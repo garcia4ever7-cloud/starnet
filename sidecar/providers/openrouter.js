@@ -21,6 +21,18 @@
   const timeouts = provider.timeouts;
   const BASE = 'https://openrouter.ai/api/v1';
 
+  // A handful of OpenRouter catalog entries (the meta-routers: openrouter/auto, openrouter/fusion,
+  // openrouter/pareto-code, nvidia/switchyard, …) carry pricing.prompt/completion = "-1" — their real
+  // cost depends on whichever underlying model they route to, so there is no flat per-million rate to
+  // show. Treated as unpriced (not $0): usage.cost on the actual response is still authoritative for
+  // billing (cost.js prefers it over any catalog price), this only keeps the catalog from asserting a
+  // free rate the model doesn't have.
+  function realPricing(p) {
+    if (!p) return null;
+    const i = parseFloat(p.prompt), o = parseFloat(p.completion);
+    return (isFinite(i) && isFinite(o) && i >= 0 && o >= 0) ? p : null;
+  }
+
   // The OpenRouter /models catalog is key-independent, so it is shared across every per-run
   // provider instance: warmed once (see warmCatalog), it makes priceOf/contextLimit live for all
   // runs without a per-run /models round-trip. Concurrent loads dedupe on CATALOG_PROMISE.
@@ -339,7 +351,7 @@
               name: m.name || m.id,
               context_length: m.context_length || 0,
               max_completion_tokens: (m.top_provider && m.top_provider.max_completion_tokens) || null,
-              pricing: m.pricing,
+              pricing: realPricing(m.pricing),
               supported_parameters: Array.isArray(m.supported_parameters) ? m.supported_parameters.slice() : [],
               supportsTools: !!(m.supported_parameters && m.supported_parameters.indexOf('tools') >= 0),
               supportsReasoning: !!(m.supported_parameters && (m.supported_parameters.indexOf('reasoning') >= 0 || m.supported_parameters.indexOf('reasoning_effort') >= 0 || m.supported_parameters.indexOf('include_reasoning') >= 0)),

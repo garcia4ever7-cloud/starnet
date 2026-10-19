@@ -202,12 +202,19 @@ async function collect(provider, req) { const out = []; for await (const e of pr
     A.eq(badIds.slice(1).map(m => m.tool_call_id), ['same', 'call_local_1', 'call_local_2'], 'every repaired call id receives a matching synthetic result');
   }
 
-  // I. supportsTools reflects the warmed catalog; unknown -> null (never a false refusal)
+  // I. supportsTools reflects the warmed catalog; unknown -> null (never a false refusal). Also covers
+  //    catalog pricing: a normal priced model keeps its rate, while a dynamic "-1"-priced meta-router (e.g.
+  //    openrouter/auto, which bills whatever underlying model it actually routes a prompt to) is treated as
+  //    unpriced rather than a false $0 — the real usage.cost on the response still wins for billing either
+  //    way (cost.js prefers it), this only guards the catalog-derived display/estimate path. (CATALOG is a
+  //    module-level singleton warmed once per process — this is the FIRST listModels() call in this file,
+  //    so later sections must not assume they can re-warm it with different fixtures.)
   {
     const modelsFetch = async () => new Response(JSON.stringify({ data: [
-      { id: 'tooly', supported_parameters: ['tools'] },
+      { id: 'tooly', supported_parameters: ['tools'], pricing: { prompt: '0.000003', completion: '0.000015' } },
       { id: 'brainy', supported_parameters: ['tools', 'reasoning_effort'], reasoningEfforts: ['low', 'high'] },
-      { id: 'plain', supported_parameters: [] }
+      { id: 'plain', supported_parameters: [] },
+      { id: 'openrouter/auto', context_length: 2000000, supported_parameters: ['tools'], pricing: { prompt: '-1', completion: '-1' } }
     ] }), { status: 200 });
     const p = makeOpenRouterProvider({ fetch: modelsFetch });
     await p.listModels();
@@ -216,6 +223,9 @@ async function collect(provider, req) { const out = []; for await (const e of pr
     A.eq(p.supportsTools('unknown-xyz'), null, 'unknown model -> null (do not false-refuse)');
     A.eq(p.reasoningEfforts('brainy'), ['low', 'high'], 'declared reasoning efforts are exposed');
     A.eq(p.reasoningEfforts('plain'), ['none'], 'non-reasoning model exposes only reasoning off');
+    A.ok(p.priceOf('tooly') !== null, 'a normally-priced model keeps its catalog rate');
+    A.eq(p.priceOf('openrouter/auto'), null, 'a dynamic "-1"-priced router model is unpriced, not a false $0');
+    A.eq(p.contextLimit('openrouter/auto'), 2000000, 'context length is still read for a dynamically-priced model');
   }
 
   // I2. reasoning effort is sent only for reasoning-capable models and clamps to the closest supported level.
