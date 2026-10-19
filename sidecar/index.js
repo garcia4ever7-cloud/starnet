@@ -14125,7 +14125,18 @@ const DELIVERABLE_PREVIEW_MAX = 512 * 1024;
 const DELIVERABLE_IMAGE_MAX = 8 * 1024 * 1024;
 function deliverableFile(agentId, runId, f, workshop) {
   const p = String((f && f.path) || '');
-  const bytes = Number.isFinite(f && f.bytes) && f.bytes >= 0 ? Math.floor(f.bytes) : null;
+  let bytes = Number.isFinite(f && f.bytes) && f.bytes >= 0 ? Math.floor(f.bytes) : null;
+  // A run artifact (e.g. image_generate's own result) never carried a bytes field to begin with — only
+  // the workshop backlog's own manifest does. Rather than lose the preview (and the size column) for
+  // every run-sourced file, stat the ALREADY-KNOWN real path once — this reads a proved file we already
+  // resolved for openUrl below, never an unproved one, so it keeps the "never invents files" rule intact.
+  if (bytes === null && p && !workshop) {
+    try {
+      const real = fs.realpathSync(path.join(WORKSPACES, agentId, p));
+      const base = fs.realpathSync(path.join(WORKSPACES, agentId)) + path.sep;
+      if (real.startsWith(base)) bytes = fs.statSync(real).size;
+    } catch (_) { /* file moved/missing — stays null, exactly like before */ }
+  }
   const ext = path.extname(p).toLowerCase();
   let preview = null;
   if ((ext === '.md' || ext === '.markdown') && bytes !== null && bytes <= DELIVERABLE_PREVIEW_MAX) preview = 'markdown';
