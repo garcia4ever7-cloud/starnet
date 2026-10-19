@@ -1,4 +1,6 @@
 /* Agent dossier: one glass vocabulary across the landing page and expanded controls. */
+.agent-dossier, .agent-dossier :is(button,input,select,textarea,summary) { font-family: inherit; }
+
 .agent-dossier.sn-menu .con-toptabs { padding: 10px 14px; gap: 6px; background: rgba(0,0,0,.12); border-color: rgba(var(--ph-rgb),.16); }
 .agent-dossier.sn-menu .con-toptab { display: flex; justify-content: center; gap: 7px; padding: 9px 12px; margin: 0; min-height: 36px; border-radius: 7px; background: transparent; }
 .agent-dossier.sn-menu .con-toptab .con-rail-label { font-size: 14px; letter-spacing: .2px; }
