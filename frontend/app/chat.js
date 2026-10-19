@@ -930,6 +930,7 @@ const Chat = (() => {
     }
     const stopBtn = el('chat-stop'); if (stopBtn) stopBtn.onclick = stopActive;
     const sendBtn = el('chat-send'); if (sendBtn) sendBtn.onclick = () => { submitComposer(); input.focus(); };   // SEND chip: same path as Enter, keep the caret
+    const enhanceBtn = el('chat-enhance'); if (enhanceBtn) enhanceBtn.onclick = enhanceComposer;   // ENHANCE: rewrite the draft in place; never auto-sends
     wireComposerAttachments();   // ATTACHMENTS: paperclip · paste · drag-drop -> stage files in the composer
   }
 
@@ -988,6 +989,38 @@ const Chat = (() => {
     if (!t && !atts.length) return;   // everything failed to upload and there's no text → nothing to send
     input.value = ''; closeSlash(); autoGrowInput();   // COMPOSER: collapse back to one line after a send
     send(t, { attachments: atts });
+  }
+
+  // ENHANCE: rewrite a rough draft into a clearer prompt for the ACTIVE agent (POST /api/chat/enhance-prompt,
+  // sidecar/index.js enhanceComposerPrompt — uses that agent's own purpose + installed skills as context, one
+  // bounded low-reasoning completion, never a transcript turn). Replaces #chat-input in place; the Commander
+  // still has to press SEND — this never sends on its own.
+  async function enhanceComposer() {
+    const t = input.value.trim();
+    if (!t) return;
+    const submissionWs = activeWs, submissionFocusVersion = focusVersion;
+    const btn = el('chat-enhance');
+    if (btn) { btn.classList.add('busy'); btn.disabled = true; }
+    try {
+      const r = await fetch('/api/chat/enhance-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: attachAgentId(), text: t })
+      });
+      const j = await r.json().catch(() => null);
+      if (activeWs !== submissionWs || focusVersion !== submissionFocusVersion) return;   // chat switched mid-flight
+      if (!j || !j.ok) {
+        if (typeof StationUI !== 'undefined' && StationUI.notify) StationUI.notify((j && j.error) || 'could not enhance that prompt', 'warn');
+        return;
+      }
+      if (input.value.trim() !== t) return;   // the Commander kept typing — never clobber a changed draft
+      input.value = j.enhanced;
+      autoGrowInput();
+      input.focus();
+    } catch (_) {
+      if (typeof StationUI !== 'undefined' && StationUI.notify) StationUI.notify('could not enhance that prompt', 'warn');
+    } finally {
+      if (btn) { btn.classList.remove('busy'); btn.disabled = false; }
+    }
   }
 
   /* ── ATTACHMENTS ────────────────────────────────────────────────────────────────────────────────────

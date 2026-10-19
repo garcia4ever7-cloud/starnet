@@ -2405,6 +2405,77 @@ async function probeChannelRunConfig(config, timeoutMs) {
     };
   } finally { clearTimeout(timer); }
 }
+/* PROMPT ENHANCE — a single bounded, low-reasoning completion that rewrites a rough composer draft into a
+   clearer instruction for the agent you're about to send it to. Reuses channelRunConfigFor's credential
+   resolution and the same probe-style provider construction (codex / device-OAuth / key), so it never needs
+   its own auth path. The agent's own purpose + installed skill descriptions are the "project instructions"
+   context (pulled from saveStore, not the in-memory roster's slim `.system`, which is a channel-bot override
+   and empty for a normal agent). Never a tool-using run, never appended to the transcript — the box is the
+   only output, and the Commander still presses SEND. */
+async function enhanceComposerPrompt(agentId, text) {
+  const cfg = channelRunConfigFor(agentId, null);
+  if (!cfg.ok) return { ok: false, error: cfg.error };
+  let purpose = '', skillLines = [];
+  try {
+    const saved = saveStore.load('agent');
+    const rec = saved && Array.isArray(saved.agents) ? saved.agents.find(a => a && a.id === agentId) : null;
+    purpose = String((rec && rec.purpose) || '').slice(0, 4000);
+    const slugs = Array.isArray(rec && rec.skills) ? rec.skills : [];
+    for (const slug of slugs) {
+      const s = SKILL_LIBRARY.find(x => x.slug === slug);
+      skillLines.push(s ? (s.name + ' (' + slug + ')' + (s.description ? ' — ' + s.description : '')) : slug);
+    }
+  } catch (_) {}
+  const contextBlock = [
+    purpose ? ('AGENT PURPOSE:\n' + purpose) : '',
+    skillLines.length ? ('INSTALLED SKILLS:\n' + skillLines.join('\n')) : ''
+  ].filter(Boolean).join('\n\n');
+  const sys = 'You rewrite a rough, vague instruction into a clear, specific, actionable prompt for the agent '
+    + 'described below. Preserve the user\'s intent and every concrete detail they already gave — never invent '
+    + 'new facts, numbers, names, or requirements that are not implied by the original. If the draft is already '
+    + 'clear, make only light edits. Reply with ONLY the rewritten prompt text — no preamble, no quotes, no '
+    + 'explanation.' + (contextBlock ? ('\n\n' + contextBlock) : '');
+  const ac = new AbortController();
+  const timer = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 30000);
+  try {
+    let provider;
+    if (providerUsesCodex(cfg.provider)) {
+      provider = selectProvider({ provider: cfg.provider, fetch: globalThis.fetch, token: await ensureCodexAccessToken(), renewToken: forceRefreshCodexAccessToken, baseUrl: cfg.baseUrl, reasoningEffort: 'low' });
+    } else if (providerUsesDeviceOAuth(cfg.provider)) {
+      provider = selectProvider({ provider: cfg.provider, fetch: globalThis.fetch, token: await ensureOAuthAccessToken(cfg.provider), headers: oauthInferenceHeaders(cfg.provider), baseUrl: cfg.baseUrl, reasoningEffort: 'low' });
+    } else {
+      provider = selectProvider({ provider: cfg.provider, fetch: globalThis.fetch, key: cfg.key, baseUrl: cfg.baseUrl, reasoningEffort: 'low' });
+    }
+    let out = '', usage = null;
+    for await (const ev of provider.stream({ model: cfg.model, stream: true, signal: ac.signal, reasoningEffort: 'low',
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: text }] })) {
+      if (ev && ev.type === 'text') out += ev.delta;
+      else if (ev && ev.type === 'usage') usage = ev.usage;
+    }
+    out = out.trim().replace(/^["']|["']$/g, '').trim();
+    if (usage) {
+      try {
+        const c = cost.reconcile(usage, cfg.model);
+        if (c.usd) ledger.record({ runId: 'enhance-' + Date.now().toString(36), agentId, turns: 0, usd: c.usd, tokens: (c.tokensIn || 0) + (c.tokensOut || 0), model: cfg.model, unmetered: false });
+      } catch (_) {}
+    }
+    if (!out) return { ok: false, error: 'got an empty rewrite — kept your original text' };
+    return { ok: true, enhanced: out };
+  } catch (e) {
+    return { ok: false, error: ac.signal.aborted ? 'enhance timed out' : String(redact((e && e.message) || 'enhance failed')) };
+  } finally { clearTimeout(timer); }
+}
+// POST /api/chat/enhance-prompt { agentId, text } — see enhanceComposerPrompt above.
+async function handleEnhancePrompt(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let body; try { body = JSON.parse(await readBody(req, 1 << 16)) || {}; } catch (e) { return json(400, { ok: false, error: 'bad request' }); }
+  const agentId = String(body.agentId || 'agent').trim();
+  const text = String(body.text || '').trim();
+  if (!text) return json(400, { ok: false, error: 'nothing to enhance' });
+  if (text.length > 8000) return json(400, { ok: false, error: 'too long to enhance — shorten it first' });
+  const r = await enhanceComposerPrompt(agentId, text);
+  json(r.ok ? 200 : 400, r);
+}
 /* A cron/Run-Now HOP's run config: the TARGET dock's own roster provider/model/credential, exactly like a
    channel hop resolves it (channelRunConfigFor above). The 2026-08-10 audit finding was the same drawn floor
    buying DIFFERENT models per trigger surface — a channel-routed hop ran on the receiving dock's roster while
@@ -9882,6 +9953,7 @@ const ROUTES = [
   { m: 'POST', exact: '/api/deliverables/cleanup-undo', h: handleDeliverablesCleanupUndo },
   // ---- QUEST V2 §A: the harness-owned quest ledger (frontend polls /api/quests on the existing 1s tick) ----
   { m: 'GET', qsplit: '/api/quests', h: handleQuestsList },
+  { m: 'POST', exact: '/api/chat/enhance-prompt', h: handleEnhancePrompt },
   { m: 'POST', exact: '/api/quests/mint', h: handleQuestsMint },
   { m: 'POST', exact: '/api/quests/update', h: handleQuestsUpdate },
   { m: 'POST', exact: '/api/quests/confirm', h: handleQuestsConfirm },

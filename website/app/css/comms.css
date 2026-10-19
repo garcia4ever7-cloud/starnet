@@ -655,6 +655,7 @@
   .chat-tools .chat-attach-btn,
   .chat-tools .voice-toggle,
   .chat-tools .mic-btn { width: 34px; }
+  .chat-tools .chat-enhance-btn { width: 34px; }
   .chat-tools .model-dock-toggle { min-width: 44px; padding: 0 7px; gap: 5px; }
   .chat-tools .model-dock-model-name { max-width: 62px; font-size: 12px; letter-spacing: 0.3px; }
   .chat-tools .model-dock-effort-chip { display: none; }
@@ -683,6 +684,10 @@
 .chat-attach-btn:hover svg { filter: none; }
 .chat-attach-btn:active { background: var(--ph-bright); }
 .chat-attach-btn:focus-visible { outline: 1px solid var(--ph-bright); outline-offset: 2px; }
+/* ENHANCE busy state: chat.js toggles this while the rewrite call is in flight so a second click can't stack */
+.chat-enhance-btn.busy { opacity: .45; pointer-events: none; }
+.chat-enhance-btn.busy svg { animation: chatEnhanceSpin 900ms linear infinite; }
+@keyframes chatEnhanceSpin { to { transform: rotate(360deg); } }
 
 /* the preview strip sits above the edit line; hidden (via [hidden]) until at least one chip exists */
 .chat-attach-strip { display: flex; flex-wrap: wrap; gap: 6px; }
