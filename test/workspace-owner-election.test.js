@@ -13,9 +13,16 @@ const fs=require('node:fs'),path=require('node:path');
 const {makeWorkspaceOwner}=require(process.argv[1]);
 const root=process.argv[2],stage=process.argv[3];
 const proxy=Object.create(fs);
-if(stage==='ticket')proxy.linkSync=(...a)=>{fs.linkSync(...a);process.exit(91)};
+// workspace-owner.js's linkSync now falls back to copyFileSync on EACCES/EPERM/ENOTSUP/EXDEV (real on some
+// filesystems — e.g. Android/Termux tmpdirs routinely EACCES a hardlink). Both the link path and the
+// fallback copy path must be crash-injected, or an environment where linkSync fails hits the real
+// copyFileSync silently, the injected exit(91) never fires, and the child just hangs to the spawn timeout.
+if(stage==='ticket'){proxy.linkSync=(...a)=>{fs.linkSync(...a);process.exit(91)};proxy.copyFileSync=(...a)=>{fs.copyFileSync(...a);process.exit(91)}}
 if(stage==='pending')proxy.writeSync=(...a)=>{fs.writeSync(...a);process.exit(91)};
-if(stage==='primary')proxy.linkSync=(f,to)=>{fs.linkSync(f,to);if(to.endsWith('.starnet-workspace-owner.json'))process.exit(91)};
+if(stage==='primary'){
+  proxy.linkSync=(f,to)=>{fs.linkSync(f,to);if(to.endsWith('.starnet-workspace-owner.json'))process.exit(91)};
+  proxy.copyFileSync=(f,to,...rest)=>{fs.copyFileSync(f,to,...rest);if(to.endsWith('.starnet-workspace-owner.json'))process.exit(91)};
+}
 if(stage==='readback')proxy.readFileSync=(f,...a)=>{const v=fs.readFileSync(f,...a);if(f.endsWith('.starnet-workspace-owner.json'))process.exit(91);return v};
 const owner=makeWorkspaceOwner({fs:proxy,path,now:Date.now});
 const go=()=>{const r=owner.acquire(root);process.stdout.write(JSON.stringify({ok:r.ok,code:r.code,pid:process.pid})+'\\n');if(r.ok){if(stage==='held')process.exit(91);setInterval(()=>{},1000)}};

@@ -117,7 +117,7 @@ function makeWorkspaceOwner(deps) {
       if (typeof fs.fsyncSync === 'function') fs.fsyncSync(fd);
       fs.closeSync(fd); fd = null;
       // link never replaces an existing ticket, unlike rename on both platforms.
-      fs.linkSync(temporary, ticket);
+      try { fs.linkSync(temporary, ticket); } catch (le) { if (le && ["EACCES","EPERM","ENOTSUP","EXDEV"].includes(le.code)) fs.copyFileSync(temporary, ticket, fs.constants.COPYFILE_EXCL); else throw le; }
       election = ticket;
       return true;
     } catch (error) {
@@ -174,7 +174,7 @@ function makeWorkspaceOwner(deps) {
       if (typeof fs.fsyncSync === 'function') fs.fsyncSync(fd);
       fs.closeSync(fd); fd = null;
       // Publishing complete bytes avoids a same-boot torn primary after a kill.
-      fs.linkSync(temporary, lockfile);
+      try { fs.linkSync(temporary, lockfile); } catch (le) { if (le && ["EACCES","EPERM","ENOTSUP","EXDEV"].includes(le.code)) fs.copyFileSync(temporary, lockfile, fs.constants.COPYFILE_EXCL); else throw le; }
     } catch (e) {
       let cleanupError = null;
       if (fd != null) {
