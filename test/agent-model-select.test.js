@@ -26,6 +26,8 @@ A.eq(ModelDock._internals.selectorLabel('', 'none'),
   'the model-chip accessible name stays honest when no model is selected');
 A.ok(/toggle\.setAttribute\('aria-label',\s*selectorLabel\(current,\s*effort(?:,\s*item)?\)\)/.test(dock),
   'every ModelDock reflect refreshes the toggle accessible name from live model state');
+A.ok(/OPENROUTER_FALLBACK\s*=\s*\[[^\]]*'openrouter\/auto'/.test(dock),
+  'the OpenRouter offline fallback seed includes the Auto Router, so it stays selectable even when the live catalog fetch fails');
 
 // ---- the shared picker component loads before its consumers ----
 A.ok(/app\/modelpicker\.js/.test(html), 'index.html loads the shared ModelPicker');

@@ -23,12 +23,16 @@ const ModelDock = (() => {
     cerebras: ['llama-4-scout-17b-16e-instruct', 'llama3.1-8b', 'qwen-3-coder-480b']
   };
   // OpenRouter fallback seed — real slugs only (shown labelled "(catalog offline)" when the live fetch fails).
+  // openrouter/auto is OpenRouter's own Auto Router: it picks the best underlying model per prompt (real,
+  // live catalog entry, verified 2026-10-18) rather than naming one vendor, so it rides here as a resilient
+  // pick even when the live catalog fetch fails.
   const OPENROUTER_FALLBACK = [
     'anthropic/claude-opus-4.8',
     'anthropic/claude-sonnet-5',
     'openai/gpt-5',
     'google/gemini-2.5-pro',
-    'x-ai/grok-4'
+    'x-ai/grok-4',
+    'openrouter/auto'
   ];
   const EFFORTS = [
     { id: 'none', label: 'OFF', title: 'Reasoning off' },
