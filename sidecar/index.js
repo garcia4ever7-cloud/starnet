@@ -16584,10 +16584,16 @@ async function runOnceCore(o) {
     providerId, runKey, providerBaseUrl: baseUrl,
     managedKey: providerRuntimeKey('starnet', ''),
     managedBaseUrl: providerRuntimeBaseUrl('starnet', ''),
-    stationOpenRouterKey: runtimeKey,
+    // 2026-10-17 fix: this used to pass the bare `runtimeKey` global, which only ever holds a
+    // STARNET_OPENROUTER_KEY/SKYNET_OPENROUTER_KEY override — never the normal OPENROUTER_API_KEY env var
+    // or a live-UI-saved key, unlike every other provider here. A station with a perfectly good OpenRouter
+    // key configured the ordinary way silently skipped straight to OpenAI/Gemini for image generation.
+    stationOpenRouterKey: providerRuntimeKey('openrouter', ''),
     stationOpenRouterBaseUrl: providerRuntimeBaseUrl('openrouter', ''),
     stationOpenAIKey: providerRuntimeKey('openai', ''),
-    stationOpenAIBaseUrl: providerRuntimeBaseUrl('openai', '')
+    stationOpenAIBaseUrl: providerRuntimeBaseUrl('openai', ''),
+    stationGeminiKey: providerRuntimeKey('gemini', ''),
+    stationGeminiBaseUrl: providerRuntimeBaseUrl('gemini', '')
   });
   // web_search/web_fetch (DDG/Jina, OR fallback) + web_request. `accessSurface` is host authority: it comes
   // from the run host, never from tool args. An authenticated owner DM has the same stored-key reach as the

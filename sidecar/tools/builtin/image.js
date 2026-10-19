@@ -32,7 +32,21 @@
 
   const DEFAULT_OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const DEFAULT_OPENAI_IMAGE_URL = 'https://api.openai.com/v1/images/generations';
-  const OPENAI_IMAGE_MODEL = 'gpt-image-2';
+  const DEFAULT_GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta';
+  // gpt-image-2.5-flare (released 2026-09-08): same token rates as gpt-image-2 but OpenAI documents it as
+  // higher quality at up to 50% lower latency, and positions it as the default for most applications — a
+  // strict upgrade at the same price, not a tradeoff. gpt-image-2.5-sunburst exists too (slower, more
+  // output tokens per image, aimed at careful production editing) but costs MORE in practice for the same
+  // rate card, so it's left as an explicit opt-in via args.model rather than the default.
+  const OPENAI_IMAGE_MODEL = 'gpt-image-2.5-flare';
+  // Native Gemini generateContent model ids — the SAME models OpenRouter proxies under "google/...",
+  // called here directly against Google's own endpoint (x-goog-api-key) instead of through OpenRouter.
+  // This is a REAL PAID capability (no free tier for image output, unlike Gemini's free text/TTS tier —
+  // verified against ai.google.dev/gemini-api/docs/pricing, 2026-10-17) — never fire it without the
+  // owner's explicit go-ahead for that spend.
+  const GEMINI_NATIVE_IMAGE_MODEL         = 'gemini-3.1-flash-image';
+  const GEMINI_NATIVE_PREMIUM_IMAGE_MODEL = 'gemini-3-pro-image';
+  const GEMINI_NATIVE_LEGACY_IMAGE_MODEL  = 'gemini-2.5-flash-image';
   // 2026-07-07 image-quality escape: the old default (gemini-2.5-flash-image, "Nano Banana 1") is the OLDEST
   // image model in the live OpenRouter catalog — garbled text on UI mockups/marketing assets was its signature.
   // Default = current-gen fast (Nano Banana 2); PREMIUM = Nano Banana Pro (built for legible text / hero art);
@@ -147,6 +161,24 @@
     if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
     return String(item.url || '');
   }
+  // Native generateContent response: candidates[0].content.parts[] holds either {text} or
+  // {inlineData:{mimeType,data}} parts (data = base64, no data-URL wrapper). Returns a data: URL so the
+  // rest of the pipeline (dataUrlToBuffer) stays identical to the OpenRouter/OpenAI paths.
+  function parseGeminiNativeImageResponse(data) {
+    const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+    if (!Array.isArray(parts)) return '';
+    for (const p of parts) {
+      if (p && p.inlineData && p.inlineData.data) {
+        return 'data:' + (p.inlineData.mimeType || 'image/png') + ';base64,' + p.inlineData.data;
+      }
+    }
+    return '';
+  }
+  function textFromGeminiNativeResponse(data) {
+    const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+    if (!Array.isArray(parts)) return '';
+    return parts.filter(p => p && typeof p.text === 'string').map(p => p.text).join(' ').trim();
+  }
   function openAIImageSize(shape) {
     if (!shape || !shape.ratio) return '1024x1024';
     const parts = String(shape.ratio).split(':').map(Number);
@@ -180,10 +212,11 @@
     const or = deps.openrouter || {};
     const apiKey = or.apiKey || deps.apiKey || '';
     const protocol = or.protocol || 'openrouter-chat';
-    const providerLabel = or.provider === 'starnet' ? 'StarNet' : (or.provider === 'openai' ? 'OpenAI' : 'OpenRouter');
+    const providerLabel = or.provider === 'starnet' ? 'StarNet' : or.provider === 'openai' ? 'OpenAI' : or.provider === 'gemini' ? 'Gemini' : 'OpenRouter';
     const orBaseUrl = String(or.baseUrl || deps.baseUrl || '').trim().replace(/\/+$/, '');
     const orUrl = orBaseUrl ? orBaseUrl + '/chat/completions' : DEFAULT_OR_URL;
     const openAIImageUrl = orBaseUrl ? orBaseUrl + '/images/generations' : DEFAULT_OPENAI_IMAGE_URL;
+    const geminiBaseUrl = orBaseUrl || DEFAULT_GEMINI_URL;
     const fsp = deps.fsp, P = deps.pathMod, ROOT = deps.root;
     if (!fsp || !P || !ROOT) throw new Error('image.js requires { fsp, pathMod, root }');
     const doFetch = deps.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
@@ -191,6 +224,8 @@
     const configuredImageModel = String(deps.imageModel || '').trim();
     const IMAGE_MODEL  = protocol === 'openai-images'
       ? (/^(?:gpt-image-|dall-e-)/i.test(configuredImageModel) ? configuredImageModel : OPENAI_IMAGE_MODEL)
+      : protocol === 'gemini-native'
+      ? (/^gemini-/i.test(configuredImageModel) ? configuredImageModel : GEMINI_NATIVE_IMAGE_MODEL)
       : (configuredImageModel || DEFAULT_IMAGE_MODEL);
     const VISION_MODEL = deps.visionModel || or.model || DEFAULT_VISION_MODEL;
     // Auxiliary vision route: a one-shot text answer from the RUN's own provider/model (injected by the run
@@ -251,6 +286,33 @@
       return res.json || {};
     }
 
+    // Native Gemini generateContent call — Google's own endpoint, x-goog-api-key header (NOT a Bearer
+    // token, NOT OpenRouter's proxy). Used only when resolveRoute picked protocol:'gemini-native', i.e. a
+    // separately-configured Gemini key with no OpenRouter/OpenAI/managed route available. THIS IS A REAL
+    // PAID CALL — image output has no Gemini free tier (text/TTS do) — never invoked without the run
+    // explicitly asking for image_generate, exactly like the other two paid protocols above.
+    async function geminiImagePost(model, prompt, aspect, timeoutMs, parentSignal) {
+      checkCancelled(parentSignal);
+      if (!apiKey) throw new Error('STUDIO image generation is unavailable: no media connection is configured. Open SETTINGS and connect an OpenAI, OpenRouter, or Gemini API key for image generation, or link this station to your StarNet account, then retry; no image was produced.');
+      const generationConfig = { responseModalities: ['IMAGE'] };
+      if (aspect) generationConfig.imageConfig = { aspectRatio: aspect };
+      const res = await withTimeout(signal => doFetch(geminiBaseUrl + '/models/' + encodeURIComponent(model) + ':generateContent', {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+        signal
+      }).then(async r => {
+        const json = await r.json().catch(require('../../failopen.js').swallow('image.gemini.response-json', null));
+        if (typeof deps.onUsage === 'function' && (r.status >= 200 && r.status < 300 || json && json.usageMetadata)) deps.onUsage(json && json.usageMetadata, model);
+        return { status: r.status, json };
+      }), timeoutMs, parentSignal || deps.signal);
+      if (res.status < 200 || res.status >= 300) {
+        const errMsg = res.json && res.json.error && (res.json.error.message || res.json.error) || ('http ' + res.status);
+        throw new Error('Gemini ' + res.status + ': ' + (typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)));
+      }
+      return res.json || {};
+    }
+
     // ---------------- image_generate ----------------
     const generateTool = {
       name: 'image_generate', capability: 'studio', scope: 'write', requiresConsent: true, timeoutMs: GEN_TIMEOUT_MS + 15000,
@@ -258,6 +320,9 @@
         'Use for any "draw / create / generate an image of …" request. Optional "model" picks the image model: ' +
         (protocol === 'openai-images'
           ? 'default ' + OPENAI_IMAGE_MODEL + ' through the connected OpenAI Images API. Optional "path" sets the output filename. '
+          : protocol === 'gemini-native'
+          ? 'default ' + GEMINI_NATIVE_IMAGE_MODEL + ' through Google\'s own API (a real per-image cost — no free tier for image ' +
+            'output). For HERO/MARKETING assets or readable text, pass model:"' + GEMINI_NATIVE_PREMIUM_IMAGE_MODEL + '". Optional "path" sets the output filename. '
           : 'default ' + DEFAULT_IMAGE_MODEL + ' (fast, current-gen). For HERO/MARKETING assets or ANY image that must show ' +
             'READABLE TEXT (UI mockups, landing pages, posters, infographics, product concepts), pass model:"' + PREMIUM_IMAGE_MODEL + '" ' +
             '— it renders legible text; the fast tier garbles it. Optional "path" sets the output filename. ') +
@@ -282,6 +347,8 @@
         if (!prompt) throw new Error('prompt is required');
         const requestedModel = String(args.model || IMAGE_MODEL).trim();
         let model = protocol === 'openai-images' && !/^(?:gpt-image-|dall-e-)/i.test(requestedModel)
+          ? IMAGE_MODEL
+          : protocol === 'gemini-native' && !/^gemini-/i.test(requestedModel)
           ? IMAGE_MODEL : requestedModel;
         // Aspect ratio rides OpenRouter's image_config passthrough — prose in the prompt is
         // mostly ignored by the Gemini image models, so this field is the only real dial.
@@ -297,6 +364,19 @@
         let data;
         if (protocol === 'openai-images') {
           data = await openAIImagePost({ model, prompt, size: openAIImageSize(shape) }, GEN_TIMEOUT_MS, signal);
+        } else if (protocol === 'gemini-native') {
+          const legacyModel = model === GEMINI_NATIVE_PREMIUM_IMAGE_MODEL ? GEMINI_NATIVE_PREMIUM_IMAGE_MODEL : GEMINI_NATIVE_LEGACY_IMAGE_MODEL;
+          try {
+            data = await geminiImagePost(model, prompt, aspect, GEN_TIMEOUT_MS, signal);
+          } catch (e) {
+            // same slug-drift safety net as the OpenRouter path below, against Gemini's own legacy slug.
+            checkCancelled(signal);
+            const msg = String((e && e.message) || e);
+            const modelish = /\b(400|404)\b/.test(msg) && /model|not found/i.test(msg);
+            if (!modelish || model === legacyModel) throw e;
+            model = legacyModel;
+            data = await geminiImagePost(model, prompt, aspect, GEN_TIMEOUT_MS, signal);
+          }
         } else try {
           data = await orPost(Object.assign({ model }, baseBody), GEN_TIMEOUT_MS, signal);
         } catch (e) {
@@ -311,9 +391,11 @@
           data = await orPost(Object.assign({ model }, baseBody), GEN_TIMEOUT_MS, signal);
         }
         checkCancelled(signal);
-        const url = protocol === 'openai-images' ? parseOpenAIImageResponse(data) : parseImageFromResponse(data);
+        const url = protocol === 'openai-images' ? parseOpenAIImageResponse(data)
+          : protocol === 'gemini-native' ? parseGeminiNativeImageResponse(data)
+          : parseImageFromResponse(data);
         if (!url) {
-          const txt = textFromResponse(data);
+          const txt = protocol === 'gemini-native' ? textFromGeminiNativeResponse(data) : textFromResponse(data);
           throw new Error('model returned no image' + (txt ? ' (' + txt.slice(0, 200) + ')' : '') + ' — is "' + model + '" an image-output model?');
         }
         // materialize the bytes (data-URL decode, or fetch a hosted URL)
@@ -362,7 +444,7 @@
           });
         }
         const viewer = '/api/file?agent=' + encodeURIComponent(aid) + '&path=' + encodeURIComponent(rel);
-        const caption = textFromResponse(data);
+        const caption = protocol === 'gemini-native' ? textFromGeminiNativeResponse(data) : textFromResponse(data);
         const kb = (buffer.length / 1024).toFixed(0) + ' KB';
         return {
           content: 'Generated and saved ' + rel + ' (' + kb + ', ' + mime + ', model ' + model + (aspect ? ', ' + aspect : '') + sizeNote + ').\nView: ' + viewer + (caption ? '\nModel note: ' + caption : ''),
@@ -461,7 +543,7 @@
 
     return {
       generateTool, analyzeTool, analyzeImageUrl, browserVision, hasVision,
-      _internals: { parseImageFromResponse, parseOpenAIImageResponse, openAIImageSize, textFromResponse, dataUrlToBuffer, imageUrlFromPart, imageToUrl, analyzeImageUrl, resolveShape, fitToSize },
+      _internals: { parseImageFromResponse, parseOpenAIImageResponse, parseGeminiNativeImageResponse, textFromGeminiNativeResponse, openAIImageSize, textFromResponse, dataUrlToBuffer, imageUrlFromPart, imageToUrl, analyzeImageUrl, resolveShape, fitToSize },
       register(reg) { reg.register(generateTool); reg.register(analyzeTool); return reg; }
     };
   }

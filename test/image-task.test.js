@@ -71,6 +71,13 @@ const borrowedOpenAI = ImageTask.resolveRoute({ providerId: 'gemini', runKey: 'g
 A.eq(borrowedOpenAI.provider, 'openai', 'a text run can use a separately connected OpenAI key for STUDIO generation');
 A.eq(borrowedOpenAI.protocol, 'openai-images', 'the station OpenAI route selects the dedicated Images API');
 
+// A separately-configured Gemini key is the last-resort BYOK route — the run's OWN gemini conversation
+// key still does not count (same rule 'impossible' above proves), only a station-level studio key does.
+const borrowedGemini = ImageTask.resolveRoute({ providerId: 'anthropic', runKey: 'claude-key', stationGeminiKey: 'station-gemini-key', stationGeminiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/' });
+A.eq(borrowedGemini, { ok: true, provider: 'gemini', protocol: 'gemini-native', key: 'station-gemini-key', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', keySource: 'station' }, 'a separately connected Gemini key selects the native image endpoint');
+A.eq(ImageTask.resolveRoute({ providerId: 'anthropic', runKey: 'claude-key', stationOpenRouterKey: 'station-or-key', stationGeminiKey: 'station-gemini-key' }).protocol, 'openrouter-chat', 'OpenRouter is preferred over Gemini when both station keys are configured');
+A.eq(ImageTask.resolveRoute({ providerId: 'starnet', stationGeminiKey: 'station-gemini-key' }).ok, false, 'a managed/starnet run never falls back to a separately configured BYOK Gemini key');
+
 const noGear = ImageTask.admissionBlocker({ hasStudio: false, studioEnabled: false, route: direct, providerId: 'openrouter', model: 'x' });
 A.ok(/Open REFIT, place a STUDIO/.test(noGear), 'missing gear names the exact REFIT action');
 const disabled = ImageTask.admissionBlocker({ hasStudio: true, studioEnabled: false, route: direct });
@@ -109,10 +116,20 @@ A.ok(/\(taskBrief \|\| imageTask\).*agent\.run\.end/.test(runHost), 'a provision
 A.ok(/ImageTask\.enforceCompletion\(result, execution\.artifactList\(\)/.test(runHost), 'the real artifact ledger settles image completion');
 A.ok(/reason: taskQuestionAsked \? 'clarifying' : \(\(result && result\.reason\)/.test(runHost), 'the emitted terminal uses the artifact-corrected result reason');
 
+// 2026-10-17 regression: the resolveRoute call site passed the bare `runtimeKey` global for
+// stationOpenRouterKey (a legacy STARNET_OPENROUTER_KEY/SKYNET_OPENROUTER_KEY override, never the normal
+// OPENROUTER_API_KEY env var or a live-UI-saved key) instead of providerRuntimeKey('openrouter', '') like
+// every other provider right beside it — a correctly-configured station OpenRouter key silently never
+// reached STUDIO image generation, which fell straight through to OpenAI/Gemini instead.
+const resolveRouteCallAt = indexSource.indexOf('ImageTask.resolveRoute({');
+const resolveRouteCall = indexSource.slice(resolveRouteCallAt, indexSource.indexOf('});', resolveRouteCallAt));
+A.ok(/stationOpenRouterKey:\s*providerRuntimeKey\('openrouter',\s*''\)/.test(resolveRouteCall), 'the station OpenRouter key for STUDIO routing is resolved the same way as OpenAI/Gemini, not a legacy bare variable');
+A.ok(!/stationOpenRouterKey:\s*runtimeKey,/.test(resolveRouteCall), 'the bare legacy runtimeKey global never backs the station OpenRouter STUDIO route again');
+
 
 
 const byokRecovery = ImageTask.admissionBlocker({ hasStudio: true, studioEnabled: true, providerId: 'custom', model: 'local-model', route: { ok: false } });
-A.ok(/OpenAI or OpenRouter API key/.test(byokRecovery) && /StarNet account/.test(byokRecovery), 'BYOK media recovery exposes all supported routes');
+A.ok(/OpenAI, OpenRouter, or Gemini API key/.test(byokRecovery) && /StarNet account/.test(byokRecovery), 'BYOK media recovery exposes all supported routes');
 const managedRecovery = ImageTask.admissionBlocker({ hasStudio: true, studioEnabled: true, providerId: 'starnet', route: { ok: false } });
 A.ok(/relink/.test(managedRecovery) && !/OpenRouter/.test(managedRecovery), 'managed failure stays on the linked-account route');
 

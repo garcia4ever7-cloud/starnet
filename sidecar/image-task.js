@@ -67,6 +67,13 @@
     if (providerId !== 'starnet' && String(input.stationOpenAIKey || '').trim()) {
       return { ok: true, provider: 'openai', protocol: 'openai-images', key: String(input.stationOpenAIKey).trim(), baseUrl: base(input.stationOpenAIBaseUrl), keySource: 'station' };
     }
+    // A separately-configured Gemini key (Google's native generateContent image endpoint, NOT the
+    // OpenRouter-proxied "google/..." models above) is the last-resort BYOK route — same "a separately
+    // connected key, not the conversation provider's own endpoint" rule as the OpenRouter/OpenAI branches
+    // above. Checked last: OpenRouter/OpenAI/managed credits are tried first when more than one is configured.
+    if (providerId !== 'starnet' && String(input.stationGeminiKey || '').trim()) {
+      return { ok: true, provider: 'gemini', protocol: 'gemini-native', key: String(input.stationGeminiKey).trim(), baseUrl: base(input.stationGeminiBaseUrl), keySource: 'station' };
+    }
     return { ok: false, code: 'media-route-required' };
   }
 
@@ -91,7 +98,7 @@
       return 'Image task blocked: ' + (managed ? 'the StarNet credits connection is unavailable for ' : 'no media connection is configured for ')
         + label(input.providerId, input.model) + '. Open SETTINGS and ' + (managed
           ? 'relink this station to your StarNet account'
-          : 'connect an OpenAI or OpenRouter API key for image generation, or link this station to your StarNet account')
+          : 'connect an OpenAI, OpenRouter, or Gemini API key for image generation, or link this station to your StarNet account')
         + ', then retry. No image artifact was produced.';
     }
     return null;

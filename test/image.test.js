@@ -78,21 +78,53 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
   await TB.generateTool.run({ prompt: 'local route' }, ctx);
   A.eq(baseFetch.calls[0].url, 'http://127.0.0.1:43210/api/v1/chat/completions', 'image_generate honors the configured OpenRouter base URL');
 
-  // OpenAI keys use the dedicated Images API. gpt-image-2 is the media model inside STUDIO,
+  // OpenAI keys use the dedicated Images API. gpt-image-2.5-flare is the media model inside STUDIO,
   // never a streaming chat agent.
   const openAIFetch = stubFetch(() => jsonResp({ data: [{ b64_json: PNG_B64 }], usage: { input_tokens: 8, output_tokens: 16 } }));
   const TO = makeImageTools({ openrouter: { apiKey: 'openai-key', provider: 'openai', protocol: 'openai-images', baseUrl: 'https://api.openai.com/v1/' }, fsp, pathMod: path, root: ROOT, fetchImpl: openAIFetch });
   const go = await TO.generateTool.run({ prompt: 'a moonlit landscape', aspect_ratio: '16:9' }, ctx);
   A.eq(openAIFetch.calls[0].url, 'https://api.openai.com/v1/images/generations', 'OpenAI generation uses /images/generations');
-  A.eq(openAIFetch.calls[0].body, { model: 'gpt-image-2', prompt: 'a moonlit landscape', size: '1536x1024' }, 'OpenAI request uses its native prompt/model/size shape without chat streaming fields');
+  A.eq(openAIFetch.calls[0].body, { model: 'gpt-image-2.5-flare', prompt: 'a moonlit landscape', size: '1536x1024' }, 'OpenAI request uses its native prompt/model/size shape without chat streaming fields');
   A.eq(openAIFetch.calls[0].init.headers.Authorization, 'Bearer openai-key', 'OpenAI Images API receives the configured OpenAI key');
-  A.ok(/gpt-image-2/.test(TO.generateTool.description) && !/gemini-3-pro-image/.test(TO.generateTool.description), 'OpenAI STUDIO teaches the model valid for its route');
+  A.ok(/gpt-image-2\.5-flare/.test(TO.generateTool.description) && !/gemini-3-pro-image/.test(TO.generateTool.description), 'OpenAI STUDIO teaches the model valid for its route');
   A.ok(go.summary.indexOf('image → ') === 0, 'OpenAI base64 output is saved as an image artifact');
   A.eq(TO.hasVision, false, 'an OpenAI generation-only route does not falsely advertise chat vision');
   const invalidOverrideFetch = stubFetch(() => jsonResp({ data: [{ b64_json: PNG_B64 }] }));
   const TOInvalidOverride = makeImageTools({ openrouter: { apiKey: 'openai-key', provider: 'openai', protocol: 'openai-images' }, imageModel: 'google/gemini-3-pro-image', fsp, pathMod: path, root: ROOT, fetchImpl: invalidOverrideFetch });
   await TOInvalidOverride.generateTool.run({ prompt: 'route-safe model', model: 'recraft/recraft-v4' }, ctx);
-  A.eq(invalidOverrideFetch.calls[0].body.model, 'gpt-image-2', 'an OpenRouter IMAGE_MODEL override cannot cross onto the OpenAI Images API');
+  A.eq(invalidOverrideFetch.calls[0].body.model, 'gpt-image-2.5-flare', 'an OpenRouter IMAGE_MODEL override cannot cross onto the OpenAI Images API');
+
+  // ---- B2. gemini-native protocol: Google's own generateContent endpoint, x-goog-api-key (not Bearer),
+  // inlineData base64 (no data: wrapper) response shape, legacy-slug retry on a model-shaped 404 ----
+  const geminiFetch = stubFetch((url) => {
+    if (url.indexOf(':generateContent') >= 0) return jsonResp({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_B64 } }] } }], usageMetadata: { promptTokenCount: 10 } });
+    return jsonResp({}, 404);
+  });
+  const TG = makeImageTools({ openrouter: { apiKey: 'gemini-key', provider: 'gemini', protocol: 'gemini-native' }, fsp, pathMod: path, root: ROOT, fetchImpl: geminiFetch });
+  const gg = await TG.generateTool.run({ prompt: 'a lighthouse at dusk', aspect_ratio: '16:9' }, ctx);
+  A.eq(geminiFetch.calls[0].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent', 'gemini-native generation hits the native generateContent endpoint with the default model');
+  A.eq(geminiFetch.calls[0].init.headers['x-goog-api-key'], 'gemini-key', 'gemini-native sends x-goog-api-key, not an Authorization Bearer header');
+  A.eq(geminiFetch.calls[0].init.headers.Authorization, undefined, 'gemini-native never sends a Bearer Authorization header');
+  A.eq(geminiFetch.calls[0].body.generationConfig, { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '16:9' } }, 'gemini-native requests IMAGE modality + the resolved aspect ratio');
+  A.eq(geminiFetch.calls[0].body.contents, [{ parts: [{ text: 'a lighthouse at dusk' }] }], 'gemini-native sends the prompt as a single text part');
+  A.ok(gg.summary.indexOf('image → ') === 0, 'gemini-native base64 inlineData output is saved as an image artifact');
+  const ggOnDisk = fssync.readFileSync(path.join(ROOT, 'hero', (gg.summary.match(/image → (\S+)/) || [])[1]));
+  A.ok(ggOnDisk[0] === 0x89 && ggOnDisk[1] === 0x50, 'the gemini-native saved file matches the decoded inlineData bytes');
+  A.ok(/no free tier for image/.test(TG.generateTool.description), 'the gemini-native STUDIO tool is honest that image output is a paid call');
+
+  const geminiBaseFetch = stubFetch(() => jsonResp({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_B64 } }] } }] }));
+  const TGBase = makeImageTools({ openrouter: { apiKey: 'gemini-key', provider: 'gemini', protocol: 'gemini-native', baseUrl: 'http://127.0.0.1:43211/v1beta/' }, fsp, pathMod: path, root: ROOT, fetchImpl: geminiBaseFetch });
+  await TGBase.generateTool.run({ prompt: 'local gemini route' }, ctx);
+  A.eq(geminiBaseFetch.calls[0].url, 'http://127.0.0.1:43211/v1beta/models/gemini-3.1-flash-image:generateContent', 'gemini-native honors a configured base URL');
+
+  const geminiSlugDrift = stubFetch((url) => url.indexOf('gemini-3.1-flash-image') >= 0
+    ? jsonResp({ error: { message: 'model not found' } }, 404)
+    : jsonResp({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_B64 } }] } }] }));
+  const TGDrift = makeImageTools({ openrouter: { apiKey: 'gemini-key', provider: 'gemini', protocol: 'gemini-native' }, fsp, pathMod: path, root: ROOT, fetchImpl: geminiSlugDrift });
+  const ggDrift = await TGDrift.generateTool.run({ prompt: 'slug drift retry' }, ctx);
+  A.eq(geminiSlugDrift.calls.length, 2, 'a model-shaped 404 retries once on the legacy slug');
+  A.ok(geminiSlugDrift.calls[1].url.indexOf('gemini-2.5-flash-image') >= 0, 'the retry uses the known-good legacy Gemini image model');
+  A.ok(ggDrift.summary.indexOf('image → ') === 0, 'the legacy-slug retry still produces a saved image artifact');
 
   // ---- B1b. aspect_ratio rides image_config; default stays bare (no image_config); bad value refused pre-flight ----
   const gAr = await T1.generateTool.run({ prompt: 'a wide vista', aspect_ratio: '16:9' }, ctx);
