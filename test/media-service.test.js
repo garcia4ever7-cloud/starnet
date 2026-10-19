@@ -175,6 +175,36 @@ async function invokeTts(overrides, body) {
   assert.equal(spoken.provider, 'edge');
   assert.equal(spoken.buf.toString(), 'edge-mp3');
 
+  // 2026-10-17 regression: /api/tts (handleTts) must try EVERY configured keyed provider before
+  // dropping to the free Edge floor — a broken/exhausted key ahead of a working one (e.g. an
+  // out-of-credit OpenRouter key ahead of a valid Gemini key) must not silently skip the one that works.
+  {
+    let orCalls = 0, geminiCalls = 0, edgeCalls = 0;
+    const geminiAudio = Buffer.from('gemini-pcm-audio').toString('base64');
+    const cascadeResponse = await invokeTts({
+      providerRuntimeKey: provider => provider === 'openrouter' ? 'or-key' : (provider === 'gemini' ? 'gemini-key' : ''),
+      providerRuntimeBaseUrl: () => '',
+      fetch: async (url) => {
+        if (url === 'https://openrouter.ai/api/v1/audio/speech') { orCalls++; return { ok: false, status: 402, text: async () => 'credits exhausted' }; }
+        if (url.indexOf(':generateContent') >= 0) {
+          geminiCalls++;
+          return {
+            ok: true, status: 200,
+            json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: geminiAudio } }] } }] })
+          };
+        }
+        throw new Error('unexpected TTS fetch: ' + url);
+      },
+      edgetts: { enabled: () => true, resolveVoice: () => 'en-US-ChristopherNeural', synth: async () => { edgeCalls++; return Buffer.from('edge-mp3'); } }
+    }, { text: 'cascade through to the working key' });
+    assert.equal(orCalls, 1, 'the exhausted OpenRouter key is tried exactly once');
+    assert.equal(geminiCalls, 1, 'the working Gemini key is tried next in the same cascade, not skipped');
+    assert.equal(edgeCalls, 0, 'the free Edge floor is never reached once a later keyed provider succeeds');
+    assert.equal(cascadeResponse.status, 200);
+    assert.equal(cascadeResponse.headers['Content-Type'], 'audio/wav', 'Gemini TTS audio is served, not an edge/json fallback');
+    assert.ok(cascadeResponse.body.length > 0, 'real audio bytes are returned, not an empty/fallback body');
+  }
+
   // Dedicated ASR preserves the Groq -> OpenAI order and continues after a failed first tier.
   const asrCalls = [];
   const asr = await make({

@@ -175,12 +175,14 @@ function makeMediaService(options) {
   const sttOpenAiBase = String(env('OPENAI_BASE') || '').trim();
   let ttsMissCount = 0;
   let evictingVoiceCache = false;
-  let voiceDispatcher = null;
 
   try { o.fs.mkdirSync(voiceCacheDir, { recursive: true }); } catch (_) {}
-  Promise.resolve().then(() => import('undici')).then(u => {
-    if (u && u.Agent) voiceDispatcher = new u.Agent({ keepAliveTimeout: 30000, keepAliveMaxTimeout: 60000, connections: 8 });
-  }).catch(() => { voiceDispatcher = null; });
+  // NOTE (2026-10-17): a custom keep-alive dispatcher built from the bundled `undici` npm package (v6.x)
+  // used to ride here, but Node's built-in global fetch carries its OWN newer internal undici — handing
+  // it an external package's Agent as `dispatcher` throws `InvalidArgumentError: invalid onError method`
+  // the moment a request fires. That turned every keyed TTS call (Gemini/OpenAI/OpenRouter) into a bare
+  // "fetch failed" a few hundred ms after boot (once the dynamic import resolved), well before the error
+  // ever reached the provider. Removed — plain global fetch already pools keep-alive connections itself.
 
   function voiceFetchOpts(base, timeoutMs) {
     base = base || {};
@@ -189,7 +191,7 @@ function makeMediaService(options) {
       const signal = (base.signal && typeof AbortSignal.any === 'function') ? AbortSignal.any([base.signal, timeout]) : timeout;
       base = Object.assign({}, base, { signal });
     }
-    return voiceDispatcher ? Object.assign({ dispatcher: voiceDispatcher }, base) : base;
+    return base;
   }
 
   async function maybeEvictVoiceCache() {
@@ -444,31 +446,36 @@ function makeMediaService(options) {
 
     const prefer = normalizeProviderId(String((body && body.preferProvider) || ''));
     const chain = TTS_KEY_PROVIDERS.includes(prefer) ? [prefer].concat(TTS_KEY_PROVIDERS.filter(p => p !== prefer)) : TTS_KEY_PROVIDERS;
-    let ttsProvider = '', ttsKey = '';
     const explicitKey = String((body && body.key) || '').trim();
-    if (explicitKey) {
-      ttsProvider = normalizeProviderId(String((body && body.keyProvider) || '')) || 'openrouter';
-      if (!TTS_KEY_PROVIDERS.includes(ttsProvider)) ttsProvider = 'openrouter';
-      ttsKey = explicitKey;
-    } else {
-      for (const provider of chain) {
-        const key = providerRuntimeKey(provider, '');
-        if (key) { ttsProvider = provider; ttsKey = key; break; }
-      }
-    }
+    // FULL FALLBACK CHAIN (2026-10-17): try every keyed provider that actually HAS a key configured, in
+    // chain order, not just the first one found. The old code locked onto the first candidate with any key
+    // present and fell straight to the free Edge floor the moment THAT ONE failed — so a broken/exhausted
+    // key ahead of a perfectly working one (e.g. an out-of-credit OpenRouter key ahead of a valid Gemini
+    // key) meant the working key was never even attempted.
+    // The browser's own saved/preferred provider key (sent as body.key/keyProvider — e.g. whatever it
+    // already uses for chat) rides FIRST so an explicit choice is still honored, but it no longer ends
+    // the attempt on its own: the server's other configured keys follow it into the SAME cascade, so a
+    // browser defaulting to an exhausted provider doesn't silently skip a perfectly working station key.
+    const explicitProvider = explicitKey
+      ? ((TTS_KEY_PROVIDERS.includes(normalizeProviderId(String((body && body.keyProvider) || ''))) && normalizeProviderId(String((body && body.keyProvider) || ''))) || 'openrouter')
+      : '';
+    const candidates = (explicitKey ? [{ provider: explicitProvider, key: explicitKey }] : [])
+      .concat(chain.map(provider => ({ provider, key: providerRuntimeKey(provider, '') })).filter(c => c.key && c.provider !== explicitProvider));
     const input = style ? ('Say the following in ' + style + ': ' + text) : text;
-    let keyedReason = '';
-    if (ttsKey) {
+    const keyedReasons = [];
+    for (const { provider: ttsProvider, key: ttsKey } of candidates) {
       const cacheKey = ttsProvider === 'openai'
         ? crypto.createHash('sha1').update('openai/' + OPENAI_TTS_MODEL + '|' + OPENAI_TTS_VOICE + '|' + style + '|' + text).digest('hex')
         : crypto.createHash('sha1').update(model + '|' + voice + '|' + style + '|' + text).digest('hex');
+      let servedFromCache = false;
       for (const ext of ['wav', 'mp3']) {
         try {
           const cached = await fsp.readFile(path.join(voiceCacheDir, cacheKey + '.' + ext));
           res.writeHead(200, { 'Content-Type': ext === 'mp3' ? 'audio/mpeg' : 'audio/wav', 'Cache-Control': 'no-store', 'X-Voice-Cache': 'hit' });
-          return res.end(cached);
+          res.end(cached); servedFromCache = true; break;
         } catch (_) {}
       }
+      if (servedFromCache) return;
       const keyed = await ttsSynthKeyed(ttsProvider, { model, voice, input, text, style, key: ttsKey });
       if (keyed.ok) {
         try {
@@ -478,9 +485,9 @@ function makeMediaService(options) {
         res.writeHead(200, { 'Content-Type': keyed.outType, 'Cache-Control': 'no-store', 'X-Voice-Cache': 'miss' });
         res.end(keyed.buf); sweepMaybe(); return;
       }
-      keyedReason = keyed.reason;
+      keyedReasons.push(ttsProvider + ': ' + keyed.reason);
     }
-    return serveEdge(edgetts.resolveVoice(), keyedReason);
+    return serveEdge(edgetts.resolveVoice(), keyedReasons.join('; '));
   }
 
   async function sttTranscribe(baseUrl, apiKey, whisperModel, audioBuf, filename, contentType) {
