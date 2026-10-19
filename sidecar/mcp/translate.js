@@ -197,7 +197,13 @@
         const res = await call(mcpTool.name, args || {}, ctx);   // ctx (runId/emit) lets the manager emit connector_required
         // Clamp BEFORE the error branch too: a failing server is just as able to hand back a
         // megabyte of stack trace as a succeeding one.
-        const rendered = renderContent(res && res.content);
+        /* structuredContent FALLBACK: the spec only RECOMMENDS mirroring structuredContent into a text block,
+           so a server may carry its whole payload there and leave content[] empty — which rendered as a SILENT
+           empty result (success-shaped, nothing in it). index.js and cua-runtime.js already fall back this way;
+           the connector path was the one MCP surface that dropped the field. Only when content rendered empty,
+           and BEFORE the clamp, so it is truncated and fenced exactly like server text. */
+        const rendered = renderContent(res && res.content)
+          || renderContent(res && res.structuredContent);
         const clamped = clampResult(rendered, o.maxResultChars);
         const text = clamped.text;
         /* an MCP-level error (isError:true) is surfaced by THROWING — registry.dispatch turns any throw into a
