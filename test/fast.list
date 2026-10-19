@@ -350,6 +350,7 @@ test/win32desktop.test.js
 test/inputpolicy.test.js
 test/image.test.js
 test/image-task.test.js
+test/print-prep.test.js
 test/voice-tool.test.js
 test/resolve-tools.test.js
 test/connectors-tool.test.js

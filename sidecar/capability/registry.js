@@ -291,6 +291,10 @@
     studio: [
       { capId: 'studio', tool: 'image_generate', scope: 'write', requiresConsent: true, network: true },
       { capId: 'studio', tool: 'image_analyze', scope: 'read', requiresConsent: false, network: true },
+      // image_print_prep turns an already-generated image into genuine 300-PPI print files (local
+      // @napi-rs/canvas upscale + PNG pHYs metadata, no network, no provider credential) — write-gated
+      // like image_generate because it publishes new files into the workspace.
+      { capId: 'studio', tool: 'image_print_prep', scope: 'write', requiresConsent: true, network: false },
       // voice_generate SPEAKS to a file — the studio's third skill. Consent-gated for the same reason
       // image_generate is: it writes into the workspace. It rides the station's existing TTS ladder (the keyed
       // neural chain, then the free keyless Edge floor), so it needs no studio-specific credential — but it

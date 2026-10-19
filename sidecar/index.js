@@ -72,6 +72,7 @@ const { makeSkillTools } = require('./tools/builtin/skills.js');    // H4: the a
 const Todo = require('./tools/builtin/todo.js');
 const DeliverableTool = require('./tools/builtin/deliverable.js');   // deliverable_note — the agent NAMES its finished work (prose only; never status/crew)
 const { makeImageTools } = require('./tools/builtin/image.js');           // STUDIO: image_generate / image_analyze (OpenRouter multimodal)
+const { makePrintPrepTools } = require('./tools/builtin/print-prep.js');  // STUDIO: image_print_prep — genuine 300-PPI print files via @napi-rs/canvas (sharp has no android-arm64 binding here)
 const { makeConnectorTools } = require('./tools/builtin/connectors.js');  // WEB: connectors.list — what the station HAS wired, and what it could (read-only, no secrets)
 const { makeVoiceTools } = require('./tools/builtin/voice.js');           // STUDIO: voice_generate — speech saved into the workspace as a playable clip
 const { makeResolveTools } = require('./tools/builtin/resolve.js');       // STUDIO: DaVinci Resolve — FCPXML timelines (free) + live Studio control (Hermes-plugin port)
@@ -16753,6 +16754,10 @@ async function runOnceCore(o) {
   // STUDIO (media skills): image_generate / image_analyze use an OpenRouter key when one is available.
   // Gated by a 'studio' object (in the default office below) exactly like web/files; outputs save to the workspace.
   imageTools.register(registry);
+  // STUDIO, print-prep skill: image_print_prep turns an already-generated workspace image into genuine
+  // 300-PPI print files (local @napi-rs/canvas, no network, no provider credential — works even with no
+  // media route configured at all, unlike image_generate/image_analyze above).
+  makePrintPrepTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
   // STUDIO, third skill: voice_generate — the agent MAKES a clip (voiceover, narration, audio message) into its
   // workspace. It drives the SAME media-service ladder /api/tts does (keyed neural chain, then the
   // free keyless Edge floor), so it needs no voice-specific credential and a zero-key station can still record.
