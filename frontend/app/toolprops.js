@@ -34,6 +34,10 @@ const ToolProps = (() => {
     // this particular read never leaves the machine.
     'connectors.list': 'dish',
     voice_generate: 'studio',   // the studio makes audio as well as images — same prop, same pulse
+    // vector_export renders a workspace SVG into 300-PPI PNG/PDF print files. Studio work, but it
+    // carries no image_/resolve_ prefix, so it needs an exact row or the floor stays dark while the
+    // agent is visibly producing deliverables. (image_stock_fetch rides the image_ prefix below.)
+    vector_export: 'studio',
     recall_conversation: 'notebook',
     'widget.get': 'notebook',
     'widget.set': 'notebook'   // Widget definitions/readings share the notebook-object (memory) grant.

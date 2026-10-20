@@ -351,6 +351,9 @@ test/inputpolicy.test.js
 test/image.test.js
 test/image-task.test.js
 test/print-prep.test.js
+test/image-qc.test.js
+test/stock-image.test.js
+test/vector-export.test.js
 test/voice-tool.test.js
 test/resolve-tools.test.js
 test/connectors-tool.test.js

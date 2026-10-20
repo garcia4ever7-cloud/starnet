@@ -73,6 +73,9 @@ const Todo = require('./tools/builtin/todo.js');
 const DeliverableTool = require('./tools/builtin/deliverable.js');   // deliverable_note — the agent NAMES its finished work (prose only; never status/crew)
 const { makeImageTools } = require('./tools/builtin/image.js');           // STUDIO: image_generate / image_analyze (OpenRouter multimodal)
 const { makePrintPrepTools } = require('./tools/builtin/print-prep.js');  // STUDIO: image_print_prep — genuine 300-PPI print files via @napi-rs/canvas (sharp has no android-arm64 binding here)
+const { makeImageQcTools } = require('./tools/builtin/image-qc.js');      // STUDIO: image_quality_check — independent, local, zero-cost dimension/DPI/integrity verification (never trusts what a generator claimed about its own output)
+const { makeStockImageTools } = require('./tools/builtin/stock-image.js');     // STUDIO: image_stock_fetch — CC0/public-domain source imagery with a per-asset licence record (Commons needs no key; Pexels deliberately excluded, its licence forbids standalone resale)
+const { makeVectorExportTools } = require('./tools/builtin/vector-export.js'); // STUDIO: vector_export — SVG re-rasterised at full target resolution into 300-PPI PNG + real single-page PDF (zero-dep PDF writer; the sidecar has no runtime npm deps)
 const { makeConnectorTools } = require('./tools/builtin/connectors.js');  // WEB: connectors.list — what the station HAS wired, and what it could (read-only, no secrets)
 const { makeVoiceTools } = require('./tools/builtin/voice.js');           // STUDIO: voice_generate — speech saved into the workspace as a playable clip
 const { makeResolveTools } = require('./tools/builtin/resolve.js');       // STUDIO: DaVinci Resolve — FCPXML timelines (free) + live Studio control (Hermes-plugin port)
@@ -16841,6 +16844,20 @@ async function runOnceCore(o) {
   // 300-PPI print files (local @napi-rs/canvas, no network, no provider credential — works even with no
   // media route configured at all, unlike image_generate/image_analyze above).
   makePrintPrepTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, quality-check skill: image_quality_check independently re-verifies a PNG already on disk
+  // (dimensions, DPI metadata, file integrity, optional claimed-vs-actual check) — read-only, no
+  // network, no consent gate, so the validation stage of the Etsy pipeline can call it unattended.
+  makeImageQcTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, sourcing skill: image_stock_fetch pulls CC0/public-domain backgrounds and mockup backdrops
+  // into the workspace, writing a <file>.license.json beside every asset. Wikimedia Commons needs no
+  // credential at all; the Smithsonian tier reads SMITHSONIAN_API_KEY from THIS process's environment
+  // (servicekeys' ${NAME} substitution reads the stored KEYS list, never process.env — so an exported
+  // shell variable would be invisible to it, which is why this tool resolves its own key).
+  makeStockImageTools({ fsp, pathMod: path, root: WORKSPACES, now: () => Date.now() }).register(registry);
+  // STUDIO, export skill: vector_export renders a workspace SVG at the full target pixel size (NOT an
+  // upscale — canvas rasterises an SVG at its declared size, so the tool rewrites that first) and emits
+  // 300-PPI PNGs plus single-page PDFs. Local, zero-cost, no provider credential.
+  makeVectorExportTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
   // STUDIO, third skill: voice_generate — the agent MAKES a clip (voiceover, narration, audio message) into its
   // workspace. It drives the SAME media-service ladder /api/tts does (keyed neural chain, then the
   // free keyless Edge floor), so it needs no voice-specific credential and a zero-key station can still record.

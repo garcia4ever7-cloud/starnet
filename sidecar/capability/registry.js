@@ -295,6 +295,22 @@
       // @napi-rs/canvas upscale + PNG pHYs metadata, no network, no provider credential) — write-gated
       // like image_generate because it publishes new files into the workspace.
       { capId: 'studio', tool: 'image_print_prep', scope: 'write', requiresConsent: true, network: false },
+      // image_quality_check only READS an existing file and re-derives facts about it (dimensions, DPI
+      // metadata, integrity) — no network, no write, consent-free like image_analyze. Deliberately NOT
+      // gated the same as image_generate/image_print_prep: it must be callable unattended so the
+      // validation stage's independent quality check can run without a live approval.
+      { capId: 'studio', tool: 'image_quality_check', scope: 'read', requiresConsent: false, network: false },
+      // image_stock_fetch downloads CC0/public-domain source imagery (backgrounds, textures, mockup
+      // backdrops) into the workspace and writes a <file>.license.json provenance record beside each one.
+      // Write + network + consent-gated like image_generate: it publishes new files AND reaches a third
+      // party. The licence allowlist lives in the tool, not here — this row grants the ability, the tool
+      // decides what is lawful to keep. (see tools/builtin/stock-image.js)
+      { capId: 'studio', tool: 'image_stock_fetch', scope: 'write', requiresConsent: true, network: true },
+      // vector_export re-rasterises a workspace SVG at full target resolution into 300-PPI PNGs + real
+      // single-page PDFs. Local-only like image_print_prep (no network, no credential), consent-gated
+      // because it publishes files. Distinct from image_print_prep, which upscales existing raster art;
+      // this one renders from vector so the result is genuinely sharp. (see tools/builtin/vector-export.js)
+      { capId: 'studio', tool: 'vector_export', scope: 'write', requiresConsent: true, network: false },
       // voice_generate SPEAKS to a file — the studio's third skill. Consent-gated for the same reason
       // image_generate is: it writes into the workspace. It rides the station's existing TTS ladder (the keyed
       // neural chain, then the free keyless Edge floor), so it needs no studio-specific credential — but it
