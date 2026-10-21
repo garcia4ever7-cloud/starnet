@@ -5478,7 +5478,29 @@ async function deliverCronResult(job, result) {
   return { ok: failed === 0, error: firstError || null, deliveredTargets: Array.from(deliveredTargets) };
 }
 
+/* EARLY-WARNING SINK (2026-10-21, after the reasoning-mandatory incident sat silently failing for hours
+   before anyone noticed): cron-store.js stamps `consecutiveFailureWarning` on the EXACT settlement that
+   brings a routine's failure streak to precisely 2; cron-driver.js's finishFire matches that stamp and
+   calls this hook exactly once per streak (never again at 3/4/5...). Two effects, both best-effort — a
+   notes-file write or a diagnostics push must never break a cron settlement:
+     1. recordDiagError — the SAME ring "Copy diagnostics" already exports, so the warning rides in any
+        bug report immediately with zero new UI surface.
+     2. append one line to STATION_FIELD_NOTES.md, the durable "already learned this" record this repo's
+        own CLAUDE.md names as the place to check before re-investigating the station. A dev checkout only
+        — a packaged/installed build has no such repo-relative file, so the write is wrapped and silently
+        skipped there (never the ledger/run path's problem). */
+const STATION_FIELD_NOTES_FILE = path.join(__dirname, '..', 'STATION_FIELD_NOTES.md');
+function noteConsecutiveFailureWarning(job, count) {
+  if (!job) return;
+  const line = '⚠ "' + (job.name || job.id) + '" (agent: ' + (job.agentId || 'unknown') + ') has failed '
+    + count + ' runs in a row. Last error: ' + String(job.lastError || '').replace(/^⚠ \d+ failed runs in a row for this routine\. /, '').slice(0, 300);
+  try { recordDiagError(line, Date.now(), job.lastRunId); } catch (_) {}
+  try {
+    fs.appendFileSync(STATION_FIELD_NOTES_FILE, '\n- ' + new Date().toISOString() + ' AUTO-WARNING (cron, 2 failures in a row): ' + line + '\n');
+  } catch (e) { console.warn('[cron] could not append consecutive-failure warning to STATION_FIELD_NOTES.md:', (e && e.message) || e); }
+}
 const cronDriver = makeCronDriver({
+  onConsecutiveFailure: noteConsecutiveFailureWarning,
   getJobs: () => cronJobs,
   // setJobs persists the driver's computed store UNDER the lock (G4.3). Inside a lock-wrapped applyTick this
   // is a re-entrant nested acquire (no double-take, no premature release), so the ADVANCE-before-run write is

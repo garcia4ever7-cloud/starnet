@@ -355,7 +355,15 @@
               supported_parameters: Array.isArray(m.supported_parameters) ? m.supported_parameters.slice() : [],
               supportsTools: !!(m.supported_parameters && m.supported_parameters.indexOf('tools') >= 0),
               supportsReasoning: !!(m.supported_parameters && (m.supported_parameters.indexOf('reasoning') >= 0 || m.supported_parameters.indexOf('reasoning_effort') >= 0 || m.supported_parameters.indexOf('include_reasoning') >= 0)),
-              reasoningEfforts: normalizeEffortList(m.reasoningEfforts || m.reasoning_efforts || m.supportedReasoningEfforts || m.supported_reasoning_efforts)
+              // OpenRouter's catalog carries the real per-model effort floor in a NESTED `reasoning` object
+              // (`{mandatory, supported_efforts, default_effort}`), not the flat `reasoningEfforts`/etc. keys
+              // this used to check. A mandatory-reasoning model (e.g. minimax-m3.1-flash) omits 'none'/'minimal'
+              // from supported_efforts; missing this made every such model fall through to the generic
+              // OPENROUTER_REASONING_EFFORTS list (which includes 'none'), so an effort of 'none' sailed through
+              // clamping unclamped and got sent on the wire -> OpenRouter 400s "Reasoning is mandatory... cannot
+              // be disabled." Reading the nested list first restores correct clamping (down to the model's real
+              // floor, e.g. 'low') for every mandatory-reasoning model, not just this one.
+              reasoningEfforts: normalizeEffortList((m.reasoning && m.reasoning.supported_efforts) || m.reasoningEfforts || m.reasoning_efforts || m.supportedReasoningEfforts || m.supported_reasoning_efforts)
             }));
           } catch (e) { return []; }
         })();

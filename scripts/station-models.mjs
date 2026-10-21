@@ -20,6 +20,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createRequire } from 'node:module';
+
+// Reuse the REAL wire adapter for the post-switch probe below — not a hand-rolled fetch call. Rolling our
+// own would drift from the real reasoning-effort clamping (sidecar/providers/openrouter.js) the 2026-10-21
+// incident fixed, and silently stop testing what the station actually sends the day that logic next changes.
+const require = createRequire(import.meta.url);
+const { makeOpenRouterProvider } = require('../sidecar/providers/openrouter.js');
 
 const HOME = os.homedir();
 const WORKSPACES = process.env.WORKSPACES
@@ -60,6 +67,40 @@ function token() {
       .find(l => /^\s*(export\s+)?STARNET_API_TOKEN=/.test(l));
     return line ? line.replace(/^\s*(export\s+)?STARNET_API_TOKEN=/, '').replace(/^["']|["']$/g, '').trim() : '';
   } catch (_) { return ''; }
+}
+
+// Same env-file-is-truth rule as token() above, for whichever of the two accepted key names is present.
+function openrouterKey() {
+  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY.trim();
+  if (process.env.OPENROUTER_KEY) return process.env.OPENROUTER_KEY.trim();
+  try {
+    const line = fs.readFileSync(ENVFILE, 'utf8').split('\n')
+      .find(l => /^\s*(export\s+)?OPENROUTER_(API_)?KEY=/.test(l));
+    return line ? line.replace(/^\s*(export\s+)?OPENROUTER_(API_)?KEY=/, '').replace(/^["']|["']$/g, '').trim() : '';
+  } catch (_) { return ''; }
+}
+
+/* POST-SWITCH VERIFICATION (2026-10-21, after a reasoning-effort catalog bug let a bad model assignment
+   sit live for hours before anyone noticed). ONE tiny real request through the real adapter, 'low' effort
+   to keep it cheap on a paid model (free models cost $0 either way) and bounded to 30s so a hung endpoint
+   can't hang the CLI. Returns the EXACT error text the adapter raised — the whole point is that a silent
+   failure must become a loud, specific one. */
+async function probeModel(model) {
+  const key = openrouterKey();
+  if (!key) return { ok: false, skipped: true, error: 'no OPENROUTER_API_KEY/OPENROUTER_KEY found in ' + ENVFILE + ' or environment — cannot verify, leaving the change unverified' };
+  const provider = makeOpenRouterProvider({ key, fetch, reasoningEffort: 'low', referer: 'http://127.0.0.1' });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    let answered = false;
+    for await (const ev of provider.stream({ model, reasoningEffort: 'low', messages: [{ role: 'user', content: 'Reply with exactly: OK' }], signal: ctrl.signal })) {
+      if (ev && ((ev.type === 'text' && ev.delta) || ev.type === 'done')) answered = true;
+    }
+    if (!answered) return { ok: false, error: 'the model accepted the request but returned no response' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: ctrl.signal.aborted ? 'verification request timed out after 30s' : String((e && e.message) || e) };
+  } finally { clearTimeout(timer); }
 }
 
 async function api(route, body) {
@@ -107,7 +148,7 @@ function resolveSnapshot(ref) {
    alone. Both files get the SAME `updatedAt`, which is also what the roster push is stamped with —
    the sidecar refuses a stamp older than the one it last accepted, and the browser adopts whichever
    copy has the newer stamp. Miss the bump and a station tab silently undoes you. */
-async function applyAssignment(assign, { label }) {
+async function applyAssignment(assign, { label, verify = true }) {
   const before = currentAssignment();
   const unknown = [...assign.keys()].filter(id => !before.some(a => a.agentId === id));
   if (unknown.length) die('no such agent: ' + unknown.join(', ') + ' (have: ' + before.map(a => a.agentId).join(', ') + ')');
@@ -152,6 +193,30 @@ async function applyAssignment(assign, { label }) {
   if (!changed.length) console.log('no change — already assigned that way');
   for (const c of changed) console.log('  ' + c.agentId.padEnd(13) + c.from + '  ->  ' + c.to);
   console.log('live:     ' + live);
+
+  // POST-SWITCH VERIFICATION: one tiny real request per newly-assigned model (deduped — "set all x" probes
+  // x once, not five times). A failure here means the SAME failure would hit a real scheduled run later,
+  // silently, hours from now — so it reverts immediately instead of leaving a known-bad model live.
+  if (changed.length && verify) {
+    const toVerify = [...new Set(changed.map(c => c.to))];
+    console.log('\nverifying ' + toVerify.length + ' newly assigned model(s) with a tiny live request...');
+    const failures = [];
+    for (const m of toVerify) {
+      const r = await probeModel(m);
+      if (r.ok) console.log('  OK      ' + m);
+      else { console.log('  ' + (r.skipped ? 'SKIPPED ' : 'FAILED  ') + m + ' — ' + r.error); if (!r.skipped) failures.push({ model: m, error: r.error }); }
+    }
+    if (failures.length) {
+      console.log('\n' + failures.length + ' model(s) failed verification — reverting to the pre-change snapshot automatically...');
+      const revertAssign = new Map(before.map(a => [a.agentId, a.model]));
+      await applyAssignment(revertAssign, { label: 'auto-revert-after-failed-verify', verify: false });
+      console.log('\nREVERTED — the exact error(s) that caused it:');
+      for (const f of failures) console.log('  ' + f.model + ': ' + f.error);
+      process.exitCode = 1;
+      return changed;
+    }
+  }
+
   if (changed.length) console.log('\nReload any open StarNet browser tab — the frontend owns the roster and a stale tab can push the old models back.');
   return changed;
 }

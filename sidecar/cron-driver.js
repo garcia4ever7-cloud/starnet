@@ -300,6 +300,17 @@
         if (settled && settled.enabled === false && settled.disabledReason === 'consecutive-failures' && (settled.disabledAt === iso(at))) {
           baseReason = baseReason + ' (paused: consecutive-failures x' + settled.consecutiveFailures + ')';
         }
+        // EARLY-WARNING (2026-10-21, after the reasoning-mandatory incident sat unnoticed for hours): the
+        // SAME streak the auto-pause ceiling above watches, but fired the moment it crosses 2-in-a-row —
+        // well before the default ceiling of 5 — so a broken routine is flagged while it is still enabled
+        // and still spending, not only once it has already paused itself. cronStore.markRun stamps
+        // consecutiveFailureWarning.at on the EXACT settlement that brings the streak to 2 (never re-stamped
+        // on 3/4/5...), so matching it against this settlement's `at` — same pattern as the disabledAt check
+        // above — fires the hook exactly once per streak. Purely additive: no onConsecutiveFailure dep ->
+        // no-op, byte-identical to before this change.
+        if (settled && settled.consecutiveFailureWarning && settled.consecutiveFailureWarning.at === iso(at) && typeof d.onConsecutiveFailure === 'function') {
+          try { d.onConsecutiveFailure(settled, Number(settled.consecutiveFailures)); } catch (e) { warn('[cron] onConsecutiveFailure hook threw: ' + ((e && e.message) || e)); }
+        }
       }
       // an UNOWNED settle whose runId already reported (its reclaim settled it) stays silent: one run, one cron.result
       const alreadyReported = !owned && runId != null && settledRunIds.has(String(runId));

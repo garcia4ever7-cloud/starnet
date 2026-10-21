@@ -556,6 +556,18 @@
       next.retryAnchorAt = null;   // the occurrence is settled — the retry re-anchor must not outlive it
       // CONSECUTIVE-FAILURE COUNTER (durable): terminal failures in a row; any ok/silent settlement resets it.
       next.consecutiveFailures = ok ? 0 : ((Number(job.consecutiveFailures) || 0) + 1);
+      // EARLY-WARNING MARKER (2026-10-21, after a bad model assignment failed silently for hours before
+      // anyone noticed): a durable, structured flag on the EXACT settlement that brings the streak to
+      // precisely 2 — "unlucky once" vs "a pattern" — well before the maxConsecutive auto-pause ceiling
+      // below (default 5). Never re-stamped on 3/4/5..., since consecutiveFailures only equals 2 once per
+      // streak. cron-driver.js's finishFire matches this .at against the current settlement to fire a
+      // one-time diagnostics/notes warning; the job record itself also carries it, so a UI reading raw job
+      // state (same fields ROUTINES already renders: lastError/lastOutput) sees the streak without needing
+      // the driver hook at all. Resets to undefined the moment a success clears consecutiveFailures.
+      next.consecutiveFailureWarning = (!ok && next.consecutiveFailures === 2) ? { count: 2, at: iso(now) } : undefined;
+      if (!ok && next.consecutiveFailures === 2) {
+        next.lastError = '⚠ 2 failed runs in a row for this routine. ' + (next.lastError || '');
+      }
       next.lastRunAt = iso(now);
       next.repeat = Object.assign({}, job.repeat, { completed: ((job.repeat && job.repeat.completed) || 0) + 1 });
       const exhausted = next.repeat.times != null && next.repeat.completed >= next.repeat.times;

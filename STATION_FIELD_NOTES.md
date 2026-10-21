@@ -333,9 +333,9 @@ Superseded / do not ship:
 
 ## 9. Open problems and next steps (2026-10-20 session end)
 
-**Not committed yet.** Everything in §4 and the `station-models.mjs` script exist only in this
-working tree until `git commit` runs. Check `git log -1` — if this line is still true, nothing has
-landed.
+**Now committed** (`858344697`, 2026-10-20) — §4's tools and the `station-models.mjs` script landed
+on `feat/harness-backend`. This line is stale from the session that wrote it; left as a historical
+marker rather than deleted outright.
 
 **Real delegation has never been proven this session.** Every "run the team" request was worked
 around by having NIGHT4CHRIST act alone (§1) — that's a harness boundary, not a bug, but it also
@@ -377,3 +377,64 @@ missed is a real, reproducible gap. Not fixed this session; noted as a known lim
 (see `GET /api/cron`), now pointed at paid models with ~$17.93 in the wallet behind them. They will
 fire unattended on their normal schedule. Nothing about them was changed this session except the
 model each resolves to when it doesn't set its own override.
+
+---
+
+## 10. 2026-10-21 — the reasoning-mandatory bug actually hit production, plus a ledger lock, plus three guards against both recurring silently
+
+**What actually happened:** the free-model switch in §6/§7 looked clean when it landed, but every
+real scheduled run on `minimax/minimax-m3.1-flash:free` started failing with `openrouter http 400 —
+Reasoning is mandatory for this endpoint and cannot be disabled`. Root cause:
+`sidecar/providers/openrouter.js`'s `/models` catalog mapper only read FLAT fields
+(`reasoningEfforts`/`reasoning_effort`/etc.) for a model's allowed reasoning-effort list — but
+OpenRouter reports a mandatory-reasoning model's real floor in a NESTED `reasoning` object
+(`{mandatory, supported_efforts, default_effort}`). Missing that field name meant the adapter fell
+back to a generic effort list that wrongly includes `none`, so a `none` request (this model's real
+`supported_efforts` is `['low','medium','high','xhigh','max']` — no `none`) sailed through clamping
+unclamped and reached the wire. **Fixed**: read `m.reasoning.supported_efforts` first (see the
+catalog-mapping block in `loadCatalog()`). Verified live: a real scheduled SCOUT run on the same
+model completed a real multi-tool research task end to end after the fix + a sidecar restart.
+
+**The fix needs a RESTART to take effect — editing the file alone is not enough.** The live sidecar
+process has the OLD module already loaded in its `require` cache; this cost real confused time this
+session because the file was fixed and test-verified first, while the LIVE process kept failing the
+exact same way until `kill`'d and relaunched via `~/start-starnet.sh`. If "I fixed it but it's still
+broken the same way," check whether the sidecar was actually restarted before assuming the fix is wrong.
+
+**Second, unrelated failure surfaced right after: `UNSETTLED_SPEND` again** (see
+[[project-starnet-live-environment]] for the general failure mode — this is its second recurrence).
+Two orphaned `.spend-pending/<hash>.json` receipts (one from a run interrupted by this session's own
+sidecar restart, one pre-existing) made `ledgerIo.readAll()` throw on every boot, silently zeroing
+the in-memory ledger and hard-failing every agent run with "Spend history is unavailable..." — not a
+crash, the process looked healthy throughout. Fixed the same way as last time: backed up both
+receipts + `ledger.jsonl`, overwrote each stale receipt with the ledger's own self-healing
+`{runId, entry:{...,usd:0,turns:0,entryId:<new uuid>}}` shape, restarted. Confirmed via
+`GET /api/budget/status` → `accounting.complete:true`, `readError:null`.
+
+**Three guards added so neither class of failure goes unnoticed again, all additive/no-op when unused:**
+
+1. **`test/provider.openrouter-reasoning-mandatory.test.js`** (in `test/fast.list`) — regression-locks
+   the catalog-mapping fix above: asserts the nested `reasoning.supported_efforts` is read correctly,
+   and that a `none` request against a mandatory-reasoning model clamps to its real floor instead of
+   reaching the wire. Verified it actually fails against the pre-fix file before trusting it.
+2. **`scripts/station-models.mjs` now verifies every model it switches TO** with one tiny real
+   request (via the real `openrouter.js` adapter — not a hand-rolled fetch, so it can't drift from
+   the real clamping logic above) immediately after pushing it live. Any failure prints the exact
+   provider error and auto-reverts to the pre-change snapshot. Verified live both ways: a real switch
+   to a working free model passed; a switch to a deliberately-fake model id failed verification and
+   was auto-reverted, restoring the prior model.
+3. **A 2-consecutive-failures early warning**, well before the existing 5-failure auto-pause ceiling
+   (`DEFAULT_MAX_CONSECUTIVE_FAILURES` in `cron-store.js`). `markRun` stamps a durable
+   `consecutiveFailureWarning:{count,at}` marker on the EXACT settlement that brings a routine's
+   failure streak to precisely 2 (never re-stamped on 3/4/5...), and prefixes `lastError` with a
+   visible `⚠ 2 failed runs in a row...` marker — the job stays enabled, this is a warning, not a
+   pause. `cron-driver.js`'s `finishFire` matches that stamp and fires an injected
+   `onConsecutiveFailure(job, count)` hook exactly once per streak; `sidecar/index.js` wires it to (a)
+   `recordDiagError` — same ring "Copy diagnostics" already exports — and (b) one appended line in
+   THIS file (see the auto-generated lines this produces below, if any exist — they look like
+   `- <ISO timestamp> AUTO-WARNING (cron, 2 failures in a row): ...`; that pattern is the sidecar
+   writing to this file by itself, not a human note). Verified live: fired exactly once at failure 2,
+   did not re-fire at failure 3, job stayed enabled throughout.
+
+**All of the above is committed** (confirm with `git log` — this note should not say "not committed
+yet" by the time you read it; if it still does, something went wrong).
