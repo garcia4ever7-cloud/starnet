@@ -4,14 +4,16 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**10** open (open+claimed) of 216 total — 0 P0 · 0 P1 · 10 P2
+**16** open (open+claimed) of 222 total — 1 P0 · 2 P1 · 13 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
-User/owner reports: **100** · source fixed: **89** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **97**.
+User/owner reports: **105** · source fixed: **89** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **102**.
 
 | Report | Family | Source | Installer | Customer |
 | --- | --- | --- | --- | --- |
+| [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | deliverable-content-verification | open | unverified | unconfirmed |
+| [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | provider-stream-retry | open | unverified | unconfirmed |
 | [Delegated specialist lacks connected MCP tools](bugs/acd9ecb4-delegated-specialist-lacks-connected-mcp-tools.md) | delegated-capabilities | fixed | verified | unconfirmed |
 | [Customer reports an ONCE routine absent from Active Routines](bugs/c2a6c3c8-once-routine-reported-missing.md) | durability-and-visibility | fixed | unverified | unconfirmed |
 | [Persisted E-STOP cannot be resumed from the desktop control](bugs/8f911536-persisted-e-stop-cannot-be-resumed-from-the-desk.md) | emergency-stop | fixed | unverified | unconfirmed |
@@ -77,6 +79,9 @@ User/owner reports: **100** · source fixed: **89** · installer verified: **6**
 | [Ollama run times out with no chat POST observed by reporter](bugs/5274c7b7-ollama-chat-request-not-observed.md) | local-provider-transport | open | unverified | unconfirmed |
 | [Ollama task runs finish without reported filesystem tool calls](bugs/678ac951-ollama-task-runs-finish-without-reported-filesys.md) | local-provider-tool-projection | open | unverified | unconfirmed |
 | [Mac installer reports application unsupported on the computer](bugs/ff3fb4cb-mac-unsupported-installation-uncorrelated.md) | mac-install-compatibility | open | unverified | unconfirmed |
+| [Deliverables panel can show the internal screen-capture wrapper as the Commander's request](bugs/bbabad8d-deliverables-panel-can-show-the-internal-screen.md) | deliverable-request-text | open | unverified | unconfirmed |
+| [Deliverables panel lists a run's full artifact history including deleted scratch scripts](bugs/00840e6f-deliverables-panel-lists-a-run-s-full-artifact-h.md) | deliverable-artifact-ledger | open | unverified | unconfirmed |
+| [Deliverables panel shows no files for mockup_compose/print_prep/vector_export/stock_fetch output](bugs/ce0c7fc0-deliverables-panel-shows-no-files-for-mockup-com.md) | deliverable-artifact-ledger | open | unverified | unconfirmed |
 | [Deliverable naming instruction conflicts with explicit stop limits](bugs/5a35bcfe-deliverable-note-overrides-stop.md) | task-scope | fixed | unverified | unconfirmed |
 | [Paused routines falsely keep an idle desktop armed](bugs/ce430c35-paused-routines-falsely-keep-an-idle-desktop-arm.md) | lifecycle-truth | fixed | verified | unconfirmed |
 | [Dense service cards squeeze technical prose into tiny columns](bugs/734b469e-dense-service-cards-squeeze-technical-prose-into.md) | record-readability | fixed | unverified | unconfirmed |
@@ -115,6 +120,7 @@ User/owner reports: **100** · source fixed: **89** · installer verified: **6**
 
 | Sev | Status | Surface | Bug | Lane | Fix |
 | --- | --- | --- | --- | --- | --- |
+| P0 | open | safecell | [shell.exec has no filesystem jail, so it can read host secret files (e.g. ~/.config/starnet/env) in plaintext, outside the agent workspace boundary every other tool enforces](bugs/cd082d49-shell-exec-inherits-the-full-sidecar-environment.md) | isaiah-4k-style-session-2026-10-21 | — |
 | P0 | fixed | autonomy | [After E-STOP the ROUTINES panel still renders "● scheduler armed — routines fire automatically" plus a live countdown; GET /api/cron's `halted` field has zero c](bugs/4962c3ad-after-e-stop-the-routines-panel-still-renders-sc.md) | sweep/autonomy | b7e18ce8 |
 | P0 | fixed | onboarding | [Only the skip CHIP is recognized as a skip — the typed word the interview invites ("skip") is stored as a weight:'stated' belief, raising FAMILIARITY, opening t](bugs/e62959ca-only-the-skip-chip-is-recognized-as-a-skip.md) | sweep/onboarding | 6afeb9ee |
 | P0 | fixed | providers | [The KEYS-tab UNATTENDED grant is enforced only at web_request — servicekeys.runEnv() has no surface argument, so an unattended shell child receives every ENABLE](bugs/14d4f234-the-keys-tab-unattended-grant-is-enforced-only-a.md) | sweep/providers | 6afeb9ee |
@@ -122,6 +128,8 @@ User/owner reports: **100** · source fixed: **89** · installer verified: **6**
 | P0 | fixed | safecell | [The Permissions panel's normalizeGrants regex drops every path: and mcp: standing grant — the ledger prints "No standing approvals yet" while the backend holds](bugs/7274ff21-the-permissions-panel-s-normalizegrants-regex-dr.md) | sweep/safecell | 6afeb9ee |
 | P0 | fixed | sessions | [An attachment-bearing user turn is dropped from the durable transcript and the PREVIOUS turn is written in its place — the string-only scan at index.js:11299 fa](bugs/e7dcb889-an-attachment-bearing-user-turn-is-dropped-from.md) | sweep/sessions | 6afeb9ee |
 | P0 | fixed | skills | [skill.view's hydrate-then-bump stores the RENDERED SKILL.md as the skill's body, so every view→persist cycle re-appends '## Setup' and '## Support Files' — unbo](bugs/c70f8965-skill-view-s-hydrate-then-bump-stores-the-render.md) | sweep/skills | 598ab4a4 |
+| P1 | open | autonomy | [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | sweep/autonomy | — |
+| P1 | open | providers | [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | fix/http2-retry | — |
 | P1 | fixed | autonomy | [Agent loop pause leaves cancelled iteration running and lease held](bugs/c66e8c39-agent-loop-pause-leaves-cancelled-iteration-runn.md) | agent/seam-audit-0912-b | b5c5cba75 |
 | P1 | fixed | autonomy | [Ambiguous permission and routine acknowledgements report unproven changes](bugs/95d13aaf-ambiguous-permission-and-routine-acknowledgement.md) | agent/systemic-bugs-0919 | 8eb87b0d3 |
 | P1 | fixed | autonomy | [Autonomy controls claim unconfirmed settings and overwrite server state on reload](bugs/b0349a7c-autonomy-controls-claim-unconfirmed-settings-and.md) | agent/system-polish-0920 | 4a2028759 |
@@ -251,6 +259,9 @@ User/owner reports: **100** · source fixed: **89** · installer verified: **6**
 | P2 | open | providers | [Ollama task runs finish without reported filesystem tool calls](bugs/678ac951-ollama-task-runs-finish-without-reported-filesys.md) | agent/reliability-audit-0919 | — |
 | P2 | open | release | [Mac installer reports application unsupported on the computer](bugs/ff3fb4cb-mac-unsupported-installation-uncorrelated.md) | release-0120-prep-0915 | — |
 | P2 | open | release | [Windows Node 24 HTTP test exits with a native libuv assertion after passing](bugs/6e29727c-windows-node-24-http-test-exits-with-a-native-li.md) | reliability-audit-0919 | — |
+| P2 | open | sessions | [Deliverables panel can show the internal screen-capture wrapper as the Commander's request](bugs/bbabad8d-deliverables-panel-can-show-the-internal-screen.md) | fix/deliverables-panel | — |
+| P2 | open | sessions | [Deliverables panel lists a run's full artifact history including deleted scratch scripts](bugs/00840e6f-deliverables-panel-lists-a-run-s-full-artifact-h.md) | fix/deliverables-panel | — |
+| P2 | open | sessions | [Deliverables panel shows no files for mockup_compose/print_prep/vector_export/stock_fetch output](bugs/ce0c7fc0-deliverables-panel-shows-no-files-for-mockup-com.md) | fix/deliverables-panel | — |
 | P2 | fixed | autonomy | [Cancelled edit starts a replacement language server](bugs/37059128-cancelled-edit-starts-a-replacement-language-ser.md) | reliability-audit | 547dd03d7 |
 | P2 | fixed | autonomy | [Deliverable naming instruction conflicts with explicit stop limits](bugs/5a35bcfe-deliverable-note-overrides-stop.md) | report-0110-0908 | 72a8a3043c263cd53ed353daed2042e256c8e236 |
 | P2 | fixed | autonomy | [Loop pause and resume discard refused control responses](bugs/32fd08b2-loop-pause-and-resume-discard-refused-control-re.md) | agent/seam-audit-0912-b | b5c5cba75 |
@@ -337,10 +348,10 @@ User/owner reports: **100** · source fixed: **89** · installer verified: **6**
 | Surface | Open |
 | --- | --- |
 | channels | 1 |
-| autonomy | 3 |
-| providers | 3 |
-| safecell | 0 |
-| sessions | 0 |
+| autonomy | 4 |
+| providers | 4 |
+| safecell | 1 |
+| sessions | 3 |
 | skills | 0 |
 | onboarding | 1 |
 | world | 0 |

@@ -99,7 +99,8 @@ const { recoverToolResult } = require('./tool-recovery.js'); // bounded retry fo
 const transcriptStoreModule = require('./transcriptstore.js');
 const { makeTranscriptStore } = transcriptStoreModule;
 const orchestration = require('./project-orchestration.js');  // studio: blueprint/workflow state management
-const { orchestrateNextAgent, setApiToken } = require('./cron-orchestrator.js');  // studio: multi-agent pipeline driver
+const { orchestrateNextAgent, runPipelineToCompletion, setApiToken } = require('./cron-orchestrator.js');  // studio: multi-agent pipeline driver
+const { verifyVideoFile } = require('./video-verify.js');       // studio: proves a video is real before it can be KEPT
 const { makeRunJournal, DISPATCH_BOUNDARY_MODEL } = require('./run-journal.js');
 const { makeAffinityIndex } = require('./agent-affinity.js');   // idle-life social graph: which agents the run log proves work together
 const RunRecovery = require('./run-recovery.js');
@@ -19783,53 +19784,43 @@ async function handleProjectPickFolder(req, res) {
 async function registerOrchestrationOutputs(projectId, blueprint) {
   try {
     const outboxDir = path.join(require('node:os').homedir(), 'outbox', projectId);
-    if (!fs.existsSync(outboxDir)) return; // No outbox yet
 
     // Check if all agents have completed
     const allComplete = blueprint.outputs.storywriter && blueprint.outputs.director
       && blueprint.outputs.producer && blueprint.outputs.qceditor;
-    if (!allComplete) return; // Pipeline not finished
+    if (!allComplete) return; // Pipeline not finished — nothing to judge yet
 
-    // Find and validate deliverable files
-    const files = [];
+    // A missing outbox is NOT an early return: a finished pipeline with no video file is
+    // precisely the prose-only failure this guard exists to report. verifyVideoFile()
+    // reports that as 'file-missing' and it lands as a FAILED row below.
+
+    // A video only earns 'kept' if video-verify.js can prove it is real footage. A
+    // placeholder is recorded as 'failed' WITH its reason rather than skipped — an
+    // unattended run has to surface the problem, and registering nothing taught the
+    // owner nothing.
     const videoFile = path.join(outboxDir, 'video.mp4');
-    if (fs.existsSync(videoFile)) {
-      const stat = fs.statSync(videoFile);
-      // Verify it's a valid video file
-      const header = Buffer.alloc(12);
-      const fd = fs.openSync(videoFile, 'r');
-      fs.readSync(fd, header, 0, 12);
-      fs.closeSync(fd);
-      // Check for MP4 signature (ftyp box at offset 4-7)
-      const isValidMp4 = header.toString('ascii', 4, 8) === 'ftyp';
-      if (isValidMp4 && stat.size > 0) {
-        files.push({
-          path: videoFile,
-          bytes: stat.size,
-          // Use studio-file endpoint instead of workspace endpoint
-          openUrl: '/api/studio-file?project=' + encodeURIComponent(projectId) + '&file=video.mp4'
-        });
-      }
-    }
-
-    if (files.length > 0) {
-      // Register as a "kept" deliverable in the store
+    const verdict = verifyVideoFile(videoFile);
+    const row = {
+      id: 'studio:' + projectId + ':video',
+      agentId: 'studio',
+      runId: projectId,
+      title: 'Christian Story Studio Video',
+      source: 'studio',
+      status: verdict.ok ? 'kept' : 'failed',
+      kind: 'video',
+      summary: verdict.ok
+        ? blueprint.userPrompt.slice(0, 260)
+        : ('Video rejected: ' + verdict.reason + ' — ' + blueprint.userPrompt.slice(0, 180)),
       // Store only path and bytes; preview/openUrl are computed by deliverableFile() on retrieval
-      const row = {
-        id: 'studio:' + projectId + ':video',
-        agentId: 'studio',
-        runId: projectId,
-        title: 'Christian Story Studio Video',
-        source: 'studio',
-        status: 'kept',
-        kind: 'video',
-        summary: blueprint.userPrompt.slice(0, 260),
-        files: files.map(f => ({ path: f.path, bytes: f.bytes })),
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      await deliverableStore.record(row, Date.now());
+      files: verdict.ok ? [{ path: videoFile, bytes: verdict.bytes }] : [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    if (!verdict.ok) {
+      row.verifyReason = verdict.reason;
+      row.verifyBytes = verdict.bytes;
     }
+    await deliverableStore.record(row, Date.now());
   } catch (e) {
     // Log but don't fail the request if registration errors
     console.error('[orchestration] Failed to register outputs:', e.message);
@@ -19863,18 +19854,32 @@ async function handleStudioAssignment(req, res) {
     await orchestration.saveBlueprint(projectId, blueprint);
     await orchestration.saveWorkflow(projectId, workflow);
 
-    // Immediately trigger first agent (STORYWRITER)
     setApiToken(API_TOKEN);  // Pass the sidecar's token to the orchestrator
-    const orchResult = await orchestrateNextAgent(projectId, 300000); // 5 min timeout for agent execution
 
-    // Register outputs if pipeline completed
-    await registerOrchestrationOutputs(projectId, blueprint);
+    // Run the WHOLE pipeline, not just the first stage. This used to call
+    // orchestrateNextAgent once, so a project ran STORYWRITER and then sat at "running"
+    // until something advanced it by hand — which made "unattended" untrue in practice.
+    //
+    // Detached on purpose: a full run is four model turns plus a video render, far longer
+    // than any sane HTTP timeout. The client gets the projectId immediately and polls
+    // GET /api/studio/project?projectId=<id>; all state is persisted atomically as it goes,
+    // so nothing depends on this response being read.
+    runPipelineToCompletion(projectId, 300000)
+      .then(async (out) => {
+        try {
+          const bp = await orchestration.loadBlueprint(projectId);
+          if (bp) await registerOrchestrationOutputs(projectId, bp);
+        } catch (_) {}
+        console.log('[studio] pipeline ' + projectId + ' -> ' +
+          (out.ok ? 'complete' : ('stopped: ' + (out.failureReason || out.error || out.status))));
+      })
+      .catch(e => console.error('[studio] pipeline ' + projectId + ' threw:', e && e.message));
 
     sendJson(200, {
       ok: true,
       projectId,
-      message: 'Project created and STORYWRITER started',
-      orchestration: orchResult,
+      message: 'Project created; pipeline running (storywriter -> director -> producer -> qceditor)',
+      poll: '/api/studio/project?projectId=' + encodeURIComponent(projectId),
       status: 'running'
     });
   } catch (e) {
@@ -19882,15 +19887,30 @@ async function handleStudioAssignment(req, res) {
   }
 }
 
+/* Resolve a studio project id from EITHER the query string or a path segment.
+   Both studio project routes are registered with `qsplit: '/api/studio/project'`, which
+   matches the bare path ONLY — yet both handlers read `url.split('/')[4]`, a path segment
+   the route can never deliver. Every call therefore 404'd ("not found") no matter how it was
+   addressed: the advance endpoint was unreachable by construction. Accept the query form the
+   route actually permits, and keep the path form working for callers that use it. */
+function studioProjectIdFrom(req) {
+  const raw = String(req.url || '');
+  const bare = raw.split('?')[0];
+  const seg = bare.split('/')[4];
+  if (seg && seg.length >= 5) return decodeURIComponent(seg);
+  const qs = raw.indexOf('?') >= 0 ? raw.slice(raw.indexOf('?') + 1) : '';
+  const params = new URLSearchParams(qs);
+  const q = params.get('projectId') || params.get('project') || params.get('id') || '';
+  return q && q.length >= 5 ? q : '';
+}
+
 // GET /api/studio/project/{id}/status
 // Get current workflow status for a project
 async function handleStudioProjectStatus(req, res) {
   const sendJson = (code, obj) => respondJson(res, code, obj);
-  const url = req.url.split('?')[0];
-  const projectId = url.split('/')[4]; // /api/studio/project/{id}/status
-
-  if (!projectId || projectId.length < 5) {
-    return sendJson(400, { error: 'Invalid project ID' });
+  const projectId = studioProjectIdFrom(req);
+  if (!projectId) {
+    return sendJson(400, { error: 'Invalid project ID — pass ?projectId=<id>' });
   }
 
   try {
@@ -19934,15 +19954,16 @@ async function handleStudioProjectStatus(req, res) {
 // Manually advance to next agent (for testing/recovery)
 async function handleStudioProjectAdvance(req, res) {
   const sendJson = (code, obj) => respondJson(res, code, obj);
-  const url = req.url.split('?')[0];
-  const projectId = url.split('/')[4];
-
-  if (!projectId || projectId.length < 5) {
-    return sendJson(400, { error: 'Invalid project ID' });
+  const projectId = studioProjectIdFrom(req);
+  if (!projectId) {
+    return sendJson(400, { error: 'Invalid project ID — pass ?projectId=<id>' });
   }
 
   try {
-    const result = await orchestrateNextAgent(projectId, 120000);
+    // 300s, matching the assignment path. At 120s the DIRECTOR stage — which reads a full
+    // screenplay before it answers — was cut off mid-generation and reported as
+    // "run exceeded 120s" for work that was progressing normally.
+    const result = await orchestrateNextAgent(projectId, 300000);
     sendJson(result.error ? 400 : 200, { ok: !result.error, ...result });
   } catch (e) {
     sendJson(500, { error: e.message });

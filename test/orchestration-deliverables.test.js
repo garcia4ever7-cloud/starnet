@@ -5,6 +5,7 @@ const assert = require('./_assert.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { verifyVideoFile } = require('../sidecar/video-verify.js');
 
 // Create mock deliverableStore that tracks records
 let recordedDeliverables = [];
@@ -116,36 +117,40 @@ async function testExistingProjectRegistration() {
       && blueprint.outputs.producer && blueprint.outputs.qceditor;
 
     if (allComplete) {
-      const files = [];
-      if (fs.existsSync(videoPath)) {
-        const stat = fs.statSync(videoPath);
-        files.push({ path: videoPath, bytes: stat.size });
-      }
-
-      if (files.length > 0) {
-        const row = {
-          id: 'studio:' + projectId + ':video',
-          agentId: 'studio',
-          runId: projectId,
-          title: 'Christian Story Studio Video',
-          source: 'studio',
-          status: 'kept',
-          kind: 'video',
-          summary: blueprint.userPrompt.slice(0, 260),
-          files: files
-        };
-        await mockDeliverableStore.record(row, Date.now());
-      }
+      // Mirrors registerOrchestrationOutputs: the verdict decides kept vs failed, and a
+      // rejected video is still RECORDED (as failed) rather than silently dropped.
+      const verdict = verifyVideoFile(videoPath);
+      const row = {
+        id: 'studio:' + projectId + ':video',
+        agentId: 'studio',
+        runId: projectId,
+        title: 'Christian Story Studio Video',
+        source: 'studio',
+        status: verdict.ok ? 'kept' : 'failed',
+        kind: 'video',
+        summary: verdict.ok
+          ? blueprint.userPrompt.slice(0, 260)
+          : ('Video rejected: ' + verdict.reason),
+        files: verdict.ok ? [{ path: videoPath, bytes: verdict.bytes }] : []
+      };
+      if (!verdict.ok) { row.verifyReason = verdict.reason; row.verifyBytes = verdict.bytes; }
+      await mockDeliverableStore.record(row, Date.now());
     }
   }
 
-  assert.ok(recordedDeliverables.length > 0, 'Should have registered the existing project video');
+  assert.ok(recordedDeliverables.length > 0, 'the project is registered either way — never silently dropped');
   assert.eq(recordedDeliverables[0].id, 'studio:' + projectId + ':video');
-  assert.eq(recordedDeliverables[0].files[0].bytes, fs.statSync(videoPath).size);
 
-  console.log('✓ Existing project video would be registered');
-  console.log('  ID:', recordedDeliverables[0].id);
-  console.log('  File size:', recordedDeliverables[0].files[0].bytes, 'bytes');
+  // This project's delivered video is the placeholder from qa/bugs/c7abfee9. It must
+  // never come back as kept.
+  const rec = recordedDeliverables[0];
+  assert.eq(rec.status, 'failed', 'the placeholder video registers as FAILED, not KEPT');
+  assert.ok(rec.verifyReason && rec.verifyReason.length > 0, 'and carries a reason the owner can act on');
+  assert.eq(rec.files.length, 0, 'and exposes no playable file');
+
+  console.log('✓ Existing project video registers as', rec.status);
+  console.log('  ID:', rec.id);
+  console.log('  Reason:', rec.verifyReason);
 }
 
 (async () => {
