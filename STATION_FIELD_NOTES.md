@@ -1508,3 +1508,130 @@ with `voice` if the owner disagrees.
 Tests: `test/audio-finish.test.js`, 35 assertions, registered in `test/fast.list`. Silence
 detection covers BOTH shapes — no stream at all, and a present-but-dead track (the one a naive
 "has audio?" check waves through).
+
+## 14. 2026-10-26 — OmniRoute as the free brain for Claude Code and every StarNet agent
+
+### The one fault behind "everything is broken"
+
+Every model returned `401 AUTH_002 Invalid API key` **in 5-8 ms** — too fast to have left the
+device, so no upstream provider was ever at fault. `~/.omniroute/client_api_key.local` simply
+did not match either key the server stores. Proved by SHA-256 fingerprint comparison without
+printing any value:
+
+```
+local file           fp 29183feab9
+"Claude Code Local"  fp 169d98b5f6   machineId 5f238e76072d7926
+"damn"               fp 69a308b295   machineId 5f238e76072d7926
+```
+
+The keys had been rotated and the local file never updated. One stale file made the router,
+`providers test-all`, `/v1/models` (0 models) and every combo look dead at once.
+
+**Diagnostic rule: a 401 that returns in single-digit milliseconds is OmniRoute rejecting
+YOUR client key, not a provider rejecting OmniRoute.** Check the fingerprint before touching
+provider config. The owner's Gemini key, meanwhile, tested fine straight against Google
+(HTTP 200, 50 models) — proof the 401s were local.
+
+The working key now lives in BOTH `~/.omniroute/client_api_key.local` and
+`OMNIROUTE_API_KEY` in `~/.config/starnet/env`; they must stay identical, and the sidecar
+must be **restarted** to pick up a change (it had the stale value in its process env).
+
+### CLI was unusable on Termux (two separate faults)
+
+1. `#!/usr/bin/env node` — Termux has no `/usr/bin/env`. Rewritten to `$PREFIX/bin/env node`.
+2. `$PREFIX/bin/omniroute` was a **copy**, not npm's usual symlink, so its relative import
+   resolved to `$PREFIX/scripts/...` instead of the package. Replaced with a symlink to
+   `$PREFIX/lib/node_modules/omniroute/bin/omniroute.mjs`.
+
+`omniroute --version` -> 3.8.51. Originals kept as `.bak`.
+
+**CLI writes still fail with "Invalid management token"** (reads like `providers list` work).
+Use the management API instead: `POST /api/auth/login {password}` with
+`~/.omniroute/admin_password.local` returns a session cookie that authorises `/api/providers`,
+`/api/combos`, `/api/keys`, `/api/models`. Field is `apiKey`, not `credential`. Combo updates
+are `PUT /api/combos/<UUID>` — **by id, not by name** (name 404s) — and `strategy` must come
+from the enum (`priority` is ordered fallback; "fallback" is rejected).
+
+### cloude-free, rebuilt
+
+Was 3 entries, all Cloudflare, two of them the same model — one provider's cap stopped
+everything. Now 10 entries, `priority` strategy, every one **verified with a real tool-call
+request** (a model that returns 200 but emits no `tool_calls` was dropped):
+
+```
+ 1 gemini/gemini-3-flash-preview                  [gemini]      2.0s
+ 2 openrouter/nvidia/nemotron-3.5-super-vl:free   [openrouter]  5.3s
+ 3 gemini/gemini-3.1-flash-lite                   [gemini]      7.3s
+ 4 openrouter/xingchen-agi/xing4.0-29b-a4b:free   [openrouter]  3.9s
+ 5 openrouter/recursive/flint-v1.0:free           [openrouter]  1.2s
+ 6 openrouter/dots-studio/dots-3-note-preview:free[openrouter]  1.8s
+ 7 openrouter/nvidia/nemotron-3.5-lightning:free  [openrouter]  2.1s
+ 8 openrouter/liquid/lfm-2.5-2.6b:free            [openrouter]  0.4s
+ 9 cf/@cf/zai-org/glm-4.7-flash                   [cloudflare]  2.3s
+10 cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast    [cloudflare]  8.1s
+```
+
+Providers alternate at the top so one daily cap cannot stall the chain; Cloudflare is last
+(both its connections currently fail `providers test-all` with 401).
+
+**Dropped, with reasons:** `gemini/gemini-2.5-flash` and `-flash-lite` return *"no longer
+available to new users"*; `gemini/gemini-3.8-flash` and `gemini-3.7-flash` both time out at
+90s. Do not re-add these without re-probing.
+
+### Wiring
+
+- `$PREFIX/bin/omni` now sets `ANTHROPIC_MODEL=cloude-free` (was a single Cloudflare model).
+  Verified live: answered a prompt AND performed a real tool-backed file read.
+- All five agents -> provider `omniroute`, model `cloude-free`. `scripts/station-models.mjs`
+  probes each assignment with a real request before accepting it, so each switch is verified.
+- `~/start-starnet.sh` now starts OmniRoute first if `:20128` is not answering, then the
+  station — idempotent, with a bounded wait and an explicit warning if it fails to come up.
+
+### Switching
+
+```bash
+node scripts/station-models.mjs restore free-omni          # all agents -> free
+node scripts/station-models.mjs restore before-free-omni   # back to the previous mix
+node scripts/station-models.mjs list                       # who runs what, live
+```
+
+### 14a. 2026-10-26 — the free brain routes and costs $0, but it does NOT do StarNet tool calls
+
+**This is the finding that decides whether `free-omni` is usable, and it is negative.**
+
+Live headless SCOUT runs through the real station path (`POST /api/run`, `surface:autonomous`):
+
+| check | result |
+|---|---|
+| routed through OmniRoute | **yes** — `agent.run.start` reports `model: cloude-free` |
+| cost | **$0** — `usd: 0` on every run |
+| structured tool calls | **NO** |
+
+The models answer, finish `done`, and cost nothing — but instead of emitting real `tool_calls`
+they write **tool syntax as prose** and StarNet never executes anything:
+
+```
+<call tool="station_inspect" arguments="{}" />     (gemini-3-flash-preview via cloude-free)
+<scout.station_inspect />                          (nemotron-3.5-super-vl via cloude-free)
+```
+
+One earlier run instead invented tool names (`bash`, `list_files`, `shell`) until the loop
+breaker stopped it — that guard working correctly is the only reason it did not spin.
+
+**Not OmniRoute's fault.** The identical model via the DIRECT `openrouter` provider, with
+OmniRoute bypassed entirely, produced the same `(NONE)` tool calls. Reproduced with a natural
+task against a toolset SCOUT really has (`memory`), not just a named-tool prompt.
+
+**Why the simple probe passed and this fails:** the standalone probe sends ONE tool and a
+one-line prompt — every candidate emitted a correct `tool_calls` payload. StarNet sends the
+full agent system prompt plus 8 toolsets, and these small free models degrade to prose under
+that load. **A model passing a single-tool probe is therefore NOT evidence it can drive a
+StarNet agent.** Probe with the real agent loop before trusting a free model for unattended work.
+
+**Consequence:** `free-omni` is fine for chat-shaped work and for `omni` (Claude Code supplies
+its own tool harness and a real file read succeeded there). It is **not** currently safe for
+unattended StarNet agents that must actually use tools — they will report success having done
+nothing, which is exactly the failure class §13 exists to prevent.
+
+Revert with `node scripts/station-models.mjs restore before-free-omni` until a free model is
+found that emits real tool calls under the full agent prompt.
