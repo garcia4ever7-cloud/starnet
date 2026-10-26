@@ -970,3 +970,4 @@ test/trigger-sweep.test.js
 test/steptest-restart-spend.test.js
 test/studio-orchestration.test.js
 test/orchestration-deliverables.test.js
+test/video-delivery.test.js

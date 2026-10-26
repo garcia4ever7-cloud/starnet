@@ -10062,6 +10062,8 @@ const ROUTES = [
   // inside the model's tool result. (WIRING_AUDIT P4: lie #7.)
   { m: 'GET', exact: '/api/limits', h: (req, res) => { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ maxConcurrentAgents: concurrencyGate.max() })); } },
   { m: ['GET', 'HEAD'], prefix: '/api/file', h: serveWorkspaceFile },
+  // Studio/orchestration video files from ~/outbox/ — streaming video delivery for Christian Story Studio
+  { m: ['GET', 'HEAD'], prefix: '/api/studio-file', h: serveStudioFile },
   // Deliverables panel inline preview for images over DELIVERABLE_IMAGE_MAX (2026-10-22) — see the full note
   // at DELIVERABLE_PREVIEW_CACHE_DIR above handleDeliverablePreview. Never touches the original file.
   { m: 'GET', qsplit: '/api/deliverable-preview', h: handleDeliverablePreview },
@@ -14399,6 +14401,36 @@ async function handleDeliverablePreview(req, res) {
 function deliverableFile(agentId, runId, f, workshop) {
   const p = String((f && f.path) || '');
   let bytes = Number.isFinite(f && f.bytes) && f.bytes >= 0 ? Math.floor(f.bytes) : null;
+
+  // Studio orchestration videos from ~/outbox/ — special path handling
+  if (agentId === 'studio' && p.includes('/outbox/')) {
+    const ext = path.extname(p).toLowerCase();
+    const fileName = path.basename(p);
+    const isVideoExt = ['.mp4', '.webm', '.mov', '.avi', '.mkv'].indexOf(ext) >= 0;
+
+    if (isVideoExt && bytes !== null) {
+      // Verify file exists
+      let exists = false;
+      try { exists = fs.existsSync(p) && fs.statSync(p).isFile(); } catch (_) {}
+
+      if (exists) {
+        // Use studio-file endpoint
+        const projectMatch = p.match(/\/outbox\/(proj-[\d]+-[\w]+)\//);
+        const projectId = projectMatch ? projectMatch[1] : runId;
+        const openUrl = '/api/studio-file?project=' + encodeURIComponent(projectId) + '&file=' + encodeURIComponent(fileName);
+        return {
+          path: p,
+          bytes,
+          exists: true,
+          preview: 'video',
+          openUrl: openUrl,
+          previewUrl: openUrl,
+          sandboxed: false
+        };
+      }
+    }
+  }
+
   // Workshop files are already disk-proven at manifest-validation time (validateWorkshopManifest fails the
   // WHOLE manifest if any listed member is missing), so there is nothing left to check here. A run-sourced
   // file (the branch below) carries no such guarantee — run.artifacts only proves a write happened once, not
@@ -14417,12 +14449,14 @@ function deliverableFile(agentId, runId, f, workshop) {
   const ext = path.extname(p).toLowerCase();
   let preview = null;
   const isImageExt = ['.png', '.jpg', '.jpeg', '.gif', '.webp'].indexOf(ext) >= 0;
+  const isVideoExt = ['.mp4', '.webm', '.mov', '.avi', '.mkv'].indexOf(ext) >= 0;
   if ((ext === '.md' || ext === '.markdown') && bytes !== null && bytes <= DELIVERABLE_PREVIEW_MAX) preview = 'markdown';
   else if (ext === '.csv' && bytes !== null && bytes <= DELIVERABLE_PREVIEW_MAX) preview = 'csv';
   // No upper size bound here (unlike markdown/csv above): a large image still gets preview:'image', it just
   // routes to /api/deliverable-preview's downscaled-copy path below instead of the raw original — see 2026-10-22
   // note at DELIVERABLE_PREVIEW_CACHE_DIR. A missing `bytes` (can't prove the size) still refuses to guess.
   else if (isImageExt && bytes !== null) preview = 'image';
+  else if (isVideoExt && bytes !== null) preview = 'video';
   const rel = workshop ? ('workshop/' + runId + '/' + p) : p;
   const openUrl = workshop && ext === '.html'
     ? '/workshop-run/' + encodeURIComponent(agentId) + '/' + encodeURIComponent(runId) + '/' + p.split('/').map(encodeURIComponent).join('/')
@@ -19756,16 +19790,31 @@ async function registerOrchestrationOutputs(projectId, blueprint) {
       && blueprint.outputs.producer && blueprint.outputs.qceditor;
     if (!allComplete) return; // Pipeline not finished
 
-    // Find deliverable files (video.mp4, metadata.json, etc)
+    // Find and validate deliverable files
     const files = [];
     const videoFile = path.join(outboxDir, 'video.mp4');
     if (fs.existsSync(videoFile)) {
       const stat = fs.statSync(videoFile);
-      files.push({ path: videoFile, bytes: stat.size });
+      // Verify it's a valid video file
+      const header = Buffer.alloc(12);
+      const fd = fs.openSync(videoFile, 'r');
+      fs.readSync(fd, header, 0, 12);
+      fs.closeSync(fd);
+      // Check for MP4 signature (ftyp box at offset 4-7)
+      const isValidMp4 = header.toString('ascii', 4, 8) === 'ftyp';
+      if (isValidMp4 && stat.size > 0) {
+        files.push({
+          path: videoFile,
+          bytes: stat.size,
+          // Use studio-file endpoint instead of workspace endpoint
+          openUrl: '/api/studio-file?project=' + encodeURIComponent(projectId) + '&file=video.mp4'
+        });
+      }
     }
 
     if (files.length > 0) {
       // Register as a "kept" deliverable in the store
+      // Store only path and bytes; preview/openUrl are computed by deliverableFile() on retrieval
       const row = {
         id: 'studio:' + projectId + ':video',
         agentId: 'studio',
@@ -19775,7 +19824,9 @@ async function registerOrchestrationOutputs(projectId, blueprint) {
         status: 'kept',
         kind: 'video',
         summary: blueprint.userPrompt.slice(0, 260),
-        files: files
+        files: files.map(f => ({ path: f.path, bytes: f.bytes })),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       };
       await deliverableStore.record(row, Date.now());
     }
@@ -21836,6 +21887,74 @@ async function handleAttachmentUpload(req, res) {
   const r = await attachments.saveAttachment(agent, String((body && body.name) || 'file'), body && body.dataUrl);
   if (r.ok) return json(200, r);
   return json(r.code || 400, { ok: false, error: r.error });
+}
+
+// GET /api/studio-file?project=<id>&file=<name> — read-only view of studio/orchestration outputs from ~/outbox/.
+// Validates the path to prevent escape and only serves files from the project's outbox directory.
+// Streams bytes with HTTP Range support for video seeking.
+async function serveStudioFile(req, res) {
+  let abs;
+  try {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const projectId = u.searchParams.get('project') || '';
+    const fileName = u.searchParams.get('file') || '';
+
+    // Validate project ID format (proj-timestamp-code)
+    if (!/^proj-\d+-[a-z0-9]+$/.test(projectId)) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+    // Validate file name (no path traversal)
+    if (!/^[\w.-]+$/.test(fileName) || fileName.includes('..') || fileName.includes('/')) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+
+    const outboxDir = path.join(require('node:os').homedir(), 'outbox', projectId);
+    abs = path.join(outboxDir, fileName);
+
+    // Ensure the resolved path is still within outbox
+    const real = path.resolve(abs);
+    const base = path.resolve(outboxDir) + path.sep;
+    if (!real.startsWith(base)) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+  } catch (e) {
+    res.writeHead(403); return res.end('forbidden');
+  }
+
+  let st;
+  try { st = await fsp.stat(abs); } catch (_) { res.writeHead(404); return res.end('not found'); }
+  if (!st.isFile()) { res.writeHead(404); return res.end('not found'); }
+
+  const ext = path.extname(abs).toLowerCase();
+  const mimeType = MIME[ext] || 'video/mp4';
+  const headers = {
+    'Content-Type': mimeType,
+    'Cache-Control': 'no-store',
+    'Content-Disposition': 'inline; filename="' + safeDownloadName(abs) + '"',
+    'X-Content-Type-Options': 'nosniff',
+    'Accept-Ranges': 'bytes',
+    'Referrer-Policy': 'no-referrer'
+  };
+
+  const range = parseRange(req.headers && req.headers.range, st.size);
+  let start = 0, end = st.size - 1, code = 200;
+  if (range && range.unsatisfiable) {
+    res.writeHead(416, { 'Content-Range': 'bytes */' + st.size, 'Accept-Ranges': 'bytes' });
+    return res.end();
+  }
+  if (range) {
+    start = range.start; end = range.end; code = 206;
+    headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + st.size;
+  }
+  headers['Content-Length'] = (end - start + 1);
+
+  if (req.method === 'HEAD') { res.writeHead(code, headers); return res.end(); }
+
+  res.writeHead(code, headers);
+  const stream = fs.createReadStream(abs, { start, end });
+  stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+  req.on('close', () => { try { stream.destroy(); } catch (_) {} });
+  stream.pipe(res);
 }
 
 // GET /api/file?agent=<id>&path=<rel> — read-only view of a file the agent produced, jailed to its

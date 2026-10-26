@@ -6,6 +6,10 @@
   else root.Deliverables = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Mirrors sidecar/index.js's DELIVERABLE_IMAGE_MAX (2026-10-22) — the only use here is deciding whether to
+  // show the "download the full-size original" link under an inline preview; the backend is the real authority
+  // on which images actually get downscaled (this is a UI-only heuristic, not a security boundary).
+  const DELIVERABLE_IMAGE_INLINE_MAX = 8 * 1024 * 1024;
   function safeMarkdown(raw) {
     return String(raw || '').slice(0, 512 * 1024).split(/\r?\n/).map(line => {
       let s = esc(line).replace(/\*\*([^*]{1,500})\*\*/g, '<strong>$1</strong>').replace(/`([^`]{1,500})`/g, '<code>$1</code>');
@@ -41,6 +45,16 @@
 
   function fileHref(f) {
     const href = openUrl(f && f.openUrl);
+    const base = apiBase();
+    return base && href.charAt(0) === '/' ? base + href : href;
+  }
+  // The inline <img> preview fetch (2026-10-22): prefers f.previewUrl (a downscaled copy for images over the
+  // backend's inline-size cap — see DELIVERABLE_PREVIEW_CACHE_DIR in sidecar/index.js) and falls back to the
+  // real file for anything that doesn't carry one. fileHref() above is UNCHANGED and still used for the "open
+  // the real original" action — this is deliberately a second, separate href function, not a shared one, so a
+  // future edit to one can never accidentally redirect the other.
+  function previewHref(f) {
+    const href = openUrl((f && f.previewUrl) || (f && f.openUrl));
     const base = apiBase();
     return base && href.charAt(0) === '/' ? base + href : href;
   }
@@ -91,29 +105,48 @@
     const controller = new AbortController(); state.previewAbort = controller;
     host.innerHTML = '<p class="muted">Loading safe preview…</p>';
     try {
-      const response = await fetch(fileHref(f), { cache: 'no-store', signal: controller.signal });
-      if (!current()) return true;
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      if (f.preview === 'image') {
-        const blob = await response.blob();
-        if (!current()) return true;
-        const blobUrl = URL.createObjectURL(blob);
-        if (state) state.blobUrl = blobUrl;
-        host.innerHTML = '<img class="deliverable-image" alt="Preview of ' + esc(f.path) + '">';
-        const img = host.querySelector('img');
-        const release = () => {
-          // A late load/error from the previous image owns only its own URL.
-          if (state.blobUrl !== blobUrl) return;
-          clearTimeout(state.previewExpiry); state.previewExpiry = null;
-          URL.revokeObjectURL(blobUrl); state.blobUrl = '';
-        };
-        state.previewExpiry = setTimeout(release, 30000);
-        img.onload = img.onerror = release;
-        img.src = blobUrl;
+      const href = (f.preview === 'image' || f.preview === 'video') ? previewHref(f) : fileHref(f);
+      if (f.preview === 'video') {
+        // Video preview: inline HTML5 player, no fetch needed — the video src handles streaming
+        host.innerHTML = '<div class="deliverable-video-player">' +
+          '<video controls width="100%" style="max-width:600px;max-height:400px;background:#000">' +
+          '<source src="' + esc(previewHref(f)) + '" type="video/mp4">' +
+          'Your browser does not support the video tag.' +
+          '</video>' +
+          '<p class="dlv-preview-note">' + esc(f.path) + ' · ' + fmtSize(f.bytes) + ' · ' +
+          '<a href="' + esc(fileHref(f)) + '" target="_blank" rel="noopener" download>download</a></p>' +
+          '</div>';
       } else {
-        const text = await response.text();
+        const response = await fetch(href, { cache: 'no-store', signal: controller.signal });
         if (!current()) return true;
-        host.innerHTML = '<div class="cfg-block"><b>SAFE PREVIEW · ' + esc(f.path) + '</b>' + (f.preview === 'markdown' ? safeMarkdown(text) : safeCsv(text, 50, 20)) + '</div>';
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        if (f.preview === 'image') {
+          const blob = await response.blob();
+          if (!current()) return true;
+          const blobUrl = URL.createObjectURL(blob);
+          if (state) state.blobUrl = blobUrl;
+          // A downscaled copy (large original, see DELIVERABLE_IMAGE_INLINE_MAX below) still needs an explicit
+          // way to reach the real, full-size, untouched file — the inline <img> below is NEVER the original's
+          // bytes in that case, and a blob-URL "save image as" would silently save the small copy instead.
+          const downscaled = Number.isFinite(f.bytes) && f.bytes > DELIVERABLE_IMAGE_INLINE_MAX;
+          host.innerHTML = '<img class="deliverable-image" alt="Preview of ' + esc(f.path) + '">' +
+            (downscaled ? '<p class="dlv-preview-note">Downscaled preview (' + fmtSize(f.bytes) + ' original) · ' +
+              '<a href="' + esc(fileHref(f)) + '" target="_blank" rel="noopener">download the full-size original</a></p>' : '');
+          const img = host.querySelector('img');
+          const release = () => {
+            // A late load/error from the previous image owns only its own URL.
+            if (state.blobUrl !== blobUrl) return;
+            clearTimeout(state.previewExpiry); state.previewExpiry = null;
+            URL.revokeObjectURL(blobUrl); state.blobUrl = '';
+          };
+          state.previewExpiry = setTimeout(release, 30000);
+          img.onload = img.onerror = release;
+          img.src = blobUrl;
+        } else {
+          const text = await response.text();
+          if (!current()) return true;
+          host.innerHTML = '<div class="cfg-block"><b>SAFE PREVIEW · ' + esc(f.path) + '</b>' + (f.preview === 'markdown' ? safeMarkdown(text) : safeCsv(text, 50, 20)) + '</div>';
+        }
       }
     } catch (e) {
       if (!current()) return true;
@@ -475,5 +508,5 @@
     if (!runId || !body || typeof body._deliverablesShowRun !== 'function') return false;
     body._deliverablesShowRun(runId, label); return true;
   }
-  return { esc, safeMarkdown, safeCsv, openUrl, fileHref, artifactPath, handleOpenClick, bucketOf, pillOf, agentLabel, agoOf, fmtSize, mount, showRun, rowsForRun, BUCKETS };
+  return { esc, safeMarkdown, safeCsv, openUrl, fileHref, previewHref, artifactPath, handleOpenClick, bucketOf, pillOf, agentLabel, agoOf, fmtSize, mount, showRun, rowsForRun, BUCKETS, DELIVERABLE_IMAGE_INLINE_MAX };
 });
