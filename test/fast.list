@@ -286,6 +286,8 @@ test/artifacts.test.js
 test/deliverable-store.test.js
 test/idempotency-ledger.test.js
 test/deliverable-provenance.test.js
+test/deliverable-files.test.js
+test/user-text.test.js
 test/deliverable-note.test.js
 test/deliverables-ui.test.js
 test/deliverables-open.test.js
@@ -350,10 +352,18 @@ test/computer-control.test.js
 test/win32desktop.test.js
 test/inputpolicy.test.js
 test/image.test.js
+test/higgsfield.test.js
+test/higgsfield-integration.test.js
+test/higgsfield-registry.test.js
+test/agent-capabilities.test.js
+test/agent-capabilities-integration.test.js
+test/refit.test.js
 test/image-task.test.js
 test/print-prep.test.js
+test/mockup-compose.test.js
 test/image-qc.test.js
 test/stock-image.test.js
+test/image-kling-upscale.test.js
 test/vector-export.test.js
 test/voice-tool.test.js
 test/resolve-tools.test.js
@@ -958,3 +968,5 @@ test/agent-skin-thumbs.test.js
 test/estop-sample-hub.test.js
 test/trigger-sweep.test.js
 test/steptest-restart-spend.test.js
+test/studio-orchestration.test.js
+test/orchestration-deliverables.test.js

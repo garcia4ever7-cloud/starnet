@@ -72,10 +72,14 @@ const { makeSkillTools } = require('./tools/builtin/skills.js');    // H4: the a
 const Todo = require('./tools/builtin/todo.js');
 const DeliverableTool = require('./tools/builtin/deliverable.js');   // deliverable_note — the agent NAMES its finished work (prose only; never status/crew)
 const { makeImageTools } = require('./tools/builtin/image.js');           // STUDIO: image_generate / image_analyze (OpenRouter multimodal)
+const makeVideoKlingTools = require('./tools/builtin/video-kling.js');   // STUDIO: video.kling — text-to-video via official Kling 3.0 API (native audio sync, multi-shot generation)
 const { makePrintPrepTools } = require('./tools/builtin/print-prep.js');  // STUDIO: image_print_prep — genuine 300-PPI print files via @napi-rs/canvas (sharp has no android-arm64 binding here)
+const { makeMockupComposeTools } = require('./tools/builtin/mockup-compose.js');  // STUDIO: mockup_compose — Etsy listing-photo set from a finished print + a room template, zero network, zero per-use cost
 const { makeImageQcTools } = require('./tools/builtin/image-qc.js');      // STUDIO: image_quality_check — independent, local, zero-cost dimension/DPI/integrity verification (never trusts what a generator claimed about its own output)
 const { makeStockImageTools } = require('./tools/builtin/stock-image.js');     // STUDIO: image_stock_fetch — CC0/public-domain source imagery with a per-asset licence record (Commons needs no key; Pexels deliberately excluded, its licence forbids standalone resale)
 const { makeVectorExportTools } = require('./tools/builtin/vector-export.js'); // STUDIO: vector_export — SVG re-rasterised at full target resolution into 300-PPI PNG + real single-page PDF (zero-dep PDF writer; the sidecar has no runtime npm deps)
+const { makeHiggsfieldTools } = require('./tools/builtin/higgsfield.js');   // STUDIO: higgsfield.generate — text-to-image via Higgsfield's REST API with async job polling
+const { makeKlingUpscaleTools } = require('./tools/builtin/image-kling-upscale.js');  // STUDIO: image_upscale_kling — 2x/3x/4x neural AI image upscaling via official Kling 3.0 API
 const { makeConnectorTools } = require('./tools/builtin/connectors.js');  // WEB: connectors.list — what the station HAS wired, and what it could (read-only, no secrets)
 const { makeVoiceTools } = require('./tools/builtin/voice.js');           // STUDIO: voice_generate — speech saved into the workspace as a playable clip
 const { makeResolveTools } = require('./tools/builtin/resolve.js');       // STUDIO: DaVinci Resolve — FCPXML timelines (free) + live Studio control (Hermes-plugin port)
@@ -94,6 +98,8 @@ const { _internals: ProgressGuardInternals } = require('./tool-progress-guard.js
 const { recoverToolResult } = require('./tool-recovery.js'); // bounded retry for host-trusted transient reads only
 const transcriptStoreModule = require('./transcriptstore.js');
 const { makeTranscriptStore } = transcriptStoreModule;
+const orchestration = require('./project-orchestration.js');  // studio: blueprint/workflow state management
+const { orchestrateNextAgent, setApiToken } = require('./cron-orchestrator.js');  // studio: multi-agent pipeline driver
 const { makeRunJournal, DISPATCH_BOUNDARY_MODEL } = require('./run-journal.js');
 const { makeAffinityIndex } = require('./agent-affinity.js');   // idle-life social graph: which agents the run log proves work together
 const RunRecovery = require('./run-recovery.js');
@@ -284,6 +290,8 @@ const { makeIdempotencyLedger } = require('./idempotency-ledger.js'); // SOP lan
 const TaskPostconditions = require('./task-postconditions.js');        // SOP lane: the typed acceptance authority (mid-run probe + end-of-run verdict)
 const RecipeDrift = require('./recipe-drift.js');                      // golden-run drift: latest recipe run vs its own good history (pure, from run rows)
 const { makeProvenanceIndex } = require('./deliverable-provenance.js'); // WHO made a deliverable + WHAT project it belongs to, derived from the run log
+const { isScratchHelperPath } = require('./deliverable-files.js'); // which of a run's recorded files are a scratch/helper script, never a real deliverable
+const { userMsgText, isInternalUserTurnText } = require('./user-text.js'); // the real text of a user-role turn, or null for harness-injected plumbing (screen-capture/restored-context wrappers)
 const { makeQuestStore } = require('./quest-store.js'); // QUEST V2 §A: station-wide harness-owned quest ledger (contract-enforced)
 const { makeJourneyStore } = require('./journey-store.js'); // Commander journey: verified outcomes -> mastery/adaptation/evolution (never XP or gating)
 const { makeQuestTools } = require('./tools/builtin/quests.js'); // QUEST V2 §B: quest.update — the agent's read/write reach into the ledger
@@ -9766,6 +9774,10 @@ const ROUTES = [
   { m: 'POST', exact: '/api/projects/discover', h: handleProjectDiscover }, // explicit bounded scan; returns candidates and grants nothing
   { m: 'POST', exact: '/api/projects/forget', h: handleProjectForget },   // Projects rail: hard-forget revoked metadata (never withdraws trust)
   { m: 'POST', exact: '/api/projects/pickfolder', h: handleProjectPickFolder },   // Projects rail "browse": native OS folder chooser (grants nothing)
+  // Christian Story Studio routes
+  { m: 'POST', exact: '/api/studio/assignment', h: handleStudioAssignment },  // Create project + start pipeline
+  { m: 'GET', qsplit: '/api/studio/project', h: handleStudioProjectStatus },  // Get project status
+  { m: 'POST', qsplit: '/api/studio/project', h: handleStudioProjectAdvance }, // Advance to next agent
   { m: 'POST', exact: '/api/pickpath', h: handlePickPath },   // typed recipe fill-ins: native file OR folder chooser (grants nothing)
   { m: 'POST', exact: '/api/harness/detect', h: handleHarnessDetect },   // IMPORT-AN-AGENT: find on-disk OpenClaw/Hermes agent homes (read-only)
   { m: 'POST', exact: '/api/harness/scan', h: handleHarnessScan },       // IMPORT-AN-AGENT: read ONE agent home into a normalized preview (read-only)
@@ -9867,6 +9879,7 @@ const ROUTES = [
   { m: 'POST', exact: '/api/config/import', h: handleConfigImport },
   { m: 'POST', exact: '/api/config/reset', h: handleConfigReset },
   { m: 'GET', exact: '/api/runtime/agent', h: handleRuntimeAgent },   // what a LOCAL headless caller needs to drive /api/run (no secrets)
+  { m: 'GET', prefix: '/api/agent/', h: handleAgentCapabilities },   // unified agent capabilities summary (skills, toolsets, placed, connectors)
   { m: 'GET', exact: '/api/computer-control', h: handleComputerControl },
   { m: 'POST', exact: '/api/computer-control', h: handleComputerControl },
   { m: 'GET', exact: '/api/runtime/knobs', h: handleRuntimeKnobsGet },   // P1-9 advanced knobs
@@ -10049,6 +10062,9 @@ const ROUTES = [
   // inside the model's tool result. (WIRING_AUDIT P4: lie #7.)
   { m: 'GET', exact: '/api/limits', h: (req, res) => { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ maxConcurrentAgents: concurrencyGate.max() })); } },
   { m: ['GET', 'HEAD'], prefix: '/api/file', h: serveWorkspaceFile },
+  // Deliverables panel inline preview for images over DELIVERABLE_IMAGE_MAX (2026-10-22) — see the full note
+  // at DELIVERABLE_PREVIEW_CACHE_DIR above handleDeliverablePreview. Never touches the original file.
+  { m: 'GET', qsplit: '/api/deliverable-preview', h: handleDeliverablePreview },
   // USER ATTACHMENTS (COMMS): the Commander attached a photo/file to a message. Saves it into the agent's
   // workspace (.attachments/, jailed) and returns a lightweight reference the message history stores; the run
   // path later expands the reference into a provider content block. Served back for thumbnails via /api/file.
@@ -11830,6 +11846,87 @@ function handleRuntimeAgent(req, res) {
     }))
   }));
 }
+
+/* ---- /api/agent/:id/capabilities: unified agent capabilities summary (for Refit Station).
+   Returns toolsets, skills, placed equipment, and connectors for a given agent. ---- */
+function handleAgentCapabilities(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let agentId = '';
+  try {
+    const path = new URL(req.url, 'http://127.0.0.1').pathname;
+    agentId = decodeURIComponent(path.replace(/^\/api\/agent\//, '').replace(/\/.*/, ''));
+  } catch (_) {}
+  agentId = String(agentId || '').trim();
+
+  // Reject delete, update, etc. — only serve capabilities summary for GET
+  if (req.method !== 'GET' || !agentId || agentId === 'delete') {
+    return json(404, { error: 'not found' });
+  }
+
+  if (!agentRoster.has(agentId)) {
+    return json(404, { error: 'unknown agent: ' + agentId });
+  }
+
+  const agent = agentRoster.get(agentId);
+  const saveDoc = saveStore.load('agent');
+
+  // 1. TOOLSETS — per-agent tool access via placed equipment
+  const placed = require('./capability/saved-placement.js').savedPlacement(saveDoc, agentId);
+  const toolsets = require('./capability/effective-toolsets.js').effectiveToolsets({
+    registry: CAP_REGISTRY, agentId, agent,
+    placed: placedTypesFrom(placed.map(p => p.objectType)),
+    lead: true, disabled: toolsetDisabled,
+    fullAccess: FULL_ACCESS, masterBypass: masterBypassOn(),
+    backendId: executionEnvironment.backendIdFor(agentId)
+  });
+
+  // 2. SKILLS — per-agent runtime skills
+  const skills = (skillStore && typeof skillStore.list === 'function') ? skillStore.list(agentId, { archived: false }) : [];
+
+  // 3. PLACED EQUIPMENT — room objects that grant capabilities to this agent
+  let placedEquipment = [];
+  if (saveDoc && saveDoc.station) {
+    const checked = require('./station-store.js').makeStationStore().validateStationDoc(saveDoc.station);
+    if (checked.ok) {
+      const station = checked.station;
+      const roomId = station.agentRoomId(agentId);
+      if (roomId) {
+        placedEquipment = station.props().filter(p => station.roomAt(p.x, p.y) === roomId).map(p => ({
+          id: p.id, type: p.t, x: p.x, y: p.y, agentId: p.agentId, label: p.label
+        }));
+      }
+    }
+  }
+
+  // 4. CONNECTORS — MCP servers available to this agent (via placed connector props or station-wide)
+  const connectorList = connectors.list && typeof connectors.list === 'function' ? connectors.list() : [];
+  const agentConnectors = connectorList.map(c => ({
+    id: c.id, name: c.name, status: c.status || 'unknown'
+  }));
+
+  return json(200, {
+    ok: true,
+    agentId,
+    agent: {
+      name: agent.name || agentId,
+      model: agent.model || null,
+      provider: agent.provider || null,
+      executionProfile: agent.executionProfile || null,
+      approvalMode: agent.approvalMode || 'ask'
+    },
+    toolsets: toolsets.toolsets || [],
+    skills: skills.map(s => ({ id: s.id, name: s.name, summary: s.summary || '', createdBy: s.createdBy || 'unknown' })),
+    placed: placedEquipment,
+    connectors: agentConnectors,
+    summary: {
+      toolCount: (toolsets.toolsets || []).filter(t => t.available).length,
+      skillCount: skills.length,
+      placedCount: placedEquipment.length,
+      connectorCount: agentConnectors.length
+    }
+  });
+}
+
 async function handleComputerControl(req, res) {
   const json = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   if (req.method === 'GET') return json(200, computerControl.status());
@@ -14220,30 +14317,120 @@ async function handleWorkshopQueue(req, res) {
 // It never invents files or reads unproved paths. Preview hints are an allowlist consumed by the renderer.
 const DELIVERABLE_PREVIEW_MAX = 512 * 1024;
 const DELIVERABLE_IMAGE_MAX = 8 * 1024 * 1024;
+// INLINE PREVIEW FOR LARGE IMAGES (2026-10-22): a real 4K deliverable (~10-21 MB) used to fall straight to
+// "open as a separate file" in the Deliverables panel — only images at or under DELIVERABLE_IMAGE_MAX got an
+// inline <img> preview. GET /api/deliverable-preview below serves a DOWNSCALED COPY for exactly those large
+// images, generated once and cached — the ORIGINAL FILE ON DISK IS NEVER READ-MODIFY-WRITTEN, only read. The
+// "open full file" action (openUrl, unchanged) still serves the real original untouched.
+const DELIVERABLE_PREVIEW_CACHE_DIR = path.join(WORKSPACES, '.deliverable-previews');
+const DELIVERABLE_PREVIEW_MAX_DIM = 1600;      // long edge of the generated preview copy
+const DELIVERABLE_PREVIEW_TARGET_BYTES = 800 * 1024;   // keep it fast to load on a phone connection
+let deliverablePreviewCanvasLib = null, deliverablePreviewCanvasLoadError = '';
+try { deliverablePreviewCanvasLib = require('@napi-rs/canvas'); } catch (e) { deliverablePreviewCanvasLoadError = (e && e.message) || String(e); }
+function deliverablePreviewCachePath(agentId, absPath, mtimeMs, size) {
+  const h = crypto.createHash('sha1').update(agentId + ' ' + absPath + ' ' + mtimeMs + ' ' + size).digest('hex').slice(0, 24);
+  return path.join(DELIVERABLE_PREVIEW_CACHE_DIR, agentId, h + '.jpg');
+}
+// Downscale `srcAbs` to DELIVERABLE_PREVIEW_MAX_DIM's long edge and encode under the byte target, stepping
+// JPEG quality down same as mockup-compose.js's encodeJpegUnderBudget. Returns the encoded buffer; throws
+// on a genuine decode/encode failure (the route below turns that into an honest 502, never a silent original-
+// file fallback that would quietly re-serve the full 20 MB and defeat the point of this cache).
+async function renderDeliverablePreview(srcAbs) {
+  if (!deliverablePreviewCanvasLib) throw new Error('@napi-rs/canvas failed to load: ' + deliverablePreviewCanvasLoadError);
+  const buf = await fsp.readFile(srcAbs);
+  const img = new deliverablePreviewCanvasLib.Image();
+  await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = (e) => reject(new Error('could not decode image: ' + ((e && e.message) || e))); img.src = buf; });
+  const scale = Math.min(1, DELIVERABLE_PREVIEW_MAX_DIM / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+  const canvas = deliverablePreviewCanvasLib.createCanvas(w, h);
+  const cctx = canvas.getContext('2d');
+  cctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in cctx) cctx.imageSmoothingQuality = 'high';
+  cctx.drawImage(img, 0, 0, w, h);
+  let q = 85, out = await canvas.encode('jpeg', q);
+  while (out.length > DELIVERABLE_PREVIEW_TARGET_BYTES && q > 50) { q -= 10; out = await canvas.encode('jpeg', q); }
+  return out;
+}
+// GET /api/deliverable-preview?agent=&path= — same jail as /api/file, but ALWAYS answers a small image: a
+// cached downscaled JPEG for anything over DELIVERABLE_IMAGE_MAX, or the real bytes unchanged when the
+// original is already small (no pointless re-encode of a file that already loads fine). Read-only toward the
+// source file (fs.stat + fs.readFile only); the cache directory is the only thing ever written here.
+async function handleDeliverablePreview(req, res) {
+  let abs;
+  try {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const agent = u.searchParams.get('agent') || 'agent';
+    const rel = u.searchParams.get('path') || '';
+    ({ abs } = await fsJail.resolveInside(agent, rel));
+  } catch (e) {
+    const msg = (e && e.message) || '';
+    if (/escape|illegal|bad agentId|bad notebook/.test(msg)) { res.writeHead(403); return res.end('forbidden'); }
+    res.writeHead(404); return res.end('not found');
+  }
+  const agent = String(new URL(req.url, 'http://127.0.0.1').searchParams.get('agent') || 'agent');
+  let st;
+  try { st = await fsp.stat(abs); } catch (_) { res.writeHead(404); return res.end('not found'); }
+  if (!st.isFile()) { res.writeHead(404); return res.end('not found'); }
+  const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+  if (st.size <= DELIVERABLE_IMAGE_MAX) {
+    // already small enough for a direct inline fetch — serve the real bytes, no generated copy needed.
+    const ext = path.extname(abs).toLowerCase();
+    res.writeHead(200, Object.assign(headers, { 'Content-Type': MIME[ext] || 'application/octet-stream' }));
+    return fs.createReadStream(abs).pipe(res);
+  }
+  const cachePath = deliverablePreviewCachePath(agent, abs, st.mtimeMs, st.size);
+  try {
+    const cached = await fsp.readFile(cachePath);
+    res.writeHead(200, Object.assign(headers, { 'Content-Type': 'image/jpeg' }));
+    return res.end(cached);
+  } catch (_) { /* no cache yet, or it's stale (filename includes mtime+size) — fall through to generate */ }
+  let out;
+  try { out = await renderDeliverablePreview(abs); }
+  catch (e) { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('could not generate a preview: ' + ((e && e.message) || e)); }
+  try {
+    await fsp.mkdir(path.dirname(cachePath), { recursive: true });
+    const staging = cachePath + '.pending-' + process.pid;
+    await fsp.writeFile(staging, out, { flag: 'wx' });
+    fs.renameSync(staging, cachePath);
+  } catch (e) { failNote('deliverable-preview.cache-write', e); /* serve it anyway even if the cache write failed */ }
+  res.writeHead(200, Object.assign(headers, { 'Content-Type': 'image/jpeg' }));
+  res.end(out);
+}
 function deliverableFile(agentId, runId, f, workshop) {
   const p = String((f && f.path) || '');
   let bytes = Number.isFinite(f && f.bytes) && f.bytes >= 0 ? Math.floor(f.bytes) : null;
-  // A run artifact (e.g. image_generate's own result) never carried a bytes field to begin with — only
-  // the workshop backlog's own manifest does. Rather than lose the preview (and the size column) for
-  // every run-sourced file, stat the ALREADY-KNOWN real path once — this reads a proved file we already
-  // resolved for openUrl below, never an unproved one, so it keeps the "never invents files" rule intact.
-  if (bytes === null && p && !workshop) {
+  // Workshop files are already disk-proven at manifest-validation time (validateWorkshopManifest fails the
+  // WHOLE manifest if any listed member is missing), so there is nothing left to check here. A run-sourced
+  // file (the branch below) carries no such guarantee — run.artifacts only proves a write happened once, not
+  // that the file still exists NOW, so this is checked UNCONDITIONALLY (2026-10-22: previously only ran when
+  // `bytes` was already unknown, which meant a producedFiles-supplied byte count — see artifacts.js — skipped
+  // the stat entirely and a since-deleted file still got a live-looking openUrl that 404s on click).
+  let exists = true;
+  if (p && !workshop) {
     try {
       const real = fs.realpathSync(path.join(WORKSPACES, agentId, p));
       const base = fs.realpathSync(path.join(WORKSPACES, agentId)) + path.sep;
-      if (real.startsWith(base)) bytes = fs.statSync(real).size;
-    } catch (_) { /* file moved/missing — stays null, exactly like before */ }
+      if (real.startsWith(base)) { if (bytes === null) bytes = fs.statSync(real).size; }
+      else exists = false;   // resolved outside the agent's own jail — never trust it as real
+    } catch (_) { exists = false; }   // file moved/missing
   }
   const ext = path.extname(p).toLowerCase();
   let preview = null;
+  const isImageExt = ['.png', '.jpg', '.jpeg', '.gif', '.webp'].indexOf(ext) >= 0;
   if ((ext === '.md' || ext === '.markdown') && bytes !== null && bytes <= DELIVERABLE_PREVIEW_MAX) preview = 'markdown';
   else if (ext === '.csv' && bytes !== null && bytes <= DELIVERABLE_PREVIEW_MAX) preview = 'csv';
-  else if (['.png', '.jpg', '.jpeg', '.gif', '.webp'].indexOf(ext) >= 0 && bytes !== null && bytes <= DELIVERABLE_IMAGE_MAX) preview = 'image';
+  // No upper size bound here (unlike markdown/csv above): a large image still gets preview:'image', it just
+  // routes to /api/deliverable-preview's downscaled-copy path below instead of the raw original — see 2026-10-22
+  // note at DELIVERABLE_PREVIEW_CACHE_DIR. A missing `bytes` (can't prove the size) still refuses to guess.
+  else if (isImageExt && bytes !== null) preview = 'image';
   const rel = workshop ? ('workshop/' + runId + '/' + p) : p;
   const openUrl = workshop && ext === '.html'
     ? '/workshop-run/' + encodeURIComponent(agentId) + '/' + encodeURIComponent(runId) + '/' + p.split('/').map(encodeURIComponent).join('/')
     : '/api/file?agent=' + encodeURIComponent(agentId) + '&path=' + encodeURIComponent(rel);
-  return { path: p, bytes, preview, openUrl, sandboxed: workshop && ext === '.html' };
+  // previewUrl is ONLY set for images — it is what the Deliverables panel actually fetches for the inline
+  // <img>; openUrl (above) remains the "open/download the real, untouched original" action regardless of size.
+  const previewUrl = preview === 'image' ? '/api/deliverable-preview?agent=' + encodeURIComponent(agentId) + '&path=' + encodeURIComponent(rel) : null;
+  return { path: p, bytes, exists, preview, openUrl, previewUrl, sandboxed: workshop && ext === '.html' };
 }
 function deliverableSize(files) {
   const known = files.filter(f => f.bytes !== null);
@@ -14323,14 +14510,35 @@ async function deliverableRows() {
     // `ask` is the Commander's OWN request (runstore titles a run with the last user text), which is why it can be
     // shown beside the agent's prose without becoming a second agent claim. Kept distinct from `summary` — the old
     // code assigned the ask INTO summary, which read on the card as if the agent had described its own work.
-    const ask = run.title || '';
+    // isInternalUserTurnText guards against a run.title already written to disk BEFORE sidecar/user-text.js
+    // started excluding the screen-capture wrapper from latestUserText() (2026-10-22) — fixing that function
+    // only prevents a NEW bad title; a run recorded earlier still has the raw fence text baked into run.title
+    // forever, so this card would otherwise keep showing it even after the root-cause fix. Empty is the honest
+    // answer when the real ask can no longer be recovered from the durable record.
+    const ask = (run.title && !isInternalUserTurnText(run.title)) ? run.title : '';
     const note = run.deliverable || null;
     if (note) {
       // The agent NAMED this run's work, so the run is ONE deliverable with N files — not N unrelated rows. The
       // authored title/summary/kind ride as prose; `main` is only honored when it names a file the run actually
       // produced (never trust the model's path — the same rule the Workshop manifest applies to its own file list).
-      const files = arts.filter(a => a.path).map(a => deliverableFile(run.agentId, run.runId, a, false));
-      const main = note.main && files.some(f => f.path === note.main) ? note.main : '';
+      // Scratch/helper scripts (sidecar/deliverable-files.js) and files proven gone (deliverableFile's `exists`)
+      // never belong on the card — a run's artifact ledger records EVERY write it made, including throwaway
+      // calibration scripts, not just the finished output (2026-10-22: confirmed live on a run whose named
+      // deliverable listed 21 files, 19 of them deleted .py helpers).
+      let files = arts.filter(a => a.path && !isScratchHelperPath(a.path))
+        .map(a => deliverableFile(run.agentId, run.runId, a, false)).filter(f => f.exists);
+      // The agent's named `main` file is proven the same way (deliverableFile's existence check) and is NEVER
+      // trusted blind — but when it proves real and the artifacts ledger simply never recorded it (2026-10-22:
+      // runs made entirely through mockup_compose/image_print_prep/vector_export/image_stock_fetch before
+      // sidecar/artifacts.js learned those tool names — see the producedFiles fix above — left `arts` empty even
+      // though the file genuinely exists), showing nothing is less truthful than showing the one file the agent
+      // itself pointed at and the disk confirms. Only ever adds the named file, never invents the other 4 of a
+      // photo set the ledger still can't prove.
+      let main = note.main && files.some(f => f.path === note.main) ? note.main : '';
+      if (!main && note.main) {
+        const mainFile = deliverableFile(run.agentId, run.runId, { path: note.main }, false);
+        if (mainFile.exists) { files = [mainFile].concat(files); main = note.main; }
+      }
       rows.push({
         id: 'run:' + run.runId, agentId: run.agentId, runId: run.runId, title: note.title, source: 'run', status: status,
         kind: note.kind || 'files', summary: note.summary || '', authored: true, ask: ask, main: main,
@@ -14341,10 +14549,14 @@ async function deliverableRows() {
     }
     // UNNAMED run: unchanged behaviour — one row per artifact, titled by basename. We do NOT invent a grouping the
     // agent never declared, and `authored:false` lets the card show the basename as the plain fact it is instead of
-    // dressing it up as a description.
+    // dressing it up as a description. Sibling of the named-run filter above: a scratch helper or a file proven
+    // gone would otherwise become its OWN useless row here (one artifact = one row in this branch), not just a
+    // dead entry inside someone else's file list.
     arts.forEach((a, i) => {
       const p = a.path || '';
+      if (p && isScratchHelperPath(p)) return;
       const files = p ? [deliverableFile(run.agentId, run.runId, a, false)] : [];
+      if (p && files.length && !files[0].exists) return;
       rows.push({ id: 'run:' + run.runId + ':' + i, agentId: run.agentId, runId: run.runId, title: path.basename(p || a.target || (run.title + ' output')), source: 'run', status: status, kind: a.kind, summary: '', authored: false, ask: ask, files, target: a.target || '', size: deliverableSize(files), createdAt: run.ts || 0, updatedAt: run.ts || 0, actions: { open: files.length > 0, keep: false, discard: false } });
     });
   }
@@ -16186,17 +16398,8 @@ async function handleRun(req, res) {
    message, the task brief was prepared from the older text, memory recall ranked against the older query, and
    the study pass studied the older directive. Flatten the parts instead (same rule attachments.textOf uses).
    Returns '' only when the turn genuinely carries no text (an image-only send) — an honest empty, not a lie. */
-function userMsgText(m) {
-  if (!m || m.role !== 'user') return null;
-  if (typeof m.content === 'string') return m.content;
-  if (!Array.isArray(m.content)) return null;     // an unknown shape is not a user turn we can read — keep walking
-  const parts = [];
-  for (const p of m.content) {
-    if (typeof p === 'string') parts.push(p);
-    else if (p && typeof p.text === 'string') parts.push(p.text);
-  }
-  return parts.join('');                          // '' for an image-only turn: honest, and it IS a real turn
-}
+// userMsgText (used by latestUserText/recentUserText below) lives in sidecar/user-text.js — required near
+// the top of this file, alongside deliverable-files.js.
 /* H2 durable transcript — a recovery continuation's view of what its SOURCE run already recorded. The continuation's
    prompt is the source's journal checkpoint: the source's initial prompt (its base checkpoint — system, restored
    history, the directive) followed by the turns the source made and the planner's pairing results. Returns the base
@@ -16862,10 +17065,18 @@ async function runOnceCore(o) {
   // STUDIO (media skills): image_generate / image_analyze use an OpenRouter key when one is available.
   // Gated by a 'studio' object (in the default office below) exactly like web/files; outputs save to the workspace.
   imageTools.register(registry);
+  // STUDIO, Kling video: video.kling submits a text-to-video job to the official Kling 3.0 API,
+  // polls for completion, and downloads the result into the workspace. Credentials from environment
+  // (KLING_API_KEY). Supports character reference images, multi-shot generation, native audio sync.
+  makeVideoKlingTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
   // STUDIO, print-prep skill: image_print_prep turns an already-generated workspace image into genuine
   // 300-PPI print files (local @napi-rs/canvas, no network, no provider credential — works even with no
   // media route configured at all, unlike image_generate/image_analyze above).
   makePrintPrepTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, mockup skill: mockup_compose pastes a finished print into a pre-made room template to
+  // produce the full Etsy listing-photo set (etsy-rules §5) — local @napi-rs/canvas, no network, no
+  // re-generation of the art. Unattended BUILD-mode use is opened via permissions.js's JAIL_WRITE_TOOLS.
+  makeMockupComposeTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
   // STUDIO, quality-check skill: image_quality_check independently re-verifies a PNG already on disk
   // (dimensions, DPI metadata, file integrity, optional claimed-vs-actual check) — read-only, no
   // network, no consent gate, so the validation stage of the Etsy pipeline can call it unattended.
@@ -16880,6 +17091,14 @@ async function runOnceCore(o) {
   // upscale — canvas rasterises an SVG at its declared size, so the tool rewrites that first) and emits
   // 300-PPI PNGs plus single-page PDFs. Local, zero-cost, no provider credential.
   makeVectorExportTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, Higgsfield: higgsfield.generate submits a text-to-image job via Higgsfield's REST API,
+  // polls for completion, and downloads the result into the workspace. Credentials from environment
+  // (HF_CREDENTIALS or HF_API_KEY + HF_API_SECRET). Integrates with the print-prep pipeline.
+  makeHiggsfieldTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, Kling image upscaling: image_upscale_kling submits an image upscaling job to the official
+  // Kling 3.0 API (2x/3x/4x neural upscaling), polls for completion, and saves the result. Credentials
+  // from KLING_API_KEY environment variable. Integrates with image generation pipeline.
+  makeKlingUpscaleTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
   // STUDIO, third skill: voice_generate — the agent MAKES a clip (voiceover, narration, audio message) into its
   // workspace. It drives the SAME media-service ladder /api/tts does (keyed neural chain, then the
   // free keyless Edge floor), so it needs no voice-specific credential and a zero-key station can still record.
@@ -19522,6 +19741,161 @@ async function handleProjectPickFolder(req, res) {
   let r; try { r = await folderPick.pick({ surface: 'interactive' }); }
   catch (e) { return sendJson(400, { ok: false, reason: 'folder picker failed: ' + (e && e.message || e) }); }
   sendJson(r && r.ok ? 200 : 400, r || { ok: false, reason: 'folder picker failed' });
+}
+
+// ---- CHRISTIAN STORY STUDIO: Multi-Agent Video Production Pipeline ----
+
+// Register orchestration project outputs with deliverableStore
+async function registerOrchestrationOutputs(projectId, blueprint) {
+  try {
+    const outboxDir = path.join(require('node:os').homedir(), 'outbox', projectId);
+    if (!fs.existsSync(outboxDir)) return; // No outbox yet
+
+    // Check if all agents have completed
+    const allComplete = blueprint.outputs.storywriter && blueprint.outputs.director
+      && blueprint.outputs.producer && blueprint.outputs.qceditor;
+    if (!allComplete) return; // Pipeline not finished
+
+    // Find deliverable files (video.mp4, metadata.json, etc)
+    const files = [];
+    const videoFile = path.join(outboxDir, 'video.mp4');
+    if (fs.existsSync(videoFile)) {
+      const stat = fs.statSync(videoFile);
+      files.push({ path: videoFile, bytes: stat.size });
+    }
+
+    if (files.length > 0) {
+      // Register as a "kept" deliverable in the store
+      const row = {
+        id: 'studio:' + projectId + ':video',
+        agentId: 'studio',
+        runId: projectId,
+        title: 'Christian Story Studio Video',
+        source: 'studio',
+        status: 'kept',
+        kind: 'video',
+        summary: blueprint.userPrompt.slice(0, 260),
+        files: files
+      };
+      await deliverableStore.record(row, Date.now());
+    }
+  } catch (e) {
+    // Log but don't fail the request if registration errors
+    console.error('[orchestration] Failed to register outputs:', e.message);
+  }
+}
+
+// POST /api/studio/assignment { prompt, duration_target?, ... }
+// Create a new story project and start the orchestration pipeline
+async function handleStudioAssignment(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  let body = {}; try { body = JSON.parse(await readBody(req, 10 << 10)) || {}; } catch (_) { body = {}; }
+
+  const userPrompt = body.prompt || body.userPrompt || '';
+  if (!userPrompt || userPrompt.length < 10) {
+    return sendJson(400, { error: 'prompt required (minimum 10 characters)' });
+  }
+
+  try {
+    // Create project ID
+    const projectId = 'proj-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    // Create blueprint and workflow
+    const blueprint = orchestration.createBlueprint(projectId, userPrompt);
+    const workflow = orchestration.createWorkflow(projectId);
+
+    // Start the workflow in 'running' state
+    workflow.status = 'running';
+    workflow.currentStage = 0;
+
+    // Save state
+    await orchestration.saveBlueprint(projectId, blueprint);
+    await orchestration.saveWorkflow(projectId, workflow);
+
+    // Immediately trigger first agent (STORYWRITER)
+    setApiToken(API_TOKEN);  // Pass the sidecar's token to the orchestrator
+    const orchResult = await orchestrateNextAgent(projectId, 300000); // 5 min timeout for agent execution
+
+    // Register outputs if pipeline completed
+    await registerOrchestrationOutputs(projectId, blueprint);
+
+    sendJson(200, {
+      ok: true,
+      projectId,
+      message: 'Project created and STORYWRITER started',
+      orchestration: orchResult,
+      status: 'running'
+    });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
+}
+
+// GET /api/studio/project/{id}/status
+// Get current workflow status for a project
+async function handleStudioProjectStatus(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  const url = req.url.split('?')[0];
+  const projectId = url.split('/')[4]; // /api/studio/project/{id}/status
+
+  if (!projectId || projectId.length < 5) {
+    return sendJson(400, { error: 'Invalid project ID' });
+  }
+
+  try {
+    const workflow = await orchestration.loadWorkflow(projectId);
+    const blueprint = await orchestration.loadBlueprint(projectId);
+
+    if (!workflow || !blueprint) {
+      return sendJson(404, { error: 'Project not found' });
+    }
+
+    // Register outputs if pipeline completed
+    await registerOrchestrationOutputs(projectId, blueprint);
+
+    const nextAgent = orchestration.nextAgentForStatus(workflow);
+    const currentAgent = workflow.currentStage > 0
+      ? orchestration.AGENTS_IN_ORDER[Math.max(0, workflow.currentStage - 1)]
+      : orchestration.AGENTS_IN_ORDER[0];
+
+    sendJson(200, {
+      ok: true,
+      projectId,
+      status: workflow.status,
+      currentStage: workflow.currentStage,
+      currentAgent,
+      nextAgent,
+      attempts: workflow.attempts,
+      progress: {
+        storywriter: blueprint.outputs.storywriter?.deliverables?.length || 0,
+        director: blueprint.outputs.director?.deliverables?.length || 0,
+        producer: blueprint.outputs.producer?.deliverables?.length || 0,
+        qceditor: blueprint.outputs.qceditor?.deliverables?.length || 0
+      },
+      lastUpdate: workflow.lastUpdate
+    });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
+}
+
+// POST /api/studio/project/{id}/advance
+// Manually advance to next agent (for testing/recovery)
+async function handleStudioProjectAdvance(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  const url = req.url.split('?')[0];
+  const projectId = url.split('/')[4];
+
+  if (!projectId || projectId.length < 5) {
+    return sendJson(400, { error: 'Invalid project ID' });
+  }
+
+  try {
+    const result = await orchestrateNextAgent(projectId, 120000);
+    sendJson(result.error ? 400 : 200, { ok: !result.error, ...result });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
 }
 
 // POST /api/pickpath { mode:'file'|'folder' } — the GENERIC native chooser behind a recipe launch form's typed
