@@ -83,6 +83,31 @@ A.eq(T.apiTicketClaim({ method: 'GET', url: '/api/file?path=p&ticket=abc' }).sco
 A.eq(T.apiTicketClaim({ method: 'POST', url: '/api/run?ticket=x' }), null, 'POST /api/run can never claim a ticket');
 A.eq(T.apiTicketClaim({ method: 'GET', url: '/api/transcript?ticket=x' }), null, 'data routes can never claim a ticket');
 A.eq(T.apiTicketClaim({ method: 'DELETE', url: '/api/file?ticket=x' }), null, 'DELETE /api/file cannot claim a ticket');
+
+// ---- /api/deliverable-preview (2026-10-22): same 'file' kind + scopeFile as /api/file — a large-image
+// deliverable's downscaled preview is the SAME resource capability as the raw file, served a different way ----
+const c2 = T.apiTicketClaim({ method: 'GET', url: '/api/deliverable-preview?agent=webdesigner&path=' + encodeURIComponent('outbox/kit/art.jpg') + '&ticket=abc' });
+A.eq(c2 && c2.kind, 'file', 'GET /api/deliverable-preview claims a file ticket (same kind as /api/file)');
+A.eq(c2 && c2.scope, T.scopeFile('webdesigner', 'outbox/kit/art.jpg'), 'scope = the decoded agent + path, identical shape to /api/file');
+A.eq(c2 && c2.scope, T.apiTicketClaim({ method: 'GET', url: '/api/file?agent=webdesigner&path=' + encodeURIComponent('outbox/kit/art.jpg') + '&ticket=abc' }).scope,
+  'the SAME agent+path yields the IDENTICAL scope on both routes — a ticket minted via fileUrl-style scoping verifies on either');
+A.eq(T.apiTicketClaim({ method: 'POST', url: '/api/deliverable-preview?ticket=x' }), null, 'POST /api/deliverable-preview cannot claim a ticket');
+A.eq(T.apiTicketClaim({ method: 'HEAD', url: '/api/deliverable-preview?ticket=x' }), null, 'HEAD /api/deliverable-preview cannot claim a ticket (GET only, unlike /api/file)');
+
+// cross-route ticket rejection: a ticket's MAC covers (method, scope, exp, nonce) only — kind/route aren't
+// part of the message, so this is really proving verify() rejects a WRONG scope, exercised via the two
+// routes' claims to make the intent (two routes, two different checks) explicit rather than implicit.
+{
+  const key = 'test-key-xyz', now = 1700000000000;
+  const scope = T.scopeFile('webdesigner', 'outbox/kit/art.jpg');
+  const ticket = T.mint(key, 'file', scope, { now });
+  const fileClaim = T.apiTicketClaim({ method: 'GET', url: '/api/file?agent=webdesigner&path=' + encodeURIComponent('outbox/kit/art.jpg') + '&ticket=' + ticket });
+  const previewClaim = T.apiTicketClaim({ method: 'GET', url: '/api/deliverable-preview?agent=webdesigner&path=' + encodeURIComponent('outbox/kit/art.jpg') + '&ticket=' + ticket });
+  A.ok(T.verify(key, fileClaim.ticket, fileClaim.kind, fileClaim.scope, { now: now + 1000 }).ok, 'a ticket minted for this agent+path verifies on /api/file');
+  A.ok(T.verify(key, previewClaim.ticket, previewClaim.kind, previewClaim.scope, { now: now + 1000 }).ok, 'the SAME ticket also verifies on /api/deliverable-preview (identical scope)');
+  const wrongPathClaim = T.apiTicketClaim({ method: 'GET', url: '/api/deliverable-preview?agent=webdesigner&path=' + encodeURIComponent('outbox/other.jpg') + '&ticket=' + ticket });
+  A.ok(!T.verify(key, wrongPathClaim.ticket, wrongPathClaim.kind, wrongPathClaim.scope, { now: now + 1000 }).ok, 'a ticket for one path is refused for a different path on /api/deliverable-preview');
+}
 A.eq(JSON.stringify(T.splitRunTicket('/workshop-run/~t/TK/ag/run1/index.html')), JSON.stringify({ ticket: 'TK', rest: 'ag/run1/index.html' }), 'run ticket rides the path');
 A.eq(T.splitRunTicket('/workshop-run/ag/run1/index.html'), null, 'an un-ticketed run path has no ticket');
 A.eq(T.splitRunTicket('/workshop-run/~t/'), null, 'an empty ticket segment is no ticket');

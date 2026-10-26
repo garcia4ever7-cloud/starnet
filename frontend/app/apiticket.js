@@ -12,7 +12,7 @@
 (function (root) {
   'use strict';
   const DOMAIN = 'starnet-ticket-v1';
-  const KINDS = { file: { method: 'GET', ttl: 5 * 60 * 1000 }, run: { method: 'GET', ttl: 10 * 60 * 1000 },
+  const KINDS = { file: { method: 'GET', ttl: 5 * 60 * 1000 }, studio: { method: 'GET', ttl: 5 * 60 * 1000 }, run: { method: 'GET', ttl: 10 * 60 * 1000 },
     sse: { method: 'GET', ttl: 2 * 60 * 1000 }, save: { method: 'POST', ttl: 2 * 60 * 1000 } };
 
   // ---- SHA-256 / HMAC (FIPS 180-4 / RFC 2104), bytes in, bytes out ----
@@ -90,6 +90,7 @@
 
   // ---- ticket mint (mirrors sidecar/apitickets.js mint) ----
   const scopeFile = (agent, relPath) => 'file\n' + String(agent || 'agent') + '\n' + String(relPath || '');
+  const scopeStudio = (projectId, fileName) => 'studio\n' + String(projectId || '') + '\n' + String(fileName || '');
   const scopeRun = (agent, runId) => 'run\n' + String(agent || '') + '\n' + String(runId || '');
   const SCOPE_SSE = 'sse\n/api/channels/events', SCOPE_SAVE = 'save\n/api/save';
   function mintWith(key, kind, scope, now, nonce) {
@@ -111,6 +112,18 @@
     const t = mint('file', scopeFile(agent, p));
     return base() + '/api/file?agent=' + encodeURIComponent(agent) + '&path=' + encodeURIComponent(p) + (t ? '&ticket=' + encodeURIComponent(t) : '');
   }
+  // Deliverables panel inline preview (2026-10-22): identical ticket (same 'file' kind + scope) as fileUrl
+  // above, just pointed at /api/deliverable-preview — see the matching note in sidecar/apitickets.js.
+  function deliverablePreviewUrl(agentId, relPath) {
+    const agent = agentId || 'agent', p = String(relPath || '');
+    const t = mint('file', scopeFile(agent, p));
+    return base() + '/api/deliverable-preview?agent=' + encodeURIComponent(agent) + '&path=' + encodeURIComponent(p) + (t ? '&ticket=' + encodeURIComponent(t) : '');
+  }
+  function studioUrl(projectId, fileName) {
+    const proj = String(projectId || ''), file = String(fileName || '');
+    const t = mint('studio', scopeStudio(proj, file));
+    return base() + '/api/studio-file?project=' + encodeURIComponent(proj) + '&file=' + encodeURIComponent(file) + (t ? '&ticket=' + encodeURIComponent(t) : '');
+  }
   function runUrl(agentId, runId, relPath) {
     const agent = agentId || 'agent', rid = String(runId || '');
     const t = mint('run', scopeRun(agent, rid));
@@ -127,9 +140,9 @@
     const t = mint('save', SCOPE_SAVE);
     return base() + '/api/save' + (t ? '?ticket=' + encodeURIComponent(t) : '');
   }
-  /* sign(url): turn a SERVER-built open URL (a deliverable's openUrl: '/api/file?agent=&path=' or
-     '/workshop-run/<agent>/<runId>/<path>') into a ticketed, absolute-on-desktop URL. Any other URL comes back
-     unchanged (never guess a scope). A stray legacy ?token= is stripped — it must never ride a URL again. */
+  /* sign(url): turn a SERVER-built open URL (a deliverable's openUrl: '/api/file?agent=&path=',
+     '/api/studio-file?project=&file=', or '/workshop-run/<agent>/<runId>/<path>') into a ticketed, absolute-on-desktop URL.
+     Any other URL comes back unchanged (never guess a scope). A stray legacy ?token= is stripped — it must never ride a URL again. */
   function sign(url) {
     const raw = String(url || '');
     if (!raw || raw.charAt(0) !== '/') return raw;
@@ -137,6 +150,8 @@
     try { u = new URL(raw, 'http://127.0.0.1'); } catch (_) { return raw; }
     u.searchParams.delete('token');
     if (u.pathname === '/api/file') return fileUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('path') || '');
+    if (u.pathname === '/api/studio-file') return studioUrl(u.searchParams.get('project') || '', u.searchParams.get('file') || '');
+    if (u.pathname === '/api/deliverable-preview') return deliverablePreviewUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('path') || '');
     const m = /^\/workshop-run\/([^/]+)\/([^/]+)\/(.+)$/.exec(u.pathname);
     if (m && m[1] !== '~t') {
       let agent, rid, rel;
@@ -146,8 +161,8 @@
     return base() + u.pathname + u.search;
   }
 
-  const api = { fileUrl, runUrl, sseUrl, saveBeaconUrl, sign, mint,
-    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeRun, SCOPE_SSE, SCOPE_SAVE, KINDS } };
+  const api = { fileUrl, studioUrl, runUrl, deliverablePreviewUrl, sseUrl, saveBeaconUrl, sign, mint,
+    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeStudio, scopeRun, SCOPE_SSE, SCOPE_SAVE, KINDS } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.ApiTicket = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

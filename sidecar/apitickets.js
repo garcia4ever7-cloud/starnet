@@ -31,6 +31,7 @@ const SKEW_MS = 30 * 1000;   // same machine, but page and sidecar read the cloc
 // Per-kind lifetime CAP (server-enforced) + whether the ticket may be presented once only.
 const KINDS = Object.freeze({
   file: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false }),    // link/tab open of ONE workspace file
+  studio: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false }),  // streaming ONE studio/outbox video
   run: Object.freeze({ method: 'GET', maxTtlMs: 10 * 60 * 1000, once: false }),    // ONE workshop run dir (page + its relative assets)
   sse: Object.freeze({ method: 'GET', maxTtlMs: 2 * 60 * 1000, once: true }),      // one EventSource CONNECT (a live stream outlives it)
   save: Object.freeze({ method: 'POST', maxTtlMs: 2 * 60 * 1000, once: true })     // one unload beacon
@@ -38,6 +39,7 @@ const KINDS = Object.freeze({
 
 function b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function scopeFile(agent, relPath) { return 'file\n' + String(agent || 'agent') + '\n' + String(relPath || ''); }
+function scopeStudio(projectId, fileName) { return 'studio\n' + String(projectId || '') + '\n' + String(fileName || ''); }
 function scopeRun(agent, runId) { return 'run\n' + String(agent || '') + '\n' + String(runId || ''); }
 const SCOPE_SSE = 'sse\n/api/channels/events';
 const SCOPE_SAVE = 'save\n/api/save';
@@ -122,6 +124,15 @@ function apiTicketClaim(req) {
   const q = queryParams(req && req.url);
   const ticket = q.get('ticket') || '';
   if ((m === 'GET' || m === 'HEAD') && p === '/api/file') return { kind: 'file', scope: scopeFile(q.get('agent') || 'agent', q.get('path') || ''), ticket };
+  // Deliverables panel inline preview (2026-10-22): same capability as /api/file ("read this agent's file at
+  // this path") served through a different route, so it reuses the identical 'file' kind + scope function —
+  // a ticket minted for one is NOT valid for the other (the scope embeds the literal query values, and verify()
+  // re-derives scope from the ACTUAL request, so the MAC simply won't match across routes), but the SAME
+  // agent+path pair mints/verifies correctly here with no new ticket kind needed.
+  if (m === 'GET' && p === '/api/deliverable-preview') return { kind: 'file', scope: scopeFile(q.get('agent') || 'agent', q.get('path') || ''), ticket };
+  // Christian Story Studio video streaming (2026-10-26): similar to /api/file but for studio/outbox files.
+  // Uses project + file scope, scoped identically to prevent cross-project access.
+  if ((m === 'GET' || m === 'HEAD') && p === '/api/studio-file') return { kind: 'studio', scope: scopeStudio(q.get('project') || '', q.get('file') || ''), ticket };
   if (m === 'GET' && p === '/api/channels/events') return { kind: 'sse', scope: SCOPE_SSE, ticket };
   if (m === 'POST' && p === '/api/save') return { kind: 'save', scope: SCOPE_SAVE, ticket };
   return null;
@@ -143,5 +154,5 @@ function splitRunTicket(rawPath) {
 
 module.exports = {
   KINDS, SKEW_MS, mint, verify, parse, replayGuard, apiTicketClaim, splitRunTicket,
-  scopeFile, scopeRun, SCOPE_SSE, SCOPE_SAVE, message
+  scopeFile, scopeStudio, scopeRun, SCOPE_SSE, SCOPE_SAVE, message
 };
