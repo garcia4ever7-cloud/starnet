@@ -4,24 +4,18 @@ slug: sonnet-5-5-rejects-thinking-disabled-failing-eve
 title: Sonnet 5.5 rejects thinking disabled, failing every run
 surface: providers
 severity: P0
-status: claimed
+status: fixed
 found: 2026-10-27
 lane: fix/anthropic-thinking-off
-fix:
+fix: 2dc5b32e6
 origin: owner
 report: Owner report 2026-10-27 — every Commander run failing; runs 7ea55618 (05:03Z), 63062672 (06:27Z), 54ed192d (06:48Z)
-affected: v0.12.5 working tree, parent commit 704f7c1 (dirty); Termux/Android arm64, Node v26.4.0
+affected: v0.12.5, broken at parent commit 704f7c1, fixed in 2dc5b32e6 on feat/harness-backend; Termux/Android arm64, Node v26.4.0
 family: execution-configuration
 installer: not-applicable
-installerEvidence: Fix is in the sidecar request builder on a dirty working tree; no installer candidate has been cut from it.
+installerEvidence: Fix is in the sidecar request builder (sidecar/providers/anthropic.js) and verified against the live Anthropic wire plus an end-to-end run through a restarted sidecar. No installer candidate has been cut from 2dc5b32e6, so there is no packaged artifact to verify.
 recovery: unconfirmed
 ---
-
-> **STATUS NOTE.** The fix is written, live-verified end to end, and covered by a registered fast test —
-> but it sits in an **uncommitted working tree**. `status: fixed` requires an exact fix-commit SHA
-> (`scripts/qa/bug-lifecycle.mjs:31`) and committing was not authorised, so this is `claimed` rather than a
-> `fixed` record carrying a fake commit. Flip it with:
-> `node scripts/qa/bugs.mjs --set 849263eb --status fixed --fix <sha>`
 
 # Sonnet 5.5 rejects thinking disabled, failing every run
 
@@ -170,7 +164,6 @@ total, registered in `test/fast.list`.
 
 ## Sibling coverage
 
-```json
 {
   "adapters": [
     { "target": "providers/anthropic.js applyThinking (modern path)", "state": "covered",

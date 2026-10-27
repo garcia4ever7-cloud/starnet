@@ -4,15 +4,15 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**17** open (open+claimed) of 223 total — 2 P0 · 2 P1 · 13 P2
+**16** open (open+claimed) of 223 total — 1 P0 · 2 P1 · 13 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
-User/owner reports: **106** · source fixed: **89** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **103**.
+User/owner reports: **106** · source fixed: **90** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **103**.
 
 | Report | Family | Source | Installer | Customer |
 | --- | --- | --- | --- | --- |
-| [Sonnet 5.5 rejects thinking disabled, failing every run](bugs/849263eb-sonnet-5-5-rejects-thinking-disabled-failing-eve.md) | execution-configuration | claimed | not-applicable | unconfirmed |
+| [Sonnet 5.5 rejects thinking disabled, failing every run](bugs/849263eb-sonnet-5-5-rejects-thinking-disabled-failing-eve.md) | execution-configuration | fixed | not-applicable | unconfirmed |
 | [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | deliverable-content-verification | open | unverified | unconfirmed |
 | [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | provider-stream-retry | open | unverified | unconfirmed |
 | [Delegated specialist lacks connected MCP tools](bugs/acd9ecb4-delegated-specialist-lacks-connected-mcp-tools.md) | delegated-capabilities | fixed | verified | unconfirmed |
@@ -122,9 +122,9 @@ User/owner reports: **106** · source fixed: **89** · installer verified: **6**
 | Sev | Status | Surface | Bug | Lane | Fix |
 | --- | --- | --- | --- | --- | --- |
 | P0 | open | safecell | [shell.exec has no filesystem jail, so it can read host secret files (e.g. ~/.config/starnet/env) in plaintext, outside the agent workspace boundary every other tool enforces](bugs/cd082d49-shell-exec-inherits-the-full-sidecar-environment.md) | isaiah-4k-style-session-2026-10-21 | — |
-| P0 | claimed | providers | [Sonnet 5.5 rejects thinking disabled, failing every run](bugs/849263eb-sonnet-5-5-rejects-thinking-disabled-failing-eve.md) | fix/anthropic-thinking-off | — |
 | P0 | fixed | autonomy | [After E-STOP the ROUTINES panel still renders "● scheduler armed — routines fire automatically" plus a live countdown; GET /api/cron's `halted` field has zero c](bugs/4962c3ad-after-e-stop-the-routines-panel-still-renders-sc.md) | sweep/autonomy | b7e18ce8 |
 | P0 | fixed | onboarding | [Only the skip CHIP is recognized as a skip — the typed word the interview invites ("skip") is stored as a weight:'stated' belief, raising FAMILIARITY, opening t](bugs/e62959ca-only-the-skip-chip-is-recognized-as-a-skip.md) | sweep/onboarding | 6afeb9ee |
+| P0 | fixed | providers | [Sonnet 5.5 rejects thinking disabled, failing every run](bugs/849263eb-sonnet-5-5-rejects-thinking-disabled-failing-eve.md) | fix/anthropic-thinking-off | 2dc5b32e6 |
 | P0 | fixed | providers | [The KEYS-tab UNATTENDED grant is enforced only at web_request — servicekeys.runEnv() has no surface argument, so an unattended shell child receives every ENABLE](bugs/14d4f234-the-keys-tab-unattended-grant-is-enforced-only-a.md) | sweep/providers | 6afeb9ee |
 | P0 | fixed | release | [Forward-version gate asserts "no newer build is published yet" for EVERY non-'available' phase — including check 'error' and the busy short-circuit — and the 'u](bugs/9c0664eb-forward-version-gate-asserts-no-newer-build-is-p.md) | sweep/release | 6afeb9ee |
 | P0 | fixed | safecell | [The Permissions panel's normalizeGrants regex drops every path: and mcp: standing grant — the ledger prints "No standing approvals yet" while the backend holds](bugs/7274ff21-the-permissions-panel-s-normalizegrants-regex-dr.md) | sweep/safecell | 6afeb9ee |
@@ -351,7 +351,7 @@ User/owner reports: **106** · source fixed: **89** · installer verified: **6**
 | --- | --- |
 | channels | 1 |
 | autonomy | 4 |
-| providers | 5 |
+| providers | 4 |
 | safecell | 1 |
 | sessions | 3 |
 | skills | 0 |
