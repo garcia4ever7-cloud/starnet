@@ -4,11 +4,11 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**16** open (open+claimed) of 223 total — 1 P0 · 2 P1 · 13 P2
+**16** open (open+claimed) of 224 total — 1 P0 · 2 P1 · 13 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
-User/owner reports: **106** · source fixed: **90** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **103**.
+User/owner reports: **107** · source fixed: **91** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **104**.
 
 | Report | Family | Source | Installer | Customer |
 | --- | --- | --- | --- | --- |
@@ -48,6 +48,7 @@ User/owner reports: **106** · source fixed: **90** · installer verified: **6**
 | [Saved fallback changes model without switching provider](bugs/8b22d414-saved-fallback-changes-model-without-switching-p.md) | provider-fallback | fixed | verified | unconfirmed |
 | [Tier picker reports available managed models missing](bugs/ddea3c5d-tiers-ignore-managed-catalog.md) | catalog-truth | fixed | unverified | unconfirmed |
 | [Desktop bundle drops required calibration texture and disables graphical refresh](bugs/4a108286-desktop-bundle-drops-required-calibration-textur.md) | packaged-runtime-asset-closure | fixed | unverified | unconfirmed |
+| [Checkpoint ceiling sweep re-runs on every mutating tool call when it cannot shrink the repo](bugs/062379c5-checkpoint-ceiling-sweep-re-runs-on-every-mutati.md) | host-resource-cost | fixed | not-applicable | unconfirmed |
 | [File approval hides the proposed edit and patch payload](bugs/48c51661-file-approval-omits-mutation.md) | informed-approval | fixed | unverified | unconfirmed |
 | [Add agents silently fails when group backend is unavailable](bugs/0245a284-add-agents-silently-fails-when-group-backend-is.md) | group-chat-picker | fixed | unverified | unconfirmed |
 | [Agent session focus commands can unexpectedly retarget the composer](bugs/774641dc-agent-session-focus-commands-can-unexpectedly-re.md) | session-focus | fixed | unverified | unconfirmed |
@@ -202,6 +203,7 @@ User/owner reports: **106** · source fixed: **90** · installer verified: **6**
 | P1 | fixed | release | [Completing startup loading reopens a window closed to the tray](bugs/08eece34-startup-load-reopens-closed-tray-window.md) | release-0120-prep-0915 | 9c3b7819c |
 | P1 | fixed | release | [Swallowed errors can expose credentials in console warnings](bugs/a03ea726-swallowed-errors-can-expose-credentials-in-conso.md) | cleanup-0112-0910 | 0a3a605a9c41ecf944760782a4938ec442d02e6c |
 | P1 | fixed | safecell | [An errored /api/projects is rendered as a CONFIRMED EMPTY trust ledger ("NO TRUSTED PROJECTS") and silently wipes the persisted project scope](bugs/e05cdba8-an-errored-api-projects-is-rendered-as-a-confirm.md) | sweep/safecell | ed200caa |
+| P1 | fixed | safecell | [Checkpoint ceiling sweep re-runs on every mutating tool call when it cannot shrink the repo](bugs/062379c5-checkpoint-ceiling-sweep-re-runs-on-every-mutati.md) | owner/perf | 05fc43716 |
 | P1 | fixed | safecell | [Execution and disconnect controls confuse transport success with action success](bugs/1b9af0d7-execution-and-disconnect-controls-confuse-transp.md) | agent/systemic-bugs-0919 | 8eb87b0d3 |
 | P1 | fixed | safecell | [File approval hides the proposed edit and patch payload](bugs/48c51661-file-approval-omits-mutation.md) | report-0110-0908 | 72a8a3043c263cd53ed353daed2042e256c8e236 |
 | P1 | fixed | safecell | [Late permission responses replace newer authority and survive store reinitialization](bugs/dde8e66f-late-permission-responses-replace-newer-authorit.md) | agent/systemic-bugs-0919 | 8eb87b0d3 |
