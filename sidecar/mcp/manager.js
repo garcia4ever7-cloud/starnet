@@ -41,6 +41,10 @@
     // Injected like makeToolDef, and OPTIONAL: a host (or a test) that passes neither simply gets the historic
     // tools-only projection rather than a crash.
     const makeAuxDefs = ('makeAuxDefs' in deps) ? deps.makeAuxDefs : (translateMod && translateMod.connectorAuxDefs);
+    /* TEAM-WIDE DAILY CAP on connector tools that start a billable third-party run (sidecar/hostquota.js).
+       Injected and optional: absent -> no metering, byte-identical to the historic projection. It rides onto
+       every tool def below so the check happens at the ONE place the call actually leaves. */
+    const quota = deps.quota || null;
     const clock = deps.clock || { now: () => 0 };
     /* 30s -> 120s DEFAULT (h1 audit 2026-09-22). A real connector WRITE (create an invoice, send a batch, render a
        report) routinely takes longer than 30s; cutting it off did not stop it — the effect landed anyway while the
@@ -678,7 +682,7 @@
       if (!c || configIssue(c) || (c.state !== 'up' && c.state !== 'cached')) return [];
       const bound = (toolName, args, ctx) => call(c.id, toolName, args, ctx);   // ctx rides through for connector_required + the run's abort signal
       const defTimeoutMs = (c.timeoutMs || timeoutMs) + REGISTRY_SLACK_MS;
-      const defs = (c.tools || []).map(t => makeToolDef({ connectorId: c.id, label: c.label, mcpTool: t, call: bound, localProcess: c.transportKind === 'stdio', timeoutMs: defTimeoutMs }));
+      const defs = (c.tools || []).map(t => makeToolDef({ connectorId: c.id, label: c.label, mcpTool: t, call: bound, localProcess: c.transportKind === 'stdio', timeoutMs: defTimeoutMs, quota: quota }));
       /* The resources/prompts tools are projected ONLY for a server that actually publishes them, so a
          tools-only connector's catalogue is byte-identical to before — nobody pays schema bytes for a
          primitive their server does not serve. They ride the same projection as tools, which is why they

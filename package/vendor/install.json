@@ -1,0 +1,6 @@
+{
+  "install_method": "npm",
+  "package_manager": "npm",
+  "package_name": "@higgsfield/cli",
+  "version": "1.2.2"
+}

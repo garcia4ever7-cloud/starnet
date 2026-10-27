@@ -97,4 +97,46 @@ const ungranted = (extra) => makeConsentBroker(Object.assign({ surface: 'autonom
   A.ok(!b(fsCall, CABINET_WRITE).allow, 'a capability NOT in the custom set stays denied');
 }
 
+// ---- 9. unattended image generation (2026-10-22): image_generate/image_print_prep are allowed for a granted
+//         agent by TOOL NAME even though their shared capability ('studio') is NOT in the default capability
+//         allowlist — and, critically, that must NOT open every 'studio' tool (vector_export/image_stock_fetch
+//         stay denied), proving the two allowlists are independent, not a capability-level backdoor. ----
+{
+  const IMAGE_GENERATE = { name: 'image_generate', capability: 'studio', scope: 'write', requiresConsent: true };
+  const IMAGE_PRINT_PREP = { name: 'image_print_prep', capability: 'studio', scope: 'write', requiresConsent: true };
+  const MOCKUP_COMPOSE = { name: 'mockup_compose', capability: 'studio', scope: 'write', requiresConsent: true };
+  const VECTOR_EXPORT = { name: 'vector_export', capability: 'studio', scope: 'write', requiresConsent: true };
+  const IMAGE_STOCK_FETCH = { name: 'image_stock_fetch', capability: 'studio', scope: 'write', requiresConsent: true };
+  const genCall = { name: 'image_generate', args: { prompt: 'a mountain' } };
+  const prepCall = { name: 'image_print_prep', args: {} };
+  const mockupCall = { name: 'mockup_compose', args: {} };
+  const vecCall = { name: 'vector_export', args: {} };
+  const stockCall = { name: 'image_stock_fetch', args: {} };
+
+  const rg = granted()(genCall, IMAGE_GENERATE);
+  A.ok(rg.allow === true, 'granted agent: autonomous image_generate allowed by its tool-name allowlist');
+  A.ok(/workshop grant/.test(rg.reason), 'reason names the workshop grant');
+  A.ok(granted()(prepCall, IMAGE_PRINT_PREP).allow === true, 'granted agent: autonomous image_print_prep allowed');
+  const rm = granted()(mockupCall, MOCKUP_COMPOSE);
+  A.ok(rm.allow === true, 'granted agent: autonomous mockup_compose allowed (free/no-network, added 2026-10-22)');
+
+  const rv = granted()(vecCall, VECTOR_EXPORT);
+  A.ok(!rv.allow && rv.reason === SILENCE, 'granted agent: vector_export (same capability, NOT named) stays denied — no capability-level backdoor');
+  const rs = granted()(stockCall, IMAGE_STOCK_FETCH);
+  A.ok(!rs.allow && rs.reason === SILENCE, 'granted agent: image_stock_fetch (same capability, NOT named) stays denied');
+
+  // the SAME four invariants as the capability path apply here too
+  A.ok(!ungranted()(genCall, IMAGE_GENERATE).allow, 'ungranted agent: image_generate stays default-denied');
+  const execLikeGen = { name: 'image_generate', capability: 'studio', scope: 'execute', requiresConsent: true };
+  A.ok(!granted()(genCall, execLikeGen).allow, 'the tool-name allowlist is write-only too, like the capability path');
+  const interactiveB = makeConsentBroker({ surface: 'interactive', workshop: () => true });
+  A.ok(!interactiveB(genCall, IMAGE_GENERATE).allow, 'the tool-name grant does nothing on the interactive surface either');
+
+  // overridable, same shape as workshopCaps
+  const custom = makeConsentBroker({ surface: 'autonomous', workshop: () => true, workshopTools: { x_only: true } });
+  const X_ONLY = { name: 'x_only', capability: 'studio', scope: 'write' };
+  A.ok(custom({ name: 'x_only', args: {} }, X_ONLY).allow === true, 'custom workshopTools unlocks the named tool');
+  A.ok(!custom(genCall, IMAGE_GENERATE).allow, 'a custom workshopTools set drops the DEFAULT allowlist (image_generate) — data-driven, not merged silently');
+}
+
 A.report('workshop-permissions.test');

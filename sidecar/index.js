@@ -1932,6 +1932,27 @@ const idempotencyLedger = makeIdempotencyLedger({
 });
 function workshopOf(agentId) { try { return workshopStore.hasGrant(String(agentId || '')); } catch (_) { return false; } }
 
+/* TEAM-WIDE DAILY CAP on outbound web_request calls to named hosts — the owner's "max 8 Apify runs/day
+   including failures", which until now lived only as prose in a skill and so held only while a model chose to
+   obey it. ONE counter file for the whole station (eight across every agent, not eight each). Tunable with
+   HOST_DAILY_LIMITS="apify.com=8,example.com=2"; an unparseable entry is skipped rather than read as "no
+   rail". See sidecar/hostquota.js for why this is a host module and not a (fail-open) hook. */
+const hostQuota = require('./hostquota.js').makeHostQuota({
+  fs: fs, file: path.join(WORKSPACES, '.host-daily-quota.json'), now: () => Date.now(),
+  limits: (() => {
+    const parsed = require('./hostquota.js').parseLimits(ENV('HOST_DAILY_LIMITS'));
+    return Object.keys(parsed).length ? parsed : require('./hostquota.js').DEFAULT_LIMITS;
+  })()
+});
+
+/* THE HOST'S OWN HANDOFF FILES. One file per lead→worker dispatch, written into the LEAD's outbox from the row
+   team.dispatch actually returned — see sidecar/handoff-store.js for why the host writes this and the agent
+   does not. The outbox is the agent's own jail subdirectory, the same place its deliverables already land. */
+const handoffStore = require('./handoff-store.js').makeHandoffStore({
+  fs: fs, path: path, now: () => Date.now(),
+  dir: (leadId) => path.join(WORKSPACES, String(leadId).replace(/[^A-Za-z0-9_-]/g, '') || 'agent', 'outbox')
+});
+
 /* The agent's OWN name for the work it just did (deliverable_note), held between the tool call and the end of the
    run that made it, then drained onto that run's durable row. Deliberately in-memory and bounded: a note is worth
    nothing without the run it describes, so an unclaimed one is garbage — if the process dies mid-run there is no
@@ -4822,6 +4843,10 @@ const connectors = makeConnectorManager({
   // MCP connector calls get their OWN budget (120s), not the 30s fast-tool default: a connector write that is cut
   // off at 30s still lands remotely (h1 audit 2026-09-22). Per-connector timeoutMs still overrides it.
   clock: { now: () => Date.now() }, timeoutMs: MCP_CALL_TIMEOUT_MS,
+  // TEAM-WIDE DAILY CAP on connector tools that start a billable third-party run — the owner's 8 Apify
+  // runs/day. This is the door that actually bills: Apify is reached through the mcp:apify connector, so the
+  // web_request rail alone would have guarded a door nobody uses. Both share one counter (hostquota.js).
+  quota: hostQuota,
   schemaCache: connectorSchemaCacheStore,
   validateConfig: cfg => cfg && cfg.transportKind === 'stdio' ? mcpStdioIsolationError(cfg) : '',
   fingerprintConfig: cfg => mcpSchemaCache.fingerprint(cfg, value => crypto.createHash('sha256').update(value).digest('hex')),
@@ -13507,6 +13532,12 @@ async function handleCronRun(req, res) {
       // Run Now must exercise the REAL unattended posture, grant included — otherwise "test it now" would
       // prove a capability set the scheduled fire does not get (the whole point of this route).
       unattendedGrants: Array.isArray(job.unattendedGrants) ? job.unattendedGrants.slice() : [],
+      /* HOST-MINTED ROUTINE IDENTITY — the scheduled fire has always passed this (cron-driver.js) and Run Now
+         never did, so on this route routine.notepad had no job to select and every host record of the run
+         ("which routine did this?") came out blank. Caught 2026-10-27 by a Run-Now dispatch whose handoff file
+         recorded `cronJobId: ""`. Same two fields, same source (the durable job record, never model text), so
+         "test it now" proves the posture it claims to. */
+      cronJobId: job.id, cronJobName: job.name || '',
       // SOP recipes: Run Now is held to the same host-checked acceptance contract as the scheduled fire.
       postconditions: (job.meta && job.meta.postconditions != null) ? job.meta.postconditions : undefined,
       preloadSkills: Array.isArray(job.skills) ? job.skills.slice() : [], requiredPreloads: true, cronScript: job.script || null,
@@ -16137,7 +16168,7 @@ async function handleRun(req, res) {
   let body;
   try { body = JSON.parse(await readBody(req, 2 << 20, res)); }
   catch (e) { if (res.headersSent) return; res.writeHead(400); return res.end('bad json'); }   // over-limit already answered 413
-  const { model, system, messages = [], agentId = 'agent', isTask = false, provider, fallbackModels, fallbackProviders } = body || {};
+  const { model, system, messages = [], agentId = 'agent', isTask = true, provider, fallbackModels, fallbackProviders } = body || {};
   const recurring = !!(body && body.recurring);   // the browser's mint detector saw this task SHAPE before → salience boost for reflection
   // REASON-ONLY SELF-TALK (retitle / goal-judge / pitch / autopilot): the caller composed a complete strict-format
   // prompt and parses the raw reply. runOnce keeps that system prompt VERBATIM (no manual/capability/skill/memory
@@ -16202,6 +16233,13 @@ async function handleRun(req, res) {
   // SKILL availability (a class's recipes need the station to have the gear, not the agent's desk-room) — the TOOL
   // projection stays gated by extraObjects/`placed` (room-scoped). Absent (older client / headless) -> undefined,
   // and the compose site falls back to the room's placedTypes exactly as before.
+  if (process.env.STARNET_TOOLWIRE_DEBUG) {
+    process.stderr.write('[toolwire] handleRun agentId=' + agentId
+      + ' surface=' + String((body && body.surface) || '')
+      + ' bodyPlaced=' + (body && Array.isArray(body.placed) ? body.placed.length : 'absent')
+      + ' extraObjects=' + extraObjects.length
+      + ' [' + extraObjects.map(o => o.objectType).join(',') + ']\n');
+  }
   const stationObjects = (body && Array.isArray(body.stationPlaced)) ? placedTypesFrom(body.stationPlaced) : null;
   const usingCodex = providerUsesCodex(runProvider);   // Codex authenticates by OAuth token, not an API key
   // Desktop build: the key lives in runtimeKey (from the keychain, seeded via env at spawn and updatable
@@ -16966,7 +17004,11 @@ async function runOnceCore(o) {
     jinaKey: (() => {
       try { const r = serviceKeysMod.resolveForRequest(serviceKeys, 'JINA_API_KEY', accessSurface); return r.ok ? r.value : ''; }
       catch (_) { return ''; }
-    })()
+    })(),
+    // TEAM-WIDE DAILY HOST CAP: one counter file for the whole station, so eight Apify requests is eight
+    // across every agent and every surface — not eight each. Counted before the request leaves, failures
+    // included, and fail-closed if the file cannot be read or written (sidecar/hostquota.js).
+    hostQuota: hostQuota
   }).register(registry);
   // INTEGRATION SELF-KNOWLEDGE: the same `dish` grant as web_request. Every dep is the LIVE object the panels
   // read (manager + KEYS list + both catalogs), so the readout can never drift from what ABILITIES shows. The
@@ -17201,6 +17243,10 @@ async function runOnceCore(o) {
     // prompt states what will actually happen. A thunk read off the live roster: computed at dispatch time, and
     // deliberately NOT reusing `agentFullAccess` (declared further down) so this stays order-independent.
     approvalPosture: () => (!hostPowerWithheldFor(o) && (FULL_ACCESS || ((agentRoster.get(agentId) || {}).approvalMode === 'full'))) ? 'full' : 'ask',
+    // The HOST writes the lead→worker handoff as a file in the lead's outbox, for every outcome including
+    // failures. An unattended chain is otherwise invisible: the worker's text comes back as a tool result
+    // inside the lead's messages and dies with the run, and an ASK-mode worker cannot fs.write it itself.
+    recordHandoff: (h) => handoffStore.record(h),
     perWorker: ORCH_PER_WORKER, workerMaxIters: ORCH_WORKER_MAX_ITERS, newId: () => crypto.randomUUID(),
     dispatchTimeoutMs: ORCH_DISPATCH_TIMEOUT_MS,   // minutes, not the 30s fast-tool cap (see constant)
     // Saved session metadata is available headlessly; visual delivery still uses
@@ -17517,6 +17563,20 @@ async function runOnceCore(o) {
   if (ownerTrusted || unattendedGrants.indexOf('workbench') >= 0) station = stationWithObject(station, agentId, 'workbench');
   if (ownerTrusted || unattendedGrants.indexOf('connectors') >= 0) station = stationWithConnectors(station, agentId, connectors.ids());
   if (ownerTrusted) station = stationWithObject(station, agentId, 'orchestrator');
+  /* UNATTENDED DELEGATION GRANT (2026-10-27) — the OBJECT half of letting a SCHEDULED lead delegate. Until now
+     `lead` was true only for a browser-commanded run (capability/office.js), so the Etsy pipeline's
+     SCOUT → NIGHT4CHRIST → DESIGNER → … chain could only ever advance while a tab was open; no cron or headless
+     path could call team.dispatch at all. A routine the Commander ticked 'orchestrator' on now resolves the
+     orchestrator object in whichever room its run uses — the explicit-station (bay) path included, which is
+     exactly the case extraObjects alone would silently no-op for.
+
+     THE DEPTH FENCE lives on this line: `!o.parentRunId`. A delegated worker is started by orchestration.js
+     with no `lead` and no unattendedGrants, so it could not reach this anyway — but stating the invariant where
+     the grant is made means a future caller that forwards grants to its children cannot accidentally mint a
+     recursive worker tree. Max delegation depth is therefore 1, structurally, not by a counter: a worker never
+     holds team.dispatch, so it cannot delegate onward and cannot form a cycle. Self-dispatch is refused
+     separately inside the tool ('cannot delegate to yourself'). */
+  if (unattendedGrants.indexOf('orchestrator') >= 0 && !o.parentRunId) station = stationWithObject(station, agentId, 'orchestrator');
   // FULL POWER is capability authority, not merely a prompt preference. Materialize every execution object
   // family and every configured connector; unavailable external services still report their real prerequisite.
   // Keep the pre-existing LEAD-ONLY orchestration invariant: a delegated worker gets the whole computer but not
@@ -17629,6 +17689,10 @@ async function runOnceCore(o) {
   }
   // Harness controls never grant reach into the world. They exist only while an attended Task Brief is active.
   for (const name of internalBriefTools) if (resolved.tools.indexOf(name) < 0) resolved.tools.push(name);
+  if (process.env.STARNET_TOOLWIRE_DEBUG) {
+    process.stderr.write('[toolwire] resolved.tools=' + (resolved.tools||[]).length
+      + ' first=' + (resolved.tools||[]).slice(0,6).join(',') + '\n');
+  }
   /* TOOL FOOTPRINT (w2, 2026-09-22) — two more ADVERTISING decisions on the rail CAP_REGISTRY's `deferred: true`
      already rides. Neither touches `resolved.tools` (the grant every gate consults): a deferred tool stays granted,
      dispatchable and findable through tool.search, and the loop reveals it by WIRE name on the next turn.
@@ -17745,6 +17809,12 @@ async function runOnceCore(o) {
     // UNATTENDED CONNECTOR GRANT: same host-side source as the authority gate, so an offered MCP tool can
     // never be refused by consent (the incoherent state the terminal lane hit before this was wired).
     connectorGrant: (call, tool) => !execution.taintedBy() && (ownerTrusted || unattendedGrants.indexOf('connectors') >= 0),
+    // UNATTENDED DELEGATION GRANT: the CONSENT half, read off the SAME host-side value as the object grant
+    // above, so an offered team.dispatch can never be refused by consent (the incoherent state the terminal
+    // lane hit before this was wired). The taint check matters most here: a lead that just read a hostile page
+    // must not be able to launder that page into a fresh worker's directive. permissions.js narrows this again
+    // by exact tool name — routine.create / loop.* / team.configure / team.summon stay human-gated.
+    dispatchGrant: (call, tool) => !execution.taintedBy() && (ownerTrusted || unattendedGrants.indexOf('orchestrator') >= 0),
     surface: surface, prompt: prompt
   });
   // B1 (Cortex seam): thread runId onto capCtx so a tool's dispatch can stamp provenance (sourceRunId)

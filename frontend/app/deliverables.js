@@ -108,12 +108,12 @@
       const href = (f.preview === 'image' || f.preview === 'video') ? previewHref(f) : fileHref(f);
       if (f.preview === 'video') {
         // Video preview: inline HTML5 player, no fetch needed — the video src handles streaming
-        host.innerHTML = '<div class="deliverable-video-player">' +
-          '<video controls width="100%" style="max-width:600px;max-height:400px;background:#000">' +
+        host.innerHTML = '<div class="deliverable-video-player" style="width:100%;display:flex;flex-direction:column">' +
+          '<video controls style="width:100%;height:auto;display:block;object-fit:contain;background:#000;max-width:100%;margin:0;padding:0">' +
           '<source src="' + esc(previewHref(f)) + '" type="video/mp4">' +
           'Your browser does not support the video tag.' +
           '</video>' +
-          '<p class="dlv-preview-note">' + esc(f.path) + ' · ' + fmtSize(f.bytes) + ' · ' +
+          '<p class="dlv-preview-note" style="margin-top:8px;font-size:0.9em;word-break:break-all">' + esc(f.path) + ' · ' + fmtSize(f.bytes) + ' · ' +
           '<a href="' + esc(fileHref(f)) + '" target="_blank" rel="noopener" download>download</a></p>' +
           '</div>';
       } else {

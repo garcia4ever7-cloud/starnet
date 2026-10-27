@@ -683,6 +683,11 @@ body.no-curve #stage-wrap::before { background: none; box-shadow: none; }
 .deliverable-video { display: block; max-width: 340px; max-height: 240px; width: 100%; border: 1px solid var(--gold); border-radius: 5px; background: #000; }
 .deliverable-audio { display: block; max-width: 340px; width: 100%; margin-top: 2px; }
 .media-fallback { display: inline-block; margin-top: 5px; }
+/* Deliverable panel video player — HTML5 <video> for Christian Story Studio + workshop outputs */
+.deliverable-video-player { display: flex; flex-direction: column; gap: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: var(--r-sm); width: 100%; }
+.deliverable-video-player video { display: block; width: 100%; height: auto; object-fit: contain; background: #000; border-radius: 4px; margin: 0; padding: 0; }
+.deliverable-video-player video::-webkit-media-controls-panel { background-color: rgba(0,0,0,0.7); }
+.deliverable-video-player .dlv-preview-note { margin: 0; font-size: 12px; color: var(--ph-dim); word-break: break-all; }
 /* a clickable URL the agent typed in its prose — match the gold deliverable-link affordance */
 .cmsg.agent .body a { color: var(--gold); text-decoration: underline; }
 .cmsg.agent .body a:hover { color: var(--ph-bright); }

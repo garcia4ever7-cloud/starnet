@@ -35,6 +35,18 @@
   const METERS_PER_INCH = 0.0254;
   const PIXELS_PER_METER = Math.round(PPI / METERS_PER_INCH);   // 11811 — the standard "300 DPI" pHYs value
 
+  // ETSY FILE-SIZE LAW (2026-10-22): Etsy rejects any digital-download file over 20 MB. A full-bleed
+  // 300-PPI PNG at these pixel counts routinely lands 20-35 MB (confirmed live, 5 real KJV print kits) —
+  // every print file now ships as JPEG instead, which the same real kits showed lands 3-6 MB at these
+  // same dimensions, comfortably under the cap. 19.5 MB (not 20) is the target so a few KB of JPEG/EXIF
+  // overhead can never tip a file over Etsy's real line. Quality only ever steps DOWN from a high floor
+  // (92) — never shrinks pixel dimensions to hit the budget, matching print-prep's existing "upscale
+  // honesty" contract: the shipped WxH is always exactly what was promised.
+  const MAX_PRINT_BYTES = Math.floor(19.5 * 1024 * 1024);
+  const JPEG_QUALITY_START = 95;
+  const JPEG_QUALITY_FLOOR = 90;
+  const JPEG_QUALITY_STEP = 2;
+
   // inches -> exact pixel dims at 300 PPI. Fixed presets, not computed per-call, so the shipped
   // numbers always match the brief exactly (2400x3000 / 3300x4200 / 4800x6000) regardless of any
   // future rounding-rule change elsewhere.
@@ -107,6 +119,29 @@
 
   function pixelsPerMeterToPpi(ppm) { return Math.round(ppm * METERS_PER_INCH); }
 
+  // JPEG's equivalent of the PNG pHYs chunk: the JFIF APP0 segment's density fields. @napi-rs/canvas's
+  // 'jpeg' encoder always emits a bare JFIF APP0 as the FIRST segment (no thumbnail) at this exact fixed
+  // byte layout — verified against this build's actual output, same "prove it, don't assume it" contract
+  // the PNG path already follows. Throws rather than silently skipping if that layout ever changes
+  // upstream, exactly like injectPhys refuses to guess at a PNG that isn't shaped as expected.
+  function injectJfifDpi(jpegBuffer, dpi) {
+    if (jpegBuffer[0] !== 0xFF || jpegBuffer[1] !== 0xD8) throw new Error('not a JPEG (no SOI marker)');
+    if (jpegBuffer[2] !== 0xFF || jpegBuffer[3] !== 0xE0) throw new Error('not a bare JFIF APP0 as the first segment');
+    if (jpegBuffer.toString('ascii', 6, 10) !== 'JFIF' || jpegBuffer[10] !== 0) throw new Error('APP0 segment is not JFIF');
+    const out = Buffer.from(jpegBuffer);   // copy — never mutate the caller's buffer
+    out.writeUInt8(1, 13);                 // units = 1 (dots per inch)
+    out.writeUInt16BE(dpi, 14);
+    out.writeUInt16BE(dpi, 16);
+    return out;
+  }
+  // Read back the JFIF density fields for verification (own output, or anyone else's JPEG). null if the
+  // file isn't a bare-JFIF-first-segment JPEG (e.g. one that carries EXIF/APP1 first instead).
+  function readJfifDpi(jpegBuffer) {
+    if (jpegBuffer[0] !== 0xFF || jpegBuffer[1] !== 0xD8 || jpegBuffer[2] !== 0xFF || jpegBuffer[3] !== 0xE0) return null;
+    if (jpegBuffer.toString('ascii', 6, 10) !== 'JFIF' || jpegBuffer[10] !== 0) return null;
+    return { unit: jpegBuffer.readUInt8(13), x: jpegBuffer.readUInt16BE(14), y: jpegBuffer.readUInt16BE(16) };
+  }
+
   function makePrintPrepTools(deps) {
     deps = deps || {};
     const fsp = deps.fsp, P = deps.pathMod, ROOT = deps.root;
@@ -173,9 +208,17 @@
         cctx.drawImage(image, dx, dy, dw, dh);
         padded = true;
       }
-      let pngBuf = await canvas.encode('png');
-      pngBuf = injectPhys(pngBuf, PIXELS_PER_METER);
-      return { pngBuf, padded, padColor, upscaleX: preset.w / srcW, upscaleY: preset.h / srcH, ratioDelta };
+      // Quality only ever steps DOWN to fit the budget — pixel dimensions never shrink (see
+      // MAX_PRINT_BYTES above). Alpha is flattened to white first: JPEG has no alpha channel, and
+      // letting the encoder silently drop it would risk a black background on some decoders.
+      if (padded) { cctx.globalCompositeOperation = 'destination-over'; cctx.fillStyle = '#ffffff'; cctx.fillRect(0, 0, preset.w, preset.h); cctx.globalCompositeOperation = 'source-over'; }
+      let q = JPEG_QUALITY_START, buf = await canvas.encode('jpeg', q);
+      while (buf.length > MAX_PRINT_BYTES && q > JPEG_QUALITY_FLOOR) {
+        q -= JPEG_QUALITY_STEP;
+        buf = await canvas.encode('jpeg', q);
+      }
+      buf = injectJfifDpi(buf, PPI);
+      return { buf, quality: q, underBudget: buf.length <= MAX_PRINT_BYTES, padded, padColor, upscaleX: preset.w / srcW, upscaleY: preset.h / srcH, ratioDelta };
     }
 
     const prepTool = {
@@ -183,11 +226,13 @@
       description: 'Turn an existing OUTBOX/workspace image into genuine 300-PPI print-ready files at real pixel ' +
         'dimensions: 8x10in (2400x3000), 11x14in (3300x4200), 16x20in (4800x6000) by default — pass "sizes" ' +
         '(array of "8x10"/"11x14"/"16x20") to produce a subset. Required "image": a workspace-relative path to an ' +
-        'already-generated PNG (e.g. from image_generate). This is a PIXEL-INTERPOLATION upscale with correct PNG ' +
-        'DPI metadata, not an AI detail-restoration tool — never claim the output has more real detail than the ' +
+        'already-generated PNG (e.g. from image_generate). This is a PIXEL-INTERPOLATION upscale with correct DPI ' +
+        'metadata, not an AI detail-restoration tool — never claim the output has more real detail than the ' +
         'source. 11x14 does not share the source\'s aspect ratio: that size is letterboxed onto a canvas padded in ' +
         'the artwork\'s own sampled background color (never stretched, never cropped) — say so plainly when ' +
-        'reporting it. Each output is saved next to the source as "<name>-<size>-300ppi.png".',
+        'reporting it. Each output is saved next to the source as "<name>-<size>-300ppi.jpg" — JPEG, not PNG: ' +
+        'Etsy rejects any digital-download file over 20 MB and a full-bleed 300-PPI PNG at these dimensions ' +
+        'routinely exceeds that; this tool always ships JPEG (quality 90-95, verified under 19.5 MB) instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -218,21 +263,24 @@
         const results = [];
         for (const key of requested) {
           const preset = SIZE_PRESETS[key];
-          const { pngBuf, padded, padColor, upscaleX, upscaleY, ratioDelta } = await renderOneSize(image, srcW, srcH, preset);
+          const { buf, quality, underBudget, padded, padColor, upscaleX, upscaleY, ratioDelta } = await renderOneSize(image, srcW, srcH, preset);
 
-          // Verify our own output before publishing it: re-decode, re-check dimensions and the pHYs
-          // chunk we just wrote. A silent encoder bug must fail the tool, never ship an unverified file.
-          const check = await loadImage(pngBuf);
-          const phys = readPhys(pngBuf);
+          // Verify our own output before publishing it: re-decode, re-check dimensions, re-read the DPI
+          // metadata we just wrote, AND re-check the actual byte size. A silent encoder bug — or a file
+          // that quality-stepping still couldn't bring under budget — must fail the tool, never ship an
+          // unverified or oversized file (the exact mistake that reached Etsy-ready products before this).
+          const check = await loadImage(buf);
+          const dpiCheck = readJfifDpi(buf);
           if (check.width !== preset.w || check.height !== preset.h) throw new Error(key + ': encoded file decoded at ' + check.width + 'x' + check.height + ', expected ' + preset.w + 'x' + preset.h + ' — refusing to publish a mismatched file');
-          if (!phys || phys.x !== PIXELS_PER_METER || phys.y !== PIXELS_PER_METER || phys.unit !== 1) throw new Error(key + ': pHYs metadata missing or wrong after writing — refusing to publish a file without verified 300 PPI metadata');
+          if (!dpiCheck || dpiCheck.x !== PPI || dpiCheck.y !== PPI || dpiCheck.unit !== 1) throw new Error(key + ': JFIF DPI metadata missing or wrong after writing — refusing to publish a file without verified 300 PPI metadata');
+          if (!underBudget) throw new Error(key + ': ' + (buf.length / 1048576).toFixed(1) + ' MB even at quality ' + JPEG_QUALITY_FLOOR + ' (Etsy\'s 20 MB cap) — refusing to publish an oversized file; the source art may need to be simpler or lower-resolution');
 
-          const rel = (dir && dir !== '.' ? dir + '/' : '') + base + '-' + key + '-300ppi.png';
+          const rel = (dir && dir !== '.' ? dir + '/' : '') + base + '-' + key + '-300ppi.jpg';
           const { abs } = await jail.resolveInside(aid, rel);
           await fsp.mkdir(P.dirname(abs), { recursive: true });
           const staging = abs + '.pending-' + process.pid + '-' + (++seq);
           try {
-            await fsp.writeFile(staging, pngBuf, { flag: 'wx' });
+            await fsp.writeFile(staging, buf, { flag: 'wx' });
             require('node:fs').renameSync(staging, abs);
             emitDeliverable(ctx, aid, rel);
           } finally {
@@ -240,8 +288,10 @@
           }
 
           results.push({
-            size: key, path: rel, width: preset.w, height: preset.h, ppi: pixelsPerMeterToPpi(phys.x),
-            padded, padColor, upscaleFactor: Math.max(upscaleX, upscaleY), ratioDelta, bytes: pngBuf.length
+            // JFIF density with unit=1 IS dots-per-inch directly — no conversion needed (unlike the PNG
+            // path's pixels-per-meter, which pixelsPerMeterToPpi existed to convert).
+            size: key, path: rel, width: preset.w, height: preset.h, ppi: dpiCheck.x,
+            quality, padded, padColor, upscaleFactor: Math.max(upscaleX, upscaleY), ratioDelta, bytes: buf.length
           });
         }
 
@@ -249,13 +299,18 @@
           r.size + ' -> ' + r.path + ' (' + r.width + 'x' + r.height + 'px, verified ' + r.ppi + ' PPI, ' +
           (r.upscaleFactor).toFixed(2) + 'x interpolated upscale' + (r.padded
             ? ', letterboxed to fit — source aspect does not match this size (Δratio ' + (r.ratioDelta * 100).toFixed(1) + '%), padded in the artwork\'s own background color, nothing cropped or stretched'
-            : ', full-bleed — ratio matches the source to within ' + (r.ratioDelta * 100).toFixed(2) + '% (no visible distortion)') + ')'
+            : ', full-bleed — ratio matches the source to within ' + (r.ratioDelta * 100).toFixed(2) + '% (no visible distortion)') +
+          ', ' + (r.bytes / 1048576).toFixed(1) + ' MB JPEG q' + r.quality + ' (Etsy limit 20 MB)' + ')'
         );
         return {
           content: 'Print-prep from ' + src + ' (source ' + srcW + 'x' + srcH + 'px). This is a pixel-interpolation ' +
             'upscale (Skia high-quality resampling) — it does NOT restore or add real detail beyond the source\'s ' +
-            'actual resolution; inspect the output yourself before calling it print-ready.\n' + lines.join('\n'),
-          summary: 'print-prep -> ' + results.length + ' size(s): ' + results.map(r => r.size).join(', ')
+            'actual resolution; inspect the output yourself before calling it print-ready. Every file below is ' +
+            'JPEG, verified under 19.5 MB (Etsy rejects anything over 20 MB).\n' + lines.join('\n'),
+          summary: 'print-prep -> ' + results.length + ' size(s): ' + results.map(r => r.size).join(', '),
+          // Lets sidecar/artifacts.js's observe() record these into run.artifacts (its tool-name allowlist has no
+          // entry for image_print_prep) so the Deliverables panel's file list is never empty for real output.
+          producedFiles: results.map(r => ({ path: r.path, bytes: r.bytes }))
         };
       }
     };
@@ -263,7 +318,7 @@
     return {
       prepTool,
       register(reg) { reg.register(prepTool); return reg; },
-      _internals: { crc32, pngChunk, injectPhys, readPhys, pixelsPerMeterToPpi, PIXELS_PER_METER, PPI, SIZE_PRESETS, ASPECT_MATCH_TOLERANCE }
+      _internals: { crc32, pngChunk, injectPhys, readPhys, injectJfifDpi, readJfifDpi, pixelsPerMeterToPpi, PIXELS_PER_METER, PPI, SIZE_PRESETS, ASPECT_MATCH_TOLERANCE, MAX_PRINT_BYTES, JPEG_QUALITY_START, JPEG_QUALITY_FLOOR }
     };
   }
 

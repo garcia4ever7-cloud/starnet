@@ -1635,3 +1635,316 @@ nothing, which is exactly the failure class §13 exists to prevent.
 
 Revert with `node scripts/station-models.mjs restore before-free-omni` until a free model is
 found that emits real tool calls under the full agent prompt.
+
+## 15. 2026-10-27 — THE root cause: no headless agent has ever been given tools
+
+One wrong property access made every unattended agent useless while looking perfectly healthy.
+
+```js
+// sidecar/capability/saved-placement.js
+function savedPlacement(save, agentId) {
+  if (!save || !save.station) return [];   // <-- ALWAYS true
+```
+
+`saveStore.load()` returns the **envelope** `{version, agentId, updatedAt, doc:{…, station}}`.
+The station hangs off `.doc`. `save.station` is never present, so the guard short-circuited on
+**every** call and returned `[]`.
+
+`handleRun` uses that result as the agent's capability objects whenever the caller sends no
+`body.placed` — i.e. on **every headless path**: cron, the studio pipeline, `POST /api/run`.
+Zero objects -> zero toolsets -> `req.tools = 0` -> the provider is asked for a completion with
+no tools at all.
+
+**Measured, not inferred.** A diagnostic in both adapters printed
+`[toolwire] anthropic req.tools=0 -> body.tools=0`. The adapters were innocent all along:
+`anthropic.js` does `if (tools) body.tools = tools` correctly.
+
+### Why this looked like something else for two days
+
+With no tools, a model that is *told about* tools in its system prompt improvises the syntax
+as prose and the run ends `done`:
+
+```
+<invoke name="web_search"><parameter name="query">…</parameter></invoke>   (claude-sonnet-5-5)
+<scout.station_inspect />                                                 (nemotron-3.5-super-vl)
+<call tool="station_inspect" arguments="{}" />                            (gemini-3-flash-preview)
+```
+
+Identical on free AND paid, OmniRoute AND direct — because the cause was upstream of all of
+them. **Two earlier conclusions in this file were therefore wrong and are retracted:**
+§14a "free models cannot tool-call" and the 2026-10-27 note blaming the anthropic adapter.
+Both were the same bug wearing different clothes.
+
+It also explains the studio pipeline: PRODUCER could never have called `video.kling` — not
+because of the consent gate, but because it was handed no tools to call.
+
+### The fix
+
+Accept both shapes, envelope first. After it, every agent resolves real gear:
+
+```
+agent        -> cabinet, notebook, dish, workbench, studio
+scout        -> notebook, dish, cabinet          (room r1201, via its bay — it has no desk)
+webdesigner  -> cabinet, notebook, dish, workbench, studio
+publisher    -> cabinet, notebook, dish, workbench, studio
+harvest      -> cabinet, notebook, dish, workbench, studio
+```
+
+Guarded by `test/headless-tools-granted.test.js` (9 assertions, in `test/fast.list`). Verified
+to FAIL against the old code — 0/9 live agents granted — and pass after. The fixture is built
+from the REAL station doc because `validateStationDoc()` is strict and a hand-made station
+would have tested the fixture rather than the fix.
+
+### The standing lesson
+
+**A run ending `done` with a non-zero cost is not evidence that any work happened.** Check
+`agent.tool_call` / `agent.tool_result` events. That is the only signal that separates an agent
+doing its job from an agent narrating it — and it is the same failure family as the fabricated
+video in §13.
+
+## 16. 2026-10-27 — headless DELEGATION: a cron lead can now hand work to its crew
+
+Verified live, not inferred. `POST /api/cron/run` on a routine carrying the new `orchestrator`
+grant: NIGHT4CHRIST emitted a real `agent.tool_call team_dispatch`, SCOUT's own agent loop
+started and finished `done`, the tool result read `dispatched 1 worker(s), 1 done`, and the host
+filed the exchange as a file. Lead cost **$0.0066** (openrouter `anthropic/claude-haiku-5.5`);
+worker $0 (omniroute free). Routine id `ec4436a4-e1a0-432a-be75-3606b843ad51`, **disabled** —
+it fires only via Run Now until the owner arms it.
+
+### Two gates closed on every headless lead, not one
+
+Fixing either alone leaves the chain dead, which is why both are fed from the SAME per-routine
+record (an offered tool that consent then refuses is an incoherent state this repo has hit before):
+
+| gate | where | why it closed |
+|---|---|---|
+| capability | `sidecar/capability/office.js:40` | the `orchestrator` object is added only when `lead` is true, and `lead` is true only for a browser-commanded `/api/run`. No object -> `resolveTools` never emits `team.dispatch`, so the model is never told delegation exists. |
+| consent | `sidecar/permissions.js` tier 2.5 | `team.dispatch` is scope `'execute'`, so the autonomous **exec lockout** refused it with "silence is not consent" even when the tool WAS present. |
+
+The impact gate was never the problem: `orchestrator` has been in `SAFE_BUILTIN_CAPS` (impact
+`none`) all along — delegation spawns no host process and reaches no third party, it starts
+another StarNet agent loop.
+
+### What changed
+
+- `sidecar/inputpolicy.js` — `GRANTABLE_UNATTENDED` += `'orchestrator'`.
+- `sidecar/cron-store.js` — `GRANTABLE` += `'orchestrator'` (storage; the policy re-filters at the gate).
+- `sidecar/index.js` — grants the orchestrator object when the routine carries it **and**
+  `!o.parentRunId`; wires `dispatchGrant` into the consent broker (taint-checked, so a lead that
+  just read a hostile page cannot launder it into a worker directive).
+- `sidecar/permissions.js` — tier **2.45** `dispatchAutonomy`, above the exec lockout, below the
+  hardline floor. Narrowed by exact TOOL NAME: `team.dispatch/subagents/steer/interrupt/resume`
+  only. `routine.create`, `routine.manage`, `loop.*`, `team.configure`, `task.manage`,
+  `team.summon`, `team.spawn` stay human-gated — a capability-level yes would have handed over
+  all of it at once.
+- `sidecar/index.js` (Run Now) — now passes `cronJobId` / `cronJobName` like the scheduled fire
+  always did. Caught by the first handoff file recording `cronJobId: ""`; it also means
+  `routine.notepad` had no job to select on Run Now.
+
+### Max depth is 1, structurally — not by a counter
+
+A worker is started by `orchestration.js` with no `lead` and no `unattendedGrants`, so it resolves
+no orchestrator object and holds no `team.dispatch`. It cannot delegate onward and cannot form a
+cycle. The `!o.parentRunId` fence in `index.js` states the invariant where the grant is made, so a
+future caller that forwards grants to its children cannot mint a recursive tree. Self-dispatch is
+refused inside the tool ("cannot delegate to yourself"); an unknown agentId is refused, never guessed.
+
+### Handoffs are files, and the HOST writes them
+
+`sidecar/handoff-store.js` → `workspaces/<leadId>/outbox/<utc-stamp>-<lead>-to-<worker>.md`, one per
+dispatched worker, wrapped around every `runWorker` outcome. Markdown with a parseable
+`<!-- starnet-handoff {…} -->` JSON block: from, to, reason, `complete` (true only for `done`), real
+usd, lead/worker runIds, cronJobId, artifact paths, then TASK SENT / CONTEXT SENT / RESULT RETURNED.
+
+Two reasons it is not the agent's job:
+1. An agent asked to persist its own state **does not** — that is exactly what produced the studio
+   pipeline's four phantom 300s timeouts (§13). A model-written handoff is a claim; this is evidence.
+2. An ASK-mode worker **cannot** `fs.write` on an unattended run at all — `cabinet:write`
+   default-denies without a workshop grant. SCOUT and PUBLISHER are both ASK.
+
+A failed handoff is written exactly like a successful one and says `NOT a completed subtask` in
+prose. A missing file for a worker that ran would be the lie.
+
+### 16a. The Apify cap was guarding a door nobody uses
+
+The owner's "max 8 Apify runs/day, including failures" had **zero enforcement**: `budgetcaps.js`
+counts model spend in USD and cannot see a third-party call, so the cap lived only as prose in a
+skill — i.e. only while a model chose to obey it.
+
+The first version of this rail metered `web_request`. `GET /api/connectors` says that is the wrong
+door: Apify is reached through the **`mcp:apify` connector** (`good-apis--etsy-search-scraper`,
+`good-apis--etsy-shop-scraper`). `sidecar/hostquota.js` now meters BOTH and they share ONE daily
+counter (`workspaces/.host-daily-quota.json`), so eight is eight however the run reaches Apify.
+
+- counted BEFORE the call leaves, never decremented — a 400 costs one, because the station cannot
+  know whether a failed call already started a billable actor;
+- read-only Apify tools (`get-dataset-items`, `get-actor-run`, `fetch-actor-details`,
+  `abort-actor-run`, `get-key-value-store-record`) are **not** metered: blocking those would strand
+  work already paid for;
+- **fails closed.** Deliberately NOT a `sidecar/hooks.js` hook — that spine is documented fail-open
+  ("a handler that throws is skipped and logged, never fatal"), which is right for a formatter and
+  wrong for a money rail;
+- tunable: `STARNET_HOST_DAILY_LIMITS="apify.com=8"`; an unparseable entry is skipped rather than
+  read as "no rail".
+
+### 16b. Tool gap measured, not guessed — and it was ONE family, plus three stripped tools
+
+Measured against the live `agent.save.json` + roster by replaying the real projection
+(`composeOffice(surface:'autonomous', lead:false)` + `savedPlacement` + profile objects ->
+`resolveTools` -> `enforceRunAuthority`). Headless agents were NOT short of station objects — the
+autonomous office already hands out computer/dish/cabinet/notebook/studio/jukebox, and
+`trusted-project` adds the workbench:
+
+| agent | mode | tools, no grant | with `orchestrator` |
+|---|---|---|---|
+| NIGHT4CHRIST | full | 108 | 131 + dispatch |
+| DESIGNER | full | 108 | 131 + dispatch |
+| HARVEST | full | 108 | 131 + dispatch |
+| SCOUT | ask | 86 | 109 + dispatch |
+| PUBLISHER | ask | 86 | 109 + dispatch |
+
+The real gaps:
+
+1. **`orchestrator` — missing for everyone.** Fixed above, per routine.
+2. **`deliverable_note`, `todo`, `routine.notepad` — silently stripped from every ASK-mode
+   unattended run.** All three are `requiresConsent:false`, `network:false`, host-local
+   bookkeeping, but their capIds (`deliverable`, `taskplan`, `routinescratch`) were missing from
+   `SAFE_BUILTIN_CAPS`, so they fell through to `EXTERNAL_UNKNOWN` and `enforceRunAuthority`
+   removed them **before the model saw them**. SCOUT could not name a deliverable or keep a task
+   list on any cron fire. Exactly the failure already recorded in that file's own comments for
+   `taskbrief` and `toolsearch`: an unclassified local tool reads from outside as merely "not
+   found". Fixed by classifying the three caps.
+3. **Airtable + Apify for the two ASK agents — NOT fixed by code, and should not be.** All five
+   Etsy agents' identity docs name both; both are MCP connector tools (`EXTERNAL_UNKNOWN`). Full
+   Access agents get them; an ASK agent's own routine needs the existing `connectors` tick. The one
+   path that already works without a new grant is **delegation**: a worker reaches the lead's
+   connector authority through `connectorAuthority` (`connectorDelegated`), so SCOUT dispatched by
+   NIGHT4CHRIST has Apify/Airtable reach that SCOUT firing its own routine does not.
+   `channel.send` / `spotify_*` / `shell.exec` stay refused to ASK-mode unattended runs — the
+   widening in (2) is narrow on purpose, and `shell.exec` was given to nobody new.
+
+### 16c. SCOUT's current model returns number-stripped text
+
+Live finding from the dispatch above, worth knowing before trusting any SCOUT output. SCOUT runs
+`cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast` via omniroute. Asked for a price point it returned:
+
+```
+$ is a common price point for a -page Christian scripture printable bundle on Etsy.
+```
+
+The dollar figure and the page count are **gone**. The harness carried it verbatim (the lead saw
+the same string the handoff file holds) and the lead correctly reported it as unusable rather than
+inventing a number — so this is not a wiring fault. But **SCOUT's assigned model is unfit for
+research**, which is the one thing SCOUT exists to do. Same family as §14a: a model that passes a
+smoke test and then fails the real job. A direct bare `POST /api/run` to the same model 400s from
+omniroute, so the dispatch path is currently the only one that reaches it at all.
+
+### 16d. Regression coverage
+
+`test/headless-dispatch.test.js` (in `test/fast.list`) — 102 assertions over the real modules:
+both gates, the name fence on all 8 human-gated orchestrator tools, interactive-surface
+unchanged, the handoff file (success, timeout, path-escape, unwritable outbox), an end-to-end
+cron dispatch with a stubbed `runOnce`, the depth/self-dispatch/unknown-target fences, both Apify
+doors sharing one counter, read-only Apify tools unmetered, fail-closed on a corrupt counter, and
+the three bookkeeping tools surviving an ASK-mode autonomous run.
+
+`test/tool-withheld-message.test.js` pinned the literal `['workbench', 'connectors']`, so a
+deliberately-modelled third family read as a regression. It now asserts the *property* — the set
+is closed and its membership is exactly the three the host models — plus the matching consent tier
+and its name fence, so an UNmodelled name still fails loudly.
+
+## 17. 2026-10-27 — "StarNet isn't running" / "NIGHT4CHRIST is none" — the station was fine, the UI was lying
+
+Owner reported the station down and NIGHT4CHRIST showing no model. **Nothing was down.** Measured first,
+before changing anything:
+
+| check | result |
+|---|---|
+| sidecar process | pid alive, parented by `start-starnet.sh` (its crash-restart supervisor) |
+| `GET /api/health` | `200`, body `ok` |
+| `GET /` | serves the real UI shell |
+| MCP connectors | exa / apify / airtable all `up` |
+| `.spend-pending/` | empty — ledger not fail-closed |
+| log history | 18 boots, **every** shutdown a clean `SIGTERM`. No OOM, no `EADDRINUSE`, no degraded mode |
+| NIGHT4CHRIST, live run on its own roster model | `reason=done`, replied `ALIVE`, **$0.098** |
+
+So the engine ran the very agent the UI claimed had no model. That is the truthful-telemetry law inverted:
+the interface asserted state the harness disproved.
+
+### Root cause: the sidecar's keys are invisible to the page, and the page decides what a model is
+
+`frontend/app/harness.js` `configured(p)`, browser branch, was:
+
+```js
+: (DEVMODE || !providerNeedsKey(p) || !!getKey(p))
+```
+
+`getKey(p)` is the key **pasted into the page** (localStorage). The documented way to key an UNATTENDED
+station is `~/.config/starnet/env` — which the renderer never sees, and by project law never should. So a
+provider keyed only there read as NOT configured in every browser build. Then
+`frontend/app/modeldock.js:286`:
+
+```js
+if (!providerEnabled(p)) return disconnected();   // providerEnabled -> Harness.configured
+```
+
+…gates the entire catalog fetch on it, so the agent's model id resolved against an empty catalog and
+rendered **blank**. DESIGNER and SCOUT displayed fine only because their openrouter/omniroute keys had
+*also* been pasted into the UI at some point; the Anthropic key had only ever gone into the env file.
+
+`init()` did probe the sidecar for credential presence — but only for codex/grok/kimi, and only *after*
+`if (!DESKTOP) return;`, so a browser build learned it for nobody.
+
+### Fix
+
+`GET /api/providers` already answered `{id:'anthropic', configured:true}` — presence as a **boolean**, never
+the key. The page just never asked. Now `init()` asks (before the desktop early-return, fail-open,
+never-downgrade) and the browser branch of `configured()` honours `_configuredByProvider`. No secret enters
+the renderer, so the "secrets stay in the sidecar" law holds.
+
+**Verified by executing the real module**, not by reading it: `harness-internal.test.js` claims harness.js
+is "not node-loadable", but it loads fine in a `vm` context with a stub window/fetch/localStorage.
+`test/provider-configured-from-sidecar.test.js` (16 assertions, in `test/fast.list`) runs the actual
+`configured()` across the actual `init()`:
+
+```
+before init  configured(anthropic) = false     <- the reported bug
+after  init  configured(anthropic) = true      <- fixed
+after  init  configured(groq)      = false     <- sidecar has no groq key; no over-granting
+route dead   configured(anthropic) = false     <- fail-open, no throw
+```
+
+`/app/*.js` is served `Cache-Control: no-store`, so a plain page reload picks this up — no sidecar restart,
+no hard refresh. **This also un-blanked STORYWRITER, DIRECTOR, PRODUCER and QC_EDITOR** (all `anthropic`),
+and would have hit `openai`/`gemini` the same way.
+
+### 17a. The real reason it keeps "not running": nothing restarts it after a reboot
+
+`start-starnet.sh` restarts the sidecar when it CRASHES, but there was no `~/.termux/boot/`, so a phone
+reboot or swiping Termux out of recents left the station down and every routine silently stopped firing.
+
+- Added `~/.termux/boot/10-starnet.sh` — takes a wake lock and execs the launcher. **Inert until the
+  Termux:Boot app is installed**: only `com.termux` is present on this device (`pm list packages`), not
+  `com.termux.boot`. Needs a one-time owner install; the file is already in place for when it is.
+- Added `~/starnet-up.sh` — `bash ~/starnet-up.sh` reports UP/DOWN and starts it if down;
+  `--watch` keeps checking every 60s. It **refuses to start** while `.spend-pending/*.json` exists, because
+  booting on top of an orphaned receipt is exactly what makes the ledger fail closed (§13h) and leaves a
+  healthy-looking station that runs no agents. Tested against the live station: reported
+  `UP http://127.0.0.1:8787 (pid …)` and started nothing.
+
+### 17b. CORRECTED: the direct Anthropic account IS funded
+
+`CLAUDE.md` said "the direct Anthropic account has no balance". Probed today with a real 1-token call to
+`claude-haiku-5-5`: HTTP 200, `stop_reason: max_tokens`, usage recorded. A full NIGHT4CHRIST run on
+`claude-sonnet-5-5` also completed. The stale line is corrected in place.
+
+**But mind the price:** that one-word NIGHT4CHRIST run cost **$0.098** — the station's system prompt plus
+memory recall dominates the input, not the reply. A chatty Commander on sonnet-5-5 is not cheap; OpenRouter
+was $5.93 of $35 remaining on 2026-10-27.
+
+### The standing lesson
+
+**"It's not running" is a symptom, not a diagnosis.** Four separate things were true at once here: the
+server was healthy, the UI was lying, the boot gap was real, and a documented money fact was stale. Checking
+`/api/health` and one live agent run *first* cost nothing and stopped three wrong fixes — restarting a
+healthy sidecar, re-pasting a key that should never be in the renderer, and switching a model that worked.

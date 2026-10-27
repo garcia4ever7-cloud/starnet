@@ -70,7 +70,11 @@
      (GRANTABLE_UNATTENDED) and re-filters it at the gate on every run, so a hand-edited or migrated
      cron.jobs.json can never widen a run past what the host models — the two filters are deliberately
      independent (defense in depth), which is also why this module needs no cross-require of the policy. */
-  const GRANTABLE = ['workbench', 'connectors'];
+  /* 'orchestrator' (2026-10-27) = this routine's agent may DELEGATE unattended (team.dispatch + the read/steer
+     verbs). Same storage-not-authority rule as the two above: inputpolicy.js re-filters the name and
+     permissions.js narrows it again by exact tool, so routine.create / loop.* / team.summon stay human-gated
+     even on a routine that carries this grant. */
+  const GRANTABLE = ['workbench', 'connectors', 'orchestrator'];
   function normGrants(v) {
     if (!Array.isArray(v)) return [];
     const out = [];

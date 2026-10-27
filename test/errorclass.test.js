@@ -91,6 +91,25 @@ const R = (err, ctx) => classifyApiError(err, ctx || {});
   A.eq(R(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })).retryable, true, 'transport timeout retryable');
 }
 
+// ---- E2. ERR_HTTP2_* (2026-10-22) -> timeout, not unknown ----
+// Node's global fetch (undici) auto-negotiates h2 against a server that offers it (OpenRouter's edge does); a
+// network blip on a long streaming h2 connection resets the STREAM, surfacing as `TypeError: fetch failed` with
+// one of these codes on `.cause.code` — the exact shape observed live (Android/Termux, Node v26) across three
+// different agents/models in one failed team run, each dying with zero retries because the OLD fallthrough to
+// 'unknown' is deliberately excluded from recovery-policy.js's post-prestream retry ladder (PRESTREAM_CONTINUABLE).
+{
+  const h2 = code => Object.assign(new Error('fetch failed'), { cause: { code } });
+  A.eq(R(h2('ERR_HTTP2_STREAM_ERROR')).reason, 'timeout', 'ERR_HTTP2_STREAM_ERROR -> timeout, not unknown');
+  A.eq(R(h2('ERR_HTTP2_STREAM_ERROR')).retryable, true, 'ERR_HTTP2_STREAM_ERROR is retryable');
+  A.eq(R(h2('ERR_HTTP2_INVALID_STREAM')).reason, 'timeout', 'ERR_HTTP2_INVALID_STREAM -> timeout');
+  A.eq(R(h2('ERR_HTTP2_STREAM_CANCEL')).reason, 'timeout', 'ERR_HTTP2_STREAM_CANCEL -> timeout');
+  A.eq(R(h2('ERR_HTTP2_SESSION_ERROR')).reason, 'timeout', 'ERR_HTTP2_SESSION_ERROR -> timeout');
+  A.eq(R(h2('ERR_HTTP2_GOAWAY_SESSION')).reason, 'timeout', 'ERR_HTTP2_GOAWAY_SESSION -> timeout');
+  A.eq(R(h2('ERR_HTTP2_ERROR')).reason, 'timeout', 'bare ERR_HTTP2_ERROR -> timeout');
+  // a code that merely CONTAINS "http2" without matching one of the real Node codes must not match loosely
+  A.eq(R(h2('ERR_HTTP2_SOME_FUTURE_CODE_NOBODY_AUDITED')).reason, 'unknown', 'an unaudited ERR_HTTP2_* code is NOT assumed retryable — only the named ones');
+}
+
 // ---- F. unknown -> retryable; statusCode echoed; message preserved ----
 {
   const u = R(new Error('something weird happened'));

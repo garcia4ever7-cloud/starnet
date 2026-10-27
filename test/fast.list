@@ -976,3 +976,6 @@ test/video-providers.test.js
 test/studio-capture.test.js
 test/studio-pipeline-advance.test.js
 test/audio-finish.test.js
+test/headless-tools-granted.test.js
+test/headless-dispatch.test.js
+test/provider-configured-from-sidecar.test.js

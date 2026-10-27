@@ -135,6 +135,24 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
   A.ok(/16:9/.test(T1.generateTool.description) && /widescreen/i.test(T1.generateTool.description), 'the tool teaches the aspect_ratio dial for widescreen asks');
   A.eq(T1.generateTool.schema.properties.aspect_ratio.enum, undefined, 'aspect_ratio is NOT an enum — any shape is accepted');
   A.ok(T1.generateTool.schema.properties.width && T1.generateTool.schema.properties.height, 'schema exposes exact width/height');
+
+  // ---- B1b-2. image_size rides image_config.image_size (OpenRouter native-resolution dial) ----
+  const gSize = await T1.generateTool.run({ prompt: 'a mountain vista', aspect_ratio: '4:5', image_size: '4K' }, ctx);
+  A.ok(gSize.summary.indexOf('image → ') === 0, 'image_size call still saves an image');
+  const sizeCall = genFetch.calls[genFetch.calls.length - 1];
+  A.eq(sizeCall.body.image_config, { aspect_ratio: '4:5', image_size: '4K' }, 'aspect_ratio + image_size both land in image_config');
+  A.ok(/image_size 4K/.test(gSize.content), 'the result names the requested image_size');
+  const gSizeOnly = await T1.generateTool.run({ prompt: 'z2', image_size: '2k' }, ctx);
+  A.eq(genFetch.calls[genFetch.calls.length - 1].body.image_config, { image_size: '2K' }, 'image_size alone sends image_config.image_size with no aspect_ratio field; lowercase is normalized');
+  let badSize = null; try { await T1.generateTool.run({ prompt: 'x', image_size: '8K' }, ctx); } catch (e) { badSize = e.message; }
+  A.ok(/unrecognized image_size/.test(badSize) && /no image was produced/.test(badSize), 'an unsupported image_size is refused pre-flight with an honest error');
+  A.eq(T1.generateTool.schema.properties.image_size.enum, ['1K', '2K', '4K'], 'image_size schema is a closed enum of the real provider tiers');
+  // a route that does not actually carry image_config (gemini-native) says so instead of silently dropping the dial
+  const geminiSizeFetch = stubFetch(() => jsonResp({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: PNG_B64 } }] } }] }));
+  const TGSize = makeImageTools({ openrouter: { apiKey: 'gemini-key', provider: 'gemini', protocol: 'gemini-native' }, fsp, pathMod: path, root: ROOT, fetchImpl: geminiSizeFetch });
+  const gSizeIgnored = await TGSize.generateTool.run({ prompt: 'ignored on this route', image_size: '4K' }, ctx);
+  A.ok(/image_size "4K" was requested but ignored/.test(gSizeIgnored.content), 'image_size on a non-OpenRouter protocol is honestly reported as ignored, not silently dropped');
+
   // ---- B1c. any ratio/size snaps to the nearest provider ratio; exact pixels get fitted ----
   {
     const rs = T1._internals.resolveShape;
@@ -189,6 +207,21 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
   let threw = false; try { await T2.generateTool.run({ prompt: 'z' }, ctx); } catch (e) { threw = /no image/.test(e.message); }
   A.ok(threw, 'image_generate throws a clear error when no image comes back');
 
+  // ---- C2. MAX_IMAGE_BYTES (2026-10-22 field incident): a real 4K generation decodes to roughly 10-21 MB
+  //          and must NOT be thrown away post-download; the cap still exists for a genuinely absurd response ----
+  {
+    const make = (mb) => Buffer.alloc(mb * 1024 * 1024, 1).toString('base64');
+    const bigFetch = stubFetch(() => jsonResp({ choices: [{ message: { images: [{ image_url: { url: 'data:image/png;base64,' + make(20) } }] } }] }));
+    const TBig = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: bigFetch });
+    const rb = await TBig.generateTool.run({ prompt: '4k shot', path: 'art/big4k' }, ctx);
+    A.ok(rb.summary.indexOf('image → ') === 0, 'a real-world 4K-class generated image (~20 MB) is no longer thrown away post-download');
+
+    const hugeFetch = stubFetch(() => jsonResp({ choices: [{ message: { images: [{ image_url: { url: 'data:image/png;base64,' + make(40) } }] } }] }));
+    const THuge = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: hugeFetch });
+    let tooBig = false; try { await THuge.generateTool.run({ prompt: 'absurd' }, ctx); } catch (e) { tooBig = /too large/.test(e.message); }
+    A.ok(tooBig, 'the cap still rejects something genuinely absurd (40 MB) — raised, not removed');
+  }
+
   // ---- D. image_analyze: reads a workspace file, sends text-then-image_url parts, returns model text ----
   const anFetch = stubFetch(() => jsonResp({ choices: [{ message: { content: 'A small red cube on white.' } }] }));
   const T3 = makeImageTools({ openrouter: { apiKey: 'sk' }, fsp, pathMod: path, root: ROOT, fetchImpl: anFetch });
@@ -198,6 +231,18 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
   A.eq(parts[0].type, 'text', 'analyze sends the text part first');
   A.eq(parts[1].type, 'image_url', 'analyze sends an image_url part second');
   A.ok(parts[1].image_url.url.indexOf('data:image/png;base64,') === 0, 'analyze base64-encodes the workspace image into a data URL');
+
+  // ---- D2. image_analyze reading a workspace file shares the SAME raised cap — an agent can now look back
+  //          at its own real 4K output (image_quality_check / image_analyze "second check") without it
+  //          being refused as "too large" the moment image_generate stopped refusing to save it ----
+  {
+    const bigBuf = Buffer.alloc(20 * 1024 * 1024, 2);
+    await fsp.writeFile(path.join(ROOT, 'hero', 'big.png'), bigBuf);
+    const anBigFetch = stubFetch(() => jsonResp({ choices: [{ message: { content: 'a large four-k watercolor' } }] }));
+    const T3b = makeImageTools({ openrouter: { apiKey: 'sk' }, fsp, pathMod: path, root: ROOT, fetchImpl: anBigFetch });
+    const ab = await T3b.analyzeTool.run({ image: 'big.png' }, ctx);
+    A.ok(/four-k watercolor/.test(ab.content), 'image_analyze can read back a ~20 MB workspace image (e.g. its own 4K output)');
+  }
 
   // ---- E. image_analyze passes an http(s) URL straight through (no file read) ----
   const a2 = await T3.analyzeTool.run({ image: 'https://example.com/cat.jpg' }, ctx);
@@ -236,10 +281,31 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
     A.eq(fbFetch.calls[1].body.model, 'google/gemini-2.5-flash-image', 'the retry rides the known-good LEGACY slug');
     A.ok(r.content.indexOf('gemini-2.5-flash-image') >= 0, 'the result names the model that ACTUALLY generated (honest fallback)');
 
+    // TRANSIENT RETRY (2026-10-22): a non-model, non-refusal error (429, 5xx, dropped connection) is most
+    // likely a one-off provider hiccup, not a broken request — retry ONCE on the SAME model before giving up.
     const rlFetch = stubFetch(() => jsonResp({ error: { message: 'rate limited' } }, 429));
     const TR = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: rlFetch });
     let threw = false; try { await TR.generateTool.run({ prompt: 'x' }, { agentId: 'hero', emit: () => {} }); } catch (e) { threw = /429/.test(e.message); }
-    A.ok(threw && rlFetch.calls.length === 1, 'a non-model error (429) propagates untouched — no blind fallback');
+    A.ok(threw && rlFetch.calls.length === 2, 'a persistent non-model error (429) retries ONCE on the SAME model, then propagates');
+    A.eq(rlFetch.calls[0].body.model, rlFetch.calls[1].body.model, 'the transient retry does NOT fall back to the legacy slug — only a model-shaped rejection does');
+
+    // a transient error that clears on the second attempt recovers the whole call, not just a bare retry count
+    let rlAttempt = 0;
+    const rlRecoverFetch = stubFetch(() => {
+      rlAttempt++;
+      return rlAttempt === 1 ? jsonResp({ error: { message: 'rate limited' } }, 429)
+        : jsonResp({ choices: [{ message: { images: [{ image_url: { url: DATA_URL } }] } }] });
+    });
+    const TRR = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: rlRecoverFetch });
+    const rr = await TRR.generateTool.run({ prompt: 'recovers on retry' }, { agentId: 'hero', emit: () => {} });
+    A.eq(rlRecoverFetch.calls.length, 2, 'the recovering case also made exactly 2 attempts');
+    A.ok(rr.summary.indexOf('image → ') === 0, 'a transient failure that clears on retry still produces a saved image');
+
+    // an apparent content/policy refusal is NOT retried — retrying a refusal just spends money to get refused again
+    const refusalFetch = stubFetch(() => jsonResp({ error: { message: 'Content policy violation: request refused' } }, 400));
+    const TRF = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: refusalFetch });
+    let refused = false; try { await TRF.generateTool.run({ prompt: 'x' }, { agentId: 'hero', emit: () => {} }); } catch (e) { refused = /refused/i.test(e.message); }
+    A.ok(refused && refusalFetch.calls.length === 1, 'an apparent content/policy refusal is NOT retried');
   }
 
   // ---- H. deps.imageModel (the STARNET_IMAGE_MODEL knob) overrides the default; args.model still wins ----
@@ -338,6 +404,40 @@ function jsonResp(obj, status) { return { status: status || 200, json: async () 
     A.ok(/cleanup-proof.png/.test(result.content), 'cleanup diagnostic preserves a successfully published result');
     A.eq(delivered.length, 1, 'cleanup diagnostic does not duplicate the deliverable');
     A.eq(failopen.counts()['image.staging-cleanup'], before + 1, 'unexpected staging cleanup error is counted');
+  }
+  // ---- Z. mid-download retry (2026-10-22): headers arrive (200) but the body read drops — ERR_HTTP2_STREAM_ERROR
+  // and sibling connection-reset codes mid-stream, not a pre-connect failure. Must retry the WHOLE request (fresh
+  // bytes) up to 3 times with backoff rather than silently swallowing to a fake empty success. ----
+  {
+    const http2Err = () => Object.assign(new Error('fetch failed'), { cause: { code: 'ERR_HTTP2_STREAM_ERROR' } });
+    // Z1: drops twice, succeeds on the 3rd real attempt -> the tool call ultimately succeeds with the real image.
+    let calls = 0;
+    const flakyFetch = stubFetch((url) => {
+      calls++;
+      return { status: 200, json: async () => { if (calls <= 2) throw http2Err(); return { choices: [{ message: { images: [{ image_url: { url: DATA_URL } }] } }] }; },
+        arrayBuffer: async () => Buffer.alloc(0), headers: { get: () => 'application/json' } };
+    });
+    const TZ1 = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: flakyFetch });
+    const r1 = await TZ1.generateTool.run({ prompt: 'retry cube' }, { agentId: 'retry1', emit: () => {} });
+    A.eq(calls, 3, 'two mid-download drops + one real success = 3 total request attempts');
+    A.ok(!r1.isError && /saved/i.test(r1.content), 'the call succeeds once a retry gets real bytes through');
+
+    // Z2: drops every time -> stops after 3 retries (4 total attempts), ends in the same honest "no image"
+    // error the old swallow-to-{} fallback already produced — never retries forever, never a worse error.
+    let calls2 = 0, threw2 = false;
+    const alwaysFlakyFetch = stubFetch(() => { calls2++; return { status: 200, json: async () => { throw http2Err(); }, arrayBuffer: async () => Buffer.alloc(0), headers: { get: () => 'application/json' } }; });
+    const TZ2 = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: alwaysFlakyFetch });
+    try { await TZ2.generateTool.run({ prompt: 'always drops' }, { agentId: 'retry2', emit: () => {} }); }
+    catch (e) { threw2 = /no image/i.test(e.message); }
+    A.eq(calls2, 4, 'exactly 3 retries (4 total attempts) for a persistent mid-download drop, never unbounded');
+    A.ok(threw2, 'exhausting all retries on a real drop still ends in the same honest "no image" error as before');
+
+    // Z3: an ordinary (non-transport) json-parse failure is NOT a mid-download drop -> no retry, old behavior.
+    let calls3 = 0;
+    const ordinaryBadJson = stubFetch(() => { calls3++; return { status: 200, json: async () => { throw new SyntaxError('Unexpected token'); }, arrayBuffer: async () => Buffer.alloc(0), headers: { get: () => 'application/json' } }; });
+    const TZ3 = makeImageTools({ openrouter: { apiKey: 'k' }, fsp, pathMod: path, root: ROOT, fetchImpl: ordinaryBadJson });
+    try { await TZ3.generateTool.run({ prompt: 'malformed body' }, { agentId: 'retry3', emit: () => {} }); } catch (_) {}
+    A.eq(calls3, 1, 'a non-transport JSON parse error is never retried — single attempt, same as before this fix');
   }
   try { await fsp.rm(ROOT, { recursive: true, force: true }); } catch (_) {}
   A.report('image.test');

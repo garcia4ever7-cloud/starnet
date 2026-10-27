@@ -12,6 +12,8 @@
      workerMaxIters: optional per-WORKER iteration ceiling (0/omitted = unlimited)
      newId     : () -> a fresh runId for each child (crypto.randomUUID, injected so this UMD stays dep-free)
      maxWorkers: optional cap on workers per dispatch (0/omitted = unlimited)
+     recordHandoff: optional (h) -> {ok, relPath}|{ok:false,error} — writes the lead→worker exchange as a FILE
+                 in the lead's outbox (sidecar/handoff-store.js). Every outcome is recorded, failures included.
 
    Safety (verified against the run host): each worker is a DISTINCT agentId so it takes its own concurrency
    slot + its own ledger/live-budget entry while the lead's slot stays held; ctx.signal is threaded into every
@@ -325,6 +327,11 @@
     const baseUrl = deps.baseUrl || deps.base_url || '';
     const reasoningEffort = deps.reasoningEffort || 'medium';
     const subagents = deps.subagents || null;
+    /* recordHandoff(h) -> { ok, relPath } | { ok:false, error } — the HOST writes one file per lead→worker
+       exchange into the lead's outbox (sidecar/handoff-store.js). Injected, so this UMD stays dep-free and the
+       whole handoff behaviour is testable with a fake. Absent (older hosts, unit stubs) -> no file, and
+       dispatch behaves byte-identically to before. */
+    const recordHandoff = (typeof deps.recordHandoff === 'function') ? deps.recordHandoff : null;
     // the LEAD's OWN base identity (system prompt), threaded from the run host so team.spawn can clone it. Empty
     // string when absent → a spawned subagent still runs, just without an inherited persona.
     const selfSystem = (typeof deps.selfSystem === 'string') ? deps.selfSystem : '';
@@ -595,7 +602,34 @@
           }
         }
 
-        const runWorker = async (job, o2) => {
+        /* THE HOST'S OWN HANDOFF FILE (2026-10-27). Wraps every runWorker outcome — done, timeout, error,
+           refused, invalid-result alike — and writes the lead→worker exchange into the LEAD's outbox as a file
+           the owner can read with no browser and the next routine in the chain can parse. Written HERE, from
+           the row the dispatch really produced, because a handoff an agent is merely ASKED to save is a claim,
+           not evidence (the studio pipeline's four phantom timeouts were exactly that) — and because an
+           ASK-mode worker cannot fs.write on an unattended run at all. Fail-open on the WRITE only: a full
+           disk must not void a worker's result, so the failure rides back on the row as `handoffError` where
+           the lead (and the owner) can see it, rather than being swallowed. */
+        const withHandoff = (fn) => async (job, o2) => {
+          const row = await fn(job, o2);
+          if (!recordHandoff || !row) return row;
+          try {
+            const h = recordHandoff({
+              leadId: leadId, workerId: job.agentId,
+              prompt: job.prompt || '', context: job.context || '',
+              result: row.result == null ? '' : String(row.result),
+              reason: row.reason, usd: row.usd,
+              leadRunId: (ctx && ctx.runId) || '', workerRunId: row.runId || '',
+              cronJobId: (ctx && ctx.cronJobId) || '',
+              artifacts: Array.isArray(row.artifacts) ? row.artifacts.map(a => (a && a.path) || '').filter(Boolean) : []
+            });
+            if (h && h.ok) row.handoffFile = h.relPath;
+            else if (h) row.handoffError = h.error || 'handoff not written';
+          } catch (e) { row.handoffError = 'handoff not written: ' + ((e && e.message) || e); failNote('orchestration.handoff', e); }
+          return row;
+        };
+
+        const runWorker = withHandoff(async (job, o2) => {
           o2 = o2 || {};
           if (job.error) return { agentId: job.agentId, reason: 'error', result: job.error, usd: 0 };
           const wire = workerWire(job.ident);   // the worker's OWN provider+model when resolvable (see workerWire)
@@ -751,7 +785,7 @@
             row.artifacts = artifacts.map(a => Object.assign({}, a, { agentId: job.agentId, workspace: job.agentId }));
           }
           return row;
-        };
+        });
 
         if (args.background) {
           if (!subagents || typeof subagents.start !== 'function') return { content: 'background subagents unavailable (no subagent manager)', summary: 'error' };

@@ -88,12 +88,43 @@
   // Thinking is ALWAYS ON for these: an explicit {type:'disabled'} is refused at any effort, so 'none' is never
   // offered; saved OFF settings clamp to adaptive thinking at the lowest supported effort.
   // Opus 5.5 rejects disabled thinking; Opus 5 still supports it, so do not match all Opus 5.x.
+  // MEASURED 2026-10-27 against the live wire, all three answering identically:
+  //   "thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and
+  //    "output_config.effort" to control thinking behavior.
   const ALWAYS_THINKING_CLAUDE = ['claude-fable', 'claude-mythos', 'claude-opus-5-5', 'claude-opus-5.5'];
+
+  /* THINKING OFF HAS *TWO* WIRE SPELLINGS, AND THE MODEL PICKS (2026-10-27).
+     Sonnet 5.5 turns thinking off with {type:'between_tools'} and answers a hard 400 to {type:'disabled'}:
+
+       To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of
+       {"type": "disabled"}. The model does not think before responding. The short updates it writes
+       between tool calls come back as thinking blocks.
+
+     That 400 killed EVERY run by the station's Commander, which is on claude-sonnet-5-5.
+
+     MEASURED, not inferred — the whole published catalog was probed with {type:'disabled'} (a rejection
+     validates before anything bills, so the sweep was ~free):
+       disabled OK ...... haiku-5-5, opus-5, sonnet-5, opus-4-8, opus-4-7, sonnet-4-6, opus-4-6,
+                          opus-4-5-20251101, haiku-4-5-20251001
+       between_tools .... sonnet-5-5                                    <- this list
+       no off switch .... opus-5-5, fable-5-1, fable-5                  <- ALWAYS_THINKING_CLAUDE above
+     The schema's full enum, from a deliberately-bogus type: 'adaptive', 'between_tools', 'disabled', 'enabled'.
+
+     WHY AN EXPLICIT LIST AND NOT A GENERATION RULE: there isn't one. The 5.5 generation SPLITS three ways
+     (haiku-5-5 takes `disabled`, sonnet-5-5 needs `between_tools`, opus-5-5 accepts neither), so any
+     "newer means between_tools" heuristic is already false on shipped models.
+     WHY NOT SEND `between_tools` TO EVERYONE: it is not a synonym. `disabled` means no thinking at all;
+     `between_tools` still emits thinking blocks between tool calls, which this adapter must then replay
+     signed and in order (see thinkingBlocks). Blanket-switching would change behaviour on the nine models
+     that work today and walk into that replay contract for no reason. */
+  const BETWEEN_TOOLS_OFF_CLAUDE = ['claude-sonnet-5-5', 'claude-sonnet-5.5'];
 
   const modelKey = (id) => String(id == null ? '' : id).toLowerCase();
   function hasAny(id, list) { const k = modelKey(id); for (const s of list) if (k.indexOf(s) >= 0) return true; return false; }
   function isClaude(id) { return modelKey(id).indexOf('claude') >= 0; }
   function alwaysThinks(id) { return hasAny(id, ALWAYS_THINKING_CLAUDE); }
+  // The wire spelling of "thinking off" for THIS model. See BETWEEN_TOOLS_OFF_CLAUDE for the measurements.
+  function thinkingOffType(id) { return hasAny(id, BETWEEN_TOOLS_OFF_CLAUDE) ? 'between_tools' : 'disabled'; }
   function normalizeEffort(v) {
     const k = String(v == null ? '' : v).trim().toLowerCase().replace(/[\s_-]+/g, '');
     const map = {
@@ -443,9 +474,11 @@
         body.thinking = { type: 'enabled', budget_tokens: budget };
         return;
       }
-      // MODERN. A disable is sent WITHOUT an effort: the wire refuses `{type:'disabled'}` above `high`, and an
+      // MODERN. A disable is sent WITHOUT an effort: the wire refuses an off-switch above `high`, and an
       // omitted effort leaves the server default — the one value a disable is always accepted alongside.
-      if (effort === 'none') { body.thinking = { type: 'disabled' }; return; }
+      // The off-switch SPELLING is per-model: Sonnet 5.5 requires {type:'between_tools'} and 400s on
+      // {type:'disabled'} (which broke every run by this station's Commander). See thinkingOffType.
+      if (effort === 'none') { body.thinking = { type: thinkingOffType(model) }; return; }
       body.thinking = { type: 'adaptive' };
       body.output_config = Object.assign({}, body.output_config, { effort });
     }
@@ -463,6 +496,10 @@
       applyThinking(body, req);   // must run BEFORE the breakpoints: it can add top-level keys, never blocks
       const tools = toAnthropicTools(req.tools);
       if (tools) body.tools = tools;
+      if (process.env.STARNET_TOOLWIRE_DEBUG) {
+        process.stderr.write('[toolwire] anthropic req.tools=' + ((req.tools||[]).length)
+          + ' -> body.tools=' + ((tools||[]).length) + '\n');
+      }
       // One breakpoint for the whole static prefix. System is the preferred anchor because it sits AFTER the
       // tools and so caches both; with no system prompt the last tool is the only anchor that covers them.
       let systemAnchors = 1;

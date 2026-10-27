@@ -231,6 +231,20 @@ const Harness = (() => {
     // they are configured identically in a browser build and a packaged one. Probing after the return would
     // leave configured('starnet') false forever anywhere that isn't Tauri — including every dev session.
     await refreshCreditsConfigured();
+    /* WHICH PROVIDERS DOES THE SIDECAR ITSELF HOLD A KEY FOR? Asked in BOTH modes, deliberately before the
+       desktop early-return — a browser build previously learned this for nobody, so every provider keyed only
+       in the sidecar's environment looked unconfigured and its agents' models rendered blank (see configured()).
+       GET /api/providers answers with `configured` as a boolean per provider and never the key itself, so the
+       renderer stays secret-free. Fail-open and never downgrades: a provider already marked true by the
+       keychain, by managed credits, or by a key pasted into this page keeps that answer. */
+    try {
+      const r = await fetch('/api/providers', { cache: 'no-store' });   // window.fetch attaches the API token for every /api/ URL
+      const j = (r && r.ok) ? await r.json() : null;
+      for (const prov of ((j && j.providers) || [])) {
+        if (!prov || !prov.configured) continue;
+        _configuredByProvider[normalizeProviderId(prov.id)] = true;
+      }
+    } catch (_) {}
     if (!DESKTOP) return;
     let loaded = false;
     try {
@@ -312,6 +326,9 @@ const Harness = (() => {
     if (p === 'starnet' || p === 'starnet-cloud' || p === 'managed') return 'starnet';
     if (p === 'ollama' || p === 'ollama-local') return 'ollama';
     if (p === 'custom' || p === 'openai-compatible' || p === 'local' || p === 'vllm' || p === 'lmstudio') return 'custom';
+    // local OmniRoute router (mirrors app.js + registry.js aliases). Without this line the fallthrough
+    // below relabels it 'openrouter' and Harness reports the wrong provider as the active one.
+    if (p === 'omniroute' || p === 'omni' || p === 'omni-route') return 'omniroute';
     return 'openrouter';
   }
   function providerSlot(base, provider) {
@@ -348,7 +365,18 @@ const Harness = (() => {
     // through to the keyless branch below, which would answer "configured" for every station simply because
     // there is no key to look for, and claim a station can run on credits it has never been linked to.
     if (p === 'starnet') return !!_configuredByProvider.starnet;
-    return DESKTOP ? !!(_configuredByProvider[p] || (p === 'openrouter' && _configured)) : (DEVMODE || !providerNeedsKey(p) || !!getKey(p));
+    /* THE SIDECAR'S OWN CREDENTIALS COUNT, IN BOTH MODES (2026-10-27). The browser branch used to read
+       ONLY getKey(p) — the key pasted into this page — so a provider whose key lives solely in the SIDECAR's
+       environment (`~/.config/starnet/env`, which is the supported way to key an unattended station) read as
+       NOT configured in every browser build. Live symptom: NIGHT4CHRIST's model showed as blank/"none" in the
+       dock while DESIGNER and SCOUT showed theirs, purely because the Anthropic key had only ever been put in
+       the env file whereas the OpenRouter/OmniRoute keys had also been pasted into the page. modeldock.js:286
+       gates the whole catalog fetch on this, so an "unconfigured" provider can resolve no model name at all.
+       `_configuredByProvider` is now also filled from GET /api/providers (see init), which reports presence as
+       a BOOLEAN and never the value — so this fixes the display without putting a secret in the renderer,
+       which the project law forbids. Additive: a pasted page key still counts exactly as before. */
+    return DESKTOP ? !!(_configuredByProvider[p] || (p === 'openrouter' && _configured))
+      : (DEVMODE || !providerNeedsKey(p) || !!getKey(p) || !!_configuredByProvider[p]);
   }
 
   // Truthful-telemetry getter for the SETTINGS credential list/badges: true IFF a real credential

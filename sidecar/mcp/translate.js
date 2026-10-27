@@ -194,6 +194,16 @@
       network: true,                                     // every remote MCP call is an outward network effect
       timeoutMs: o.timeoutMs || 0,                       // 0 -> inherit the host's per-tool timeout (CAPS.toolTimeoutMs)
       run: async function (args, ctx) {
+        /* TEAM-WIDE DAILY CAP on a connector tool that starts a BILLABLE third-party run (2026-10-27). The
+           owner's "max 8 Apify runs/day, including failures" had no enforcement anywhere: the budget rails
+           count model spend in USD, and Apify is reached through THIS path — the mcp:apify connector — not
+           through web_request. Checked before the call leaves and never decremented, so a failure costs one
+           too (the station cannot know whether a failed call already started an actor). Read-only connector
+           tools match no rule and are not metered. Fails closed; see sidecar/hostquota.js. */
+        if (o.quota && typeof o.quota.consumeTool === 'function') {
+          const q = o.quota.consumeTool(connectorId, mcpTool.name);
+          if (q && q.ok === false) throw new Error(q.error || ('daily cap reached for ' + q.host));
+        }
         const res = await call(mcpTool.name, args || {}, ctx);   // ctx (runId/emit) lets the manager emit connector_required
         // Clamp BEFORE the error branch too: a failing server is just as able to hand back a
         // megabyte of stack trace as a succeeding one.

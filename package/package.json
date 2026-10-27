@@ -1,0 +1,41 @@
+{
+  "name": "@higgsfield/cli",
+  "version": "1.2.2",
+  "description": "Higgsfield AI CLI — generate images and videos from the terminal.",
+  "bin": {
+    "higgsfield": "bin/higgsfield.js",
+    "higgs": "bin/higgs.js"
+  },
+  "scripts": {
+    "prepack": "node checksums.js check",
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "checksums.js",
+    "checksums.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "MIT",
+  "homepage": "https://higgsfield.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/higgsfield-ai/cli.git"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

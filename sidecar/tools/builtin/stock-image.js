@@ -331,7 +331,13 @@
         if (notes.length) { lines.push('\nNotes:'); for (const n of notes) lines.push('  - ' + n); }
         if (saved.length) lines.push('\nThese are SOURCE assets to composite with. Do not list any of them for sale unaltered.');
 
-        return { content: lines.join('\n'), summary: 'image_stock_fetch → ' + saved.length + ' saved, ' + rejected.length + ' refused on licence' };
+        return {
+          content: lines.join('\n'), summary: 'image_stock_fetch → ' + saved.length + ' saved, ' + rejected.length + ' refused on licence',
+          // Lets sidecar/artifacts.js's observe() record these into run.artifacts (its tool-name allowlist has no
+          // entry for image_stock_fetch) so the Deliverables panel's file list is never empty for real output.
+          // The .license.json sidecar is real provenance documentation, not scratch — included too.
+          producedFiles: saved.flatMap(s => [{ path: s.rel, bytes: s.bytes }, { path: s.rel + '.license.json' }])
+        };
       }
     };
 

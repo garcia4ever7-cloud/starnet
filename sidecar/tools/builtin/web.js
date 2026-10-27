@@ -896,6 +896,17 @@
         const u = assertSafeUrl(rawUrl);
         await assertResolvedSafe(u, doLookup);
 
+        /* TEAM-WIDE DAILY HOST CAP (2026-10-27). The owner caps Apify at 8 runs/day across the whole team,
+           including failures — a policy no code enforced, because budgetcaps.js counts MODEL spend in USD and
+           cannot see a third-party HTTP call. Counted HERE, before the request leaves, and never decremented:
+           a 400 and a 200 each cost one, since the station cannot know whether a failed POST already started a
+           billable actor run. Fails CLOSED (see sidecar/hostquota.js for why this is not a hook). A host with
+           no configured limit is not counted and this is a no-op. */
+        if (deps.hostQuota && typeof deps.hostQuota.consume === 'function') {
+          const q = deps.hostQuota.consume(u.hostname);
+          if (q && q.ok === false) throw new Error(q.error || ('daily request cap reached for ' + q.host));
+        }
+
         const used = [];
         /* WHICH HEADER SLOTS ACTUALLY CARRY A SECRET. The redirect guard below used to decide this by NAME
            (authorization|cookie|x-api-key) — but the model picks the slot, and half the real API world puts

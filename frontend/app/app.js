@@ -814,7 +814,8 @@ const App = (() => {
       cerebras: 'CEREBRAS',
       starnet: 'STARNET MANAGED',
       ollama: 'OLLAMA',
-      custom: 'CUSTOM'
+      custom: 'CUSTOM',
+      omniroute: 'OMNIROUTE'
     };
     return map[provider] || String(provider || 'openrouter').toUpperCase();
   }
@@ -840,6 +841,12 @@ const App = (() => {
     if (p === 'starnet' || p === 'starnet-cloud' || p === 'managed') return 'starnet';
     if (p === 'ollama' || p === 'ollama-local') return 'ollama';
     if (p === 'custom' || p === 'openai-compatible' || p === 'local' || p === 'vllm' || p === 'lmstudio') return 'custom';
+    // OmniRoute is a LOCAL router with its own profile in sidecar/providers/registry.js. It MUST be listed
+    // here: the fallthrough below folds every unrecognised id onto 'openrouter', so an omniroute-assigned
+    // agent read by a browser tab would be relabelled OpenRouter and — because cloudsave reconcile() pushes
+    // whichever copy has the newer updatedAt — could silently rewrite the roster onto the owner's PAID
+    // OpenRouter wallet. That is the drift bug class test/provider-oauth-parity.js was written for.
+    if (p === 'omniroute' || p === 'omni' || p === 'omni-route') return 'omniroute';
     return 'openrouter';
   }
   function providerNeedsKey(provider) {
@@ -868,6 +875,7 @@ const App = (() => {
     if (p === 'perplexity') return 'pplx-...  -  perplexity.ai/settings/api';
     if (p === 'cerebras') return 'Cerebras API key';
     if (p === 'custom') return 'optional API key for this endpoint';
+    if (p === 'omniroute') return 'OmniRoute client API key  -  local router on 127.0.0.1:20128';
     return 'sk-or-...  -  openrouter.ai/keys';
   }
   // Where a NEW user actually GETS a key for this provider — the same destinations the key placeholder
@@ -888,6 +896,9 @@ const App = (() => {
       cerebras: 'https://cloud.cerebras.ai',
       // not a key page: managed credits are obtained by LINKING a station in the STORE
       starnet: 'https://account.starnetos.com',
+      // not a vendor page either: OmniRoute is the operator's own router, so its keys come from its
+      // local dashboard rather than from anyone's signup flow
+      omniroute: 'http://127.0.0.1:20128',
       openrouter: 'https://openrouter.ai/keys'
     };
     return map[p] || 'https://openrouter.ai/keys';

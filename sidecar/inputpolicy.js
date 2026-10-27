@@ -37,7 +37,14 @@ const IMPACT_SET = new Set(Object.keys(IMPACTS).map(k => IMPACTS[k]));
 // it cannot even call what it finds, it only makes it advertisable. Same live-caught failure as 'taskbrief'
 // above: without an entry here it fell through to EXTERNAL_UNKNOWN and the authority layer refused it, so
 // every DEFERRED tool became permanently unreachable while looking, from the outside, merely "not found".
-const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo']);
+// 'deliverable' / 'taskplan' / 'routinescratch' = the host's OWN bookkeeping stores (deliverable_note, todo,
+// routine.notepad): requiresConsent:false, network:false, no external effect whatsoever — a note, a task list
+// and a per-routine scratchpad, all written into StarNet's own files. Without an entry here they fell through
+// to EXTERNAL_UNKNOWN, so enforceRunAuthority STRIPPED all three from every ASK-mode unattended run before the
+// model ever saw them (measured 2026-10-27: SCOUT and PUBLISHER lost deliverable_note, todo and
+// routine.notepad on every cron fire). Exactly the failure already recorded for 'taskbrief' and 'toolsearch'
+// above: an unclassified local tool reads from the outside as merely "not found".
+const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo', 'deliverable', 'taskplan', 'routinescratch']);
 
 function impactOfTool(tool) {
   tool = tool || {};
@@ -64,7 +71,16 @@ function impactOfTool(tool) {
 // 'connectors' = the Commander's CONNECTED MCP servers (capability 'mcp:<connectorId>'). Deliberately NOT a
 // blanket external-unknown unlock: that impact class is also the FAIL-CLOSED default for any tool the host
 // cannot classify, so the grant is additionally narrowed to real connector tools by isConnectorTool below.
-const GRANTABLE_UNATTENDED = new Set(['workbench', 'connectors']);
+// 'orchestrator' = unattended DELEGATION (team.dispatch and the read/steer verbs around it). The impact gate
+// already classes the orchestrator capability as 'none' (SAFE_BUILTIN_CAPS above) — delegation spawns no host
+// process and reaches no third party, it starts another StarNet agent loop. What actually blocked a cron lead
+// was two separate things, and this name is the key to the first: without the ORCHESTRATOR OBJECT in the room
+// the tool is not resolved at all (sidecar/capability/office.js — `lead` is only ever true for a
+// browser-commanded run). The second is permissions.js's autonomous exec lockout; see dispatchGrant there,
+// which is fed from this same per-routine record so the offered tool and the consent answer cannot disagree.
+// Deliberately NOT a blanket orchestrator unlock: permissions.js narrows it again by exact tool name, so
+// routine.create / loop.* / team.configure / team.summon stay human-gated.
+const GRANTABLE_UNATTENDED = new Set(['workbench', 'connectors', 'orchestrator']);
 
 // A tool projected from a configured MCP connector. sidecar/mcp/translate.js stamps every such def with
 // capability 'mcp:<sanitized connectorId>'; nothing else in the registry uses that prefix.

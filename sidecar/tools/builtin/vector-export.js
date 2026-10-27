@@ -244,7 +244,10 @@
         return {
           content: 'Exported ' + rel + ' to ' + written.length + ' file' + (written.length === 1 ? '' : 's') +
             ' (re-rasterised from vector at each target size, not upscaled):\n' + lines.join('\n'),
-          summary: 'vector_export → ' + written.length + ' files'
+          summary: 'vector_export → ' + written.length + ' files',
+          // Lets sidecar/artifacts.js's observe() record these into run.artifacts (its tool-name allowlist has no
+          // entry for vector_export) so the Deliverables panel's file list is never empty for real output.
+          producedFiles: written.map(w => ({ path: w.rel, bytes: w.bytes }))
         };
       }
     };

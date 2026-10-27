@@ -34,10 +34,17 @@ const ToolProps = (() => {
     // this particular read never leaves the machine.
     'connectors.list': 'dish',
     voice_generate: 'studio',   // the studio makes audio as well as images — same prop, same pulse
+    // higgsfield.generate submits a text-to-image job via Higgsfield's REST API and polls for completion.
+    // Studio work, but it carries no image_/resolve_ prefix, so it needs an exact row or the floor stays dark
+    // while the agent is visibly producing deliverables. (Alternative image source to OpenRouter.)
+    'higgsfield.generate': 'studio',
     // vector_export renders a workspace SVG into 300-PPI PNG/PDF print files. Studio work, but it
     // carries no image_/resolve_ prefix, so it needs an exact row or the floor stays dark while the
     // agent is visibly producing deliverables. (image_stock_fetch rides the image_ prefix below.)
     vector_export: 'studio',
+    // mockup_compose pastes a finished print into a room template (etsy-rules §5 listing photos).
+    // Studio work, no image_/resolve_ prefix — same reason vector_export needs an exact row above.
+    mockup_compose: 'studio',
     recall_conversation: 'notebook',
     'widget.get': 'notebook',
     'widget.set': 'notebook'   // Widget definitions/readings share the notebook-object (memory) grant.
@@ -59,6 +66,10 @@ const ToolProps = (() => {
     ['skill.', 'notebook'],
     ['image_', 'studio'],
     ['resolve_', 'studio'],   // DaVinci Resolve edit bay — cutting timelines is studio work (tools/builtin/resolve.js)
+    // video.* / audio.* — rendering and inspecting footage is studio work, same prop and pulse as
+    // image_*. Without these the floor stays dark while video.kling is actually generating.
+    ['video.', 'studio'],
+    ['audio.', 'studio'],
     ['spotify_', 'jukebox']
   ];
 

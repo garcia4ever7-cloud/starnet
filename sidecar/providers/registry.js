@@ -49,6 +49,46 @@
       order: 20
     },
     {
+      /* OmniRoute — a LOCAL router (127.0.0.1:20128) in front of whatever upstream providers the operator has
+         connected to it. On this station that is Cloudflare Workers AI's free tier on the owner's own account.
+
+         Deliberately its OWN profile rather than pointing `openrouter`/`custom` at the proxy via their baseUrl
+         env: OPENROUTER_BASE is global, so repointing it would silently redirect the owner's real (paid)
+         OpenRouter traffic here too, and the UI would keep claiming "OPENROUTER" while the bytes went somewhere
+         else — the exact kind of unprovable assertion the interface law forbids.
+
+         UNPRICED BY DESIGN: the proxy's /v1 responses carry no pricing and StarNet cannot see what the router
+         paid upstream (OmniRoute keeps that in its own `omniroute cost` accounting). So this profile stays
+         METERED-but-unpriced: the loop's maxUnpricedTokens seatbelt (2M/run) still bounds a runaway, and the
+         ledger never invents a number it cannot prove. See test/prices.all-providers.test.js UNPRICED_BY_DESIGN.
+
+         wireReasoningEffort is intentionally absent: the Cloudflare Workers AI models measured on this station
+         do not document `reasoning_effort`, and sending it is how the 2026-10-21 mandatory-reasoning outage
+         reached the wire (STATION_FIELD_NOTES §10). */
+      id: 'omniroute',
+      aliases: ['omni', 'omni-route'],
+      name: 'OmniRoute',
+      label: 'OMNIROUTE',
+      endpoint: '127.0.0.1:20128/v1',
+      blurb: 'local router — free models, auto fallback',
+      live: true,
+      adapter: 'openai-compatible',
+      apiMode: 'chat_completions',
+      authType: 'api_key',
+      keyRequired: true,
+      keyEnv: ['OMNIROUTE_API_KEY'],
+      modelsRequireAuth: true,
+      baseUrl: 'http://127.0.0.1:20128/v1',
+      baseUrlEnv: ['OMNIROUTE_BASE_URL'],
+      modelsPath: '/models',
+      defaultReasoningEffort: 'medium',
+      unmetered: false,
+      credentialPool: true,
+      supportsTools: null,
+      supportsReasoning: null,
+      order: 25
+    },
+    {
       id: 'codex',
       aliases: ['openai-codex'],
       name: 'ChatGPT Codex',

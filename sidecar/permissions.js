@@ -7,7 +7,8 @@
    the sidecar edge (index.js) so the same module is deterministic and headless-testable.
 
    makeConsentBroker({ bypass, hardline, sessionKey, grantsSession, grantsPermanent, persist,
-                       networkOf, surface, prompt }) -> consent
+                       networkOf, surface, prompt,
+                       workshop?, credentialed?, terminalGrant?, connectorGrant?, dispatchGrant? }) -> consent
      consent(call, tool)              -> { allow, reason, scope } | Promise<…>   // the four-tier ladder
      consent.grant(decision,call,tool)-> { allow, reason, scope }   // record a human once/session/always/full decision
      consent.snapshot()               -> { permanent:[...], session:{...} }   // read-only, for tests/telemetry
@@ -81,9 +82,11 @@
     const prompt = typeof opts.prompt === 'function' ? opts.prompt : null;                     // (call,tool) -> Promise<decision>
     // AWAY WORKSHOP (W1): an injected predicate — the Commander's recorded "build things while I'm away" grant for
     // THIS agent. When present and true, an AUTONOMOUS run may WRITE, but ONLY inside its own jail: the tool must be
-    // a jail-scoped capability (cabinet = files, notebook = memory). This is a per-agent recorded consent, wired in
-    // index.js (workshopOf), NOT a self-approval — the exec lockout below is UNTOUCHED, so an away run still can
-    // never run a command. Pure: like hardline/networkOf, all state comes from the injected function. Default: none.
+    // a jail-scoped capability (cabinet = files, notebook = memory) OR one of a small explicitly-named allowlist
+    // (2026-10-22: image_generate, image_print_prep — unattended image generation specifically, without opening
+    // every 'studio' tool). This is a per-agent recorded consent, wired in index.js (workshopOf), NOT a self-approval
+    // — the exec lockout below is UNTOUCHED, so an away run still can never run a command. Pure: like
+    // hardline/networkOf, all state comes from the injected function. Default: none.
     const workshop = typeof opts.workshop === 'function' ? opts.workshop : null;
     const credentialed = typeof opts.credentialed === 'function' ? opts.credentialed : null;
     // UNATTENDED TERMINAL GRANT (2026-07-25): the Commander's recorded per-ROUTINE "may use the terminal"
@@ -111,12 +114,26 @@
     // 'toString' would read as granted. No such capability exists today — this is the allowlist being an
     // allowlist rather than a near-miss, matching the same repair in channels/store.js and shared/schema.js.
     const jailWritableCap = (cap) => Object.prototype.hasOwnProperty.call(JAIL_WRITE_CAPS, cap) && !!JAIL_WRITE_CAPS[cap];
+    // TOOL-NAME allowlist (2026-10-22): the capability-level allowlist above grants EVERY tool sharing a
+    // capability (e.g. every 'studio' write tool — image_generate, vector_export, image_stock_fetch,
+    // image_print_prep, mockup_compose all share capability:'studio'). The owner asked for unattended
+    // image_generate specifically (plus image_print_prep, "if needed", and later mockup_compose —
+    // genuinely free/no-network, so safe to add) — NOT vector_export or image_stock_fetch, which reach
+    // a 3rd-party source/network path the owner never asked to open unattended. A capability-level
+    // grant can't express that distinction, so this is a SEPARATE, narrower allowlist keyed by exact tool
+    // name, checked in addition to (not instead of) the capability allowlist. Same own-key-lookup safety,
+    // same jail-scoped/write-only/autonomous-only constraints as the capability path. Overridable via
+    // opts.workshopTools for tests.
+    const JAIL_WRITE_TOOLS = (opts.workshopTools && typeof opts.workshopTools === 'object')
+      ? opts.workshopTools : { image_generate: true, image_print_prep: true, mockup_compose: true };
+    const jailWritableTool = (name) => Object.prototype.hasOwnProperty.call(JAIL_WRITE_TOOLS, name) && !!JAIL_WRITE_TOOLS[name];
     function workshopWritable(call, tool) {
       if (!workshop) return false;
       if (surface !== 'autonomous') return false;               // interactive already asks a live human
       if (scopeOf(tool) !== 'write') return false;              // ONLY write; read auto-allows, execute stays locked
       const cap = tool && tool.capability;
-      if (!jailWritableCap(cap)) return false;                  // must be a jail-scoped capability (files/memory)
+      const name = tool && tool.name;
+      if (!jailWritableCap(cap) && !jailWritableTool(name)) return false;   // jail-scoped capability OR an explicitly named tool
       try { return workshop(call, tool) === true; } catch (_) { return false; }
     }
 
@@ -169,6 +186,37 @@
       try { return connectorGrant(call, tool) === true; } catch (_) { return false; }
     }
 
+    /* UNATTENDED DELEGATION GRANT (2026-10-27) — lets a SCHEDULED lead hand subtasks to its crew with nobody
+       watching. Without it a cron NIGHT4CHRIST could never dispatch: team.dispatch is scope 'execute', so even
+       with the orchestrator object in its room it died at tier 2.5 below ("silence is not consent"), and the
+       Etsy pipeline could only ever run while a browser tab was open.
+
+       Narrowed exactly like terminalAutonomy/connectorAutonomy, plus one extra fence:
+         • autonomous only (interactive already asks a live human)
+         • the capability must be exactly ORCH_CAP ('orchestrator')
+         • the TOOL NAME must be on ORCH_UNATTENDED_TOOLS — delegation and the verbs needed to watch/steer/stop
+           it. Everything else on the orchestrator capability (routine.create, routine.manage, loop.*,
+           team.configure, task.manage, team.summon, team.spawn) mutates standing station config or needs a live
+           browser, and stays human-gated. A capability-level yes could not express that, which is why this is a
+           name allowlist and not just a cap check — the same reasoning as JAIL_WRITE_TOOLS above.
+         • the injected predicate must confirm THIS RUN carries the Commander's recorded per-routine grant
+       Host-sourced only (index.js reads the durable cron job record), so prompt text and model output cannot
+       mint it. Sits ABOVE the exec lockout because opening that lockout for exactly this case IS the feature;
+       still BELOW the hardline floor. No grant -> false -> the lockout stands and nothing changes. */
+    const dispatchGrant = typeof opts.dispatchGrant === 'function' ? opts.dispatchGrant : null;
+    const ORCH_CAP = opts.orchestratorCap || 'orchestrator';
+    const ORCH_UNATTENDED_TOOLS = (opts.dispatchTools && typeof opts.dispatchTools === 'object')
+      ? opts.dispatchTools
+      : { 'team.dispatch': true, 'team.subagents': true, 'team.steer': true, 'team.interrupt': true, 'team.resume': true };
+    const dispatchableTool = (name) => Object.prototype.hasOwnProperty.call(ORCH_UNATTENDED_TOOLS, name) && !!ORCH_UNATTENDED_TOOLS[name];
+    function dispatchAutonomy(call, tool) {
+      if (!dispatchGrant) return false;
+      if (surface !== 'autonomous') return false;
+      if (!tool || tool.capability !== ORCH_CAP) return false;
+      if (!dispatchableTool(tool.name)) return false;
+      try { return dispatchGrant(call, tool) === true; } catch (_) { return false; }
+    }
+
     function sessionSet(create) {
       let s = grantsSession.get(sessionKey);
       if (!s && create) { s = new Set(); grantsSession.set(sessionKey, s); }
@@ -195,6 +243,9 @@
       // dead code. Still below the hardline floor (tier 1), so protected paths remain unwritable.
       if (terminalAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended terminal grant' };
       if (connectorAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended connector grant' };
+      // 2.45 UNATTENDED DELEGATION GRANT — same load-bearing ordering as tier 2.4: team.dispatch is scope
+      // 'execute', so below the lockout this would be dead code. Name-allowlisted in dispatchAutonomy.
+      if (dispatchAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended delegation grant' };
       // 2.5 EXEC LOCKOUT — an UNATTENDED run may NEVER execute a command off a cached/pre-blessed grant: only a
       // live human (interactive surface), or the explicit per-routine grant in tier 2.4, can approve shell. This
       // keeps "no autonomous shell" un-pre-blessable — a permanent `always` grant a human gave once does NOT

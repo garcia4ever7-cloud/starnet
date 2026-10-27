@@ -257,6 +257,49 @@ async function collect(provider, req) { const out = []; for await (const e of pr
     A.eq(b.thinking, { type: 'disabled' }, "effort 'none' -> thinking disabled");
     A.eq(b.output_config, undefined, 'a disable is sent WITHOUT an effort (xhigh/max + disabled is a 400)');
 
+    /* G3b: THINKING OFF HAS TWO WIRE SPELLINGS, AND THE MODEL PICKS (2026-10-27 outage).
+       Sonnet 5.5 answers a hard 400 to {type:'disabled'}:
+         To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of
+         {"type": "disabled"}.
+       This station's Commander runs claude-sonnet-5-5, so that one line failed EVERY run it made.
+       The three categories below are MEASURED against the live wire, not inferred — the published catalog
+       was swept with {type:'disabled'} (a rejection validates before anything bills, so the sweep was free).
+       The 5.5 generation splits three ways, which is why this cannot be a generation heuristic. */
+    b = await ask('claude-sonnet-5-5', { reasoningEffort: 'none' });
+    A.eq(b.thinking, { type: 'between_tools' },
+      "effort 'none' on claude-sonnet-5-5 -> thinking:{type:'between_tools'} — {type:'disabled'} is a 400 here");
+    A.eq(b.output_config, undefined, 'the between_tools off-switch is also sent WITHOUT an effort');
+
+    // ...and it is ONLY the off-switch that differs: a thinking effort still rides the normal modern contract.
+    b = await ask('claude-sonnet-5-5', { reasoningEffort: 'high' });
+    A.eq(b.thinking, { type: 'adaptive' }, 'claude-sonnet-5-5 at a real effort -> the ordinary adaptive contract');
+    A.eq(b.output_config, { effort: 'high' }, 'and output_config.effort still carries the level');
+
+    // The dotted spelling reaches this adapter too (hand-typed model fields, imported dossiers).
+    b = await ask('claude-sonnet-5.5', { reasoningEffort: 'none' });
+    A.eq(b.thinking, { type: 'between_tools' }, 'the dotted spelling claude-sonnet-5.5 maps to between_tools as well');
+
+    // MEASURED: these nine still take {type:'disabled'} — the fix must not switch them over, because
+    // between_tools is NOT a synonym (it still emits thinking blocks between tool calls).
+    for (const m of ['claude-haiku-5-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-opus-4-7',
+      'claude-sonnet-4-6', 'claude-opus-4-6']) {
+      b = await ask(m, { reasoningEffort: 'none' });
+      A.eq(b.thinking, { type: 'disabled' }, m + " takes {type:'disabled'} — verified on the live wire 2026-10-27");
+    }
+
+    /* MEASURED: opus-5-5 / fable accept NEITHER off-switch —
+         "thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and
+          "output_config.effort" to control thinking behavior.
+       so 'none' must never be offered for them, and asking for it clamps UP into real thinking rather than
+       emitting any off-switch at all. */
+    for (const m of ['claude-opus-5-5', 'claude-fable-5-1', 'claude-fable-5']) {
+      const efforts = makeAnthropicProvider({ fetch: bodyFetch(), key: 'k' }).reasoningEfforts(m);
+      A.eq(efforts.indexOf('none'), -1, m + " publishes no 'none' — it has no off-switch at all");
+      b = await ask(m, { reasoningEffort: 'none' });
+      A.eq(b.thinking, { type: 'adaptive' }, m + " clamps a saved OFF up to adaptive, never an off-switch");
+      A.ok(b.output_config && b.output_config.effort, m + ' carries a real effort instead');
+    }
+
     // G4: the 4.6 family predates `xhigh` — asking for it clamps UP to the strongest level it does publish.
     A.eq(makeAnthropicProvider({ fetch: bodyFetch(), key: 'k' }).reasoningEfforts('claude-sonnet-4-6').indexOf('xhigh'), -1, '4.6 publishes no xhigh');
     b = await ask('claude-sonnet-4-6', { reasoningEffort: 'xhigh' });

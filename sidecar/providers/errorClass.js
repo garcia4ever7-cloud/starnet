@@ -360,7 +360,17 @@
     if (/unauthorized|invalid api key|no auth credentials|authentication/.test(low)) return 'auth';
     if (/timed out|timeout/.test(low)) return 'timeout';
     // 5. transport
-    if (/ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ECONNABORTED|UND_ERR/i.test(transportCode(err))) return 'timeout';
+    // ERR_HTTP2_* (2026-10-22): Node's global fetch (undici) auto-negotiates h2 via ALPN against any server that
+    // offers it — OpenRouter's edge does — and a brief network interruption on a long-lived streaming connection
+    // (observed live: Android/Termux, Node v26) resets the h2 STREAM rather than the whole socket, which throws
+    // as `TypeError: fetch failed` with `.cause.code` one of these, not any of the ECONNRESET-family codes above.
+    // Unmatched, this fell through to 'unknown' — which recovery-policy.js's PRESTREAM_CONTINUABLE deliberately
+    // excludes from the loop's own retry ladder once the adapter's own quick pre-stream retries are spent, so a
+    // run died near-instantly on the FIRST such reset with zero real backoff (confirmed live: three agents in the
+    // same team run, three different models, identical zero-retry 'unknown' deaths). Classifying it as the
+    // already-handled 'timeout' class — exactly like every other transient transport drop here — restores the
+    // full, patient, multi-attempt backoff ladder (sidecar/recovery-policy.js) instead of an instant death.
+    if (/ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|ECONNABORTED|UND_ERR|ERR_HTTP2_(?:STREAM_ERROR|INVALID_STREAM|STREAM_CANCEL|SESSION_ERROR|GOAWAY_SESSION|ERROR)/i.test(transportCode(err))) return 'timeout';
     // 6. ratio heuristic (only with a known limit)
     if (overRatio(low, ctx)) return 'context_overflow';
     // 7. unknown — one retry is safe-ish

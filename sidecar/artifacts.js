@@ -14,6 +14,16 @@
      mcp__<server>__<send-ish tool>  -> { kind:'message', target:<server> }  (an MCP connector is the only
                                         in-run path that can send to a channel today; the Telegram/Discord hub
                                         delivers the REPLY after runOnce returns, outside any tool call)
+     result.producedFiles[]          -> { kind:'image'|'file', path, bytes? } per entry (2026-10-22: the generic
+                                        escape hatch — any tool whose NAME isn't one of the ones matched above can
+                                        still prove what it wrote by attaching `producedFiles: [{path, bytes?}]`
+                                        to its own result. mockup_compose, image_print_prep, vector_export and
+                                        image_stock_fetch all do this — none of their tool names match the
+                                        hard-coded branches above, so without this their real output was silently
+                                        invisible to the Deliverables panel despite the files genuinely existing.
+                                        Kind is decided by extension, same image-extension list deliverableFile()
+                                        in sidecar/index.js uses. Checked FIRST so a future tool only has to adopt
+                                        this one convention rather than earn its own named branch.)
    target/path are display labels only: NEVER message content, NEVER chat ids — nothing secret/PII enters
    the ledger. Failed calls (result.ok === false / isError) produce nothing. Unknown tools are ignored.
    Repeated writes to the same path dedupe (last bytes win). Capped: max 50 records, strings cut at 260.
@@ -89,6 +99,11 @@
     return ((verb && noun) || /^send$/i.test(rest)) ? m[1] : '';
   }
 
+  // Mirrors deliverableFile()'s image-extension list in sidecar/index.js — kept independent (not imported)
+  // because this module stays Node-core-only and dependency-free by design.
+  const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+  function producedFileKind(p) { return IMAGE_EXT_RE.test(String(p == null ? '' : p)) ? 'image' : 'file'; }
+
   function makeArtifactCollector(opts) {
     opts = opts || {};
     const cap = (typeof opts.maxEntries === 'number' && opts.maxEntries > 0) ? opts.maxEntries : MAX_ENTRIES;
@@ -130,6 +145,13 @@
         if (!r || r.ok === false || r.isError) return;
         const name = String(ob.toolName || ob.name || '');
         const args = (ob.args && typeof ob.args === 'object') ? ob.args : {};
+        // Generic escape hatch, checked first: a tool whose name matches none of the branches below can still
+        // prove what it wrote via result.producedFiles (see the header note). Each entry is one real write the
+        // tool already performed in this same call, so it is trusted the same way the name-matched branches are.
+        if (Array.isArray(r.producedFiles)) {
+          for (const f of r.producedFiles) { if (f && f.path) addFile(producedFileKind(f.path), f.path, f.bytes); }
+          return;
+        }
         if (name === 'fs.write') return addFile('file', args.path, utf8Len(args.content));
         if (name === 'fs.append') {
           const m = /now (\d+)\)/.exec(String(r.content || ''));   // "Appended to p (+N bytes, now M)." -> M = the file's real size
@@ -159,5 +181,5 @@
     };
   }
 
-  return { makeArtifactCollector, _internals: { utf8Len, patchWrites, mcpMessageTarget, imagePathFrom, MAX_ENTRIES, STR_MAX } };
+  return { makeArtifactCollector, _internals: { utf8Len, patchWrites, mcpMessageTarget, imagePathFrom, producedFileKind, MAX_ENTRIES, STR_MAX } };
 });

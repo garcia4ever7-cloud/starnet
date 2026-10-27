@@ -84,6 +84,80 @@ const okr = { ok: true, isError: false, content: 'ok', summary: 'ok' };
   A.eq(_internals.imagePathFrom({ content: 'Generated and saved images/x y.png (3 KB, image/png, model m).' }), 'images/x y.png', 'content-sentence fallback tolerates spaces');
 }
 
+// ---- F2. result.producedFiles: the generic escape hatch for tool names the branches above don't match ----
+// (mockup_compose, image_print_prep, vector_export, image_stock_fetch — shapes copied from their own
+// return statements, 2026-10-22. Before this branch existed, their real output was invisible to run.artifacts.)
+{
+  A.eq(_internals.producedFileKind('a/b-hero-mockup.jpg'), 'image', 'jpg classified as image');
+  A.eq(_internals.producedFileKind('outbox/room-2.json'), 'file', 'json classified as file');
+
+  // mockup_compose: result.producedFiles from its own `results` array (path/bytes already real)
+  const c1 = makeArtifactCollector();
+  c1.observe({
+    toolName: 'mockup_compose', args: { print_file: 'outbox/isaiah-40-31-4k-kit/isaiah-40-31-ratio-4x5-4800x6000.jpg', product_name: 'Isaiah 40:31' },
+    result: {
+      ok: true, isError: false, content: 'mockup_compose from ... :\nhero-mockup -> ... (2000x2000, 480 KB)',
+      summary: 'mockup_compose -> 5 listing photo(s) for Isaiah 40:31',
+      producedFiles: [
+        { path: 'outbox/isaiah-40-31-4k-kit/listing-photos/isaiah-40-31-ratio-4x5-4800x6000-hero-mockup.jpg', bytes: 491520 },
+        { path: 'outbox/isaiah-40-31-4k-kit/listing-photos/isaiah-40-31-ratio-4x5-4800x6000-print-alone.jpg', bytes: 450000 },
+        { path: 'outbox/isaiah-40-31-4k-kit/listing-photos/isaiah-40-31-ratio-4x5-4800x6000-sizes-chart.jpg', bytes: 300000 },
+        { path: 'outbox/isaiah-40-31-4k-kit/listing-photos/isaiah-40-31-ratio-4x5-4800x6000-lettering-closeup.jpg', bytes: 200000 },
+        { path: 'outbox/isaiah-40-31-4k-kit/listing-photos/isaiah-40-31-ratio-4x5-4800x6000-what-you-get.jpg', bytes: 250000 }
+      ]
+    }
+  });
+  A.eq(c1.count(), 5, 'all 5 mockup_compose listing photos recorded despite the tool name matching no branch');
+  A.ok(c1.list().every(a => a.kind === 'image'), 'mockup_compose jpgs classified as image');
+
+  // image_print_prep: result.producedFiles from its own `results` array
+  const c2 = makeArtifactCollector();
+  c2.observe({
+    toolName: 'image_print_prep', args: { image: 'be-still.png' },
+    result: {
+      ok: true, isError: false, content: 'Print-prep from be-still.png ...', summary: 'print-prep -> 3 size(s): 8x10, 11x14, 16x20',
+      producedFiles: [
+        { path: 'be-still-8x10-300ppi.png', bytes: 1200000 },
+        { path: 'be-still-11x14-300ppi.png', bytes: 1800000 },
+        { path: 'be-still-16x20-300ppi.png', bytes: 2400000 }
+      ]
+    }
+  });
+  A.eq(c2.list().map(a => a.path), ['be-still-8x10-300ppi.png', 'be-still-11x14-300ppi.png', 'be-still-16x20-300ppi.png'], 'image_print_prep files recorded');
+
+  // vector_export: result.producedFiles mixes png (image) and pdf (file)
+  const c3 = makeArtifactCollector();
+  c3.observe({
+    toolName: 'vector_export', args: { path: 'logo.svg' },
+    result: {
+      ok: true, isError: false, content: 'Exported logo.svg to 2 files ...', summary: 'vector_export → 2 files',
+      producedFiles: [{ path: 'logo-a4-300ppi.png', bytes: 900000 }, { path: 'logo-a4.pdf', bytes: 150000 }]
+    }
+  });
+  A.eq(c3.list(), [{ kind: 'image', path: 'logo-a4-300ppi.png', bytes: 900000 }, { kind: 'file', path: 'logo-a4.pdf', bytes: 150000 }], 'vector_export png is image, pdf is file');
+
+  // image_stock_fetch: result.producedFiles includes the image PLUS its .license.json provenance doc
+  const c4 = makeArtifactCollector();
+  c4.observe({
+    toolName: 'image_stock_fetch', args: { query: 'watercolor paper texture' },
+    result: {
+      ok: true, isError: false, content: 'Saved 1 of 1 requested ...', summary: 'image_stock_fetch → 1 saved, 0 refused on licence',
+      producedFiles: [{ path: 'stock/texture-1.jpg', bytes: 300000 }, { path: 'stock/texture-1.jpg.license.json' }]
+    }
+  });
+  A.eq(c4.list(), [{ kind: 'image', path: 'stock/texture-1.jpg', bytes: 300000 }, { kind: 'file', path: 'stock/texture-1.jpg.license.json' }], 'stock image + its license record both recorded');
+
+  // producedFiles wins over a name-matched branch if a result somehow carried both (defensive, not expected live)
+  const c5 = makeArtifactCollector();
+  c5.observe({ toolName: 'fs.write', args: { path: 'ignored.txt', content: 'x' }, result: Object.assign(wrote('ignored.txt', 1), { producedFiles: [{ path: 'real.txt', bytes: 2 }] }) });
+  A.eq(c5.list(), [{ kind: 'file', path: 'real.txt', bytes: 2 }], 'producedFiles is checked first and takes priority');
+
+  // a failed call with producedFiles still records nothing (the isError gate runs before this branch)
+  const c6 = makeArtifactCollector();
+  c6.observe({ toolName: 'mockup_compose', args: {}, result: { ok: false, isError: true, content: 'consent denied', producedFiles: [{ path: 'should-not-appear.jpg', bytes: 1 }] } });
+  A.eq(c6.count(), 0, 'a failed/denied call never records producedFiles either');
+}
+
 // ---- G. MCP channel sends -> { kind:'message', target:<server label only> } — never args/content ----
 {
   A.eq(_internals.mcpMessageTarget('mcp__telegram__send_message'), 'telegram', 'send_message matches');

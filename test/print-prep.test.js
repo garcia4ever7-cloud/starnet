@@ -1,9 +1,11 @@
 /* node test/print-prep.test.js — the STUDIO print-prep skill: image_print_prep. Offline + deterministic
    (real temp workspace, a synthetic source PNG built with @napi-rs/canvas so the test owns its own fixture
    rather than depending on any live product artwork). Pairs with sidecar/tools/builtin/print-prep.js.
-   Verifies: exact target pixel dimensions, a correct 300-PPI pHYs chunk (round-tripped through the PNG
-   byte stream, not just the in-memory object), the aspect-match vs letterbox-pad branch choice, jail
-   safety, a clean error on a missing source file, and tool metadata (capability/consent). */
+   Verifies: exact target pixel dimensions, a correct 300-DPI JFIF density round-trip (2026-10-22: output
+   switched PNG -> JPEG so Etsy's real 20 MB digital-download cap can never be exceeded — confirmed live on
+   5 real KJV print kits that a full-bleed 300-PPI PNG routinely blew past it), the real on-disk byte size
+   staying under budget, the aspect-match vs letterbox-pad branch choice, jail safety, a clean error on a
+   missing source file, and tool metadata (capability/consent). */
 'use strict';
 const A = require('./_assert.js');
 const fsp = require('node:fs/promises');
@@ -79,6 +81,23 @@ function ctx() { const events = []; return { agentId: AID, room: 'office', emit:
     A.eq(_internals.readPhys(fakePng), null, 'a PNG with no pHYs chunk reads back null, never a guessed value');
   }
 
+  // ---- pure JFIF density round-trip, against a REAL @napi-rs/canvas JPEG (the exact byte layout the live
+  // tool depends on — a hand-built fake would hide a real encoder-layout drift) ----
+  {
+    const realJpeg = await canvasLib.createCanvas(4, 4).encode('jpeg', 90);
+    A.eq(realJpeg[0], 0xFF, 'real encoder output starts with the JPEG SOI marker');
+    A.eq(realJpeg[2], 0xFF, 'real encoder emits APP0 as the very first segment (the layout injectJfifDpi assumes)');
+    A.eq(realJpeg[3], 0xE0, 'that first segment is APP0');
+    const withDpi = _internals.injectJfifDpi(realJpeg, _internals.PPI);
+    const read = _internals.readJfifDpi(withDpi);
+    A.ok(!!read, 'JFIF density is present after injection');
+    A.eq(read.x, 300, 'JFIF X density matches the injected 300 DPI');
+    A.eq(read.y, 300, 'JFIF Y density matches the injected 300 DPI');
+    A.eq(read.unit, 1, 'unit specifier is 1 (dots per inch)');
+    A.ok(withDpi !== realJpeg, 'injectJfifDpi returns a new buffer, never mutates the caller\'s');
+    await A.throws(() => _internals.injectJfifDpi(Buffer.from([0, 1, 2, 3]), 300), 'a buffer with no real JFIF header is refused, never silently no-op');
+  }
+
   // ---- a 4:5 source (matches 8x10 and 16x20 exactly) ----
   {
     const srcRel = 'outbox/synthetic-4x5.png';
@@ -89,15 +108,16 @@ function ctx() { const events = []; return { agentId: AID, room: 'office', emit:
     A.eq(c.events.length, 2, 'one deliverable event per produced size');
 
     for (const [size, w, h] of [['8x10', 2400, 3000], ['16x20', 4800, 6000]]) {
-      const abs = path.join(ROOT, AID, 'outbox', 'synthetic-4x5-' + size + '-300ppi.png');
-      A.ok(fssync.existsSync(abs), size + ': output file exists on disk at the expected path');
+      const abs = path.join(ROOT, AID, 'outbox', 'synthetic-4x5-' + size + '-300ppi.jpg');
+      A.ok(fssync.existsSync(abs), size + ': output file exists on disk at the expected path (JPEG, not PNG)');
       const buf = fssync.readFileSync(abs);
       const img = new canvasLib.Image(); img.src = buf;
       A.eq(img.width, w, size + ': decoded width matches the exact target pixel dimension');
       A.eq(img.height, h, size + ': decoded height matches the exact target pixel dimension');
-      const phys = _internals.readPhys(buf);
-      A.ok(!!phys && _internals.pixelsPerMeterToPpi(phys.x) === 300, size + ': the file on disk (re-read independently) carries a verified 300 PPI pHYs chunk');
-      A.ok(result.content.indexOf(size + ' -> outbox/synthetic-4x5-' + size + '-300ppi.png') >= 0, size + ': the report names the exact real path');
+      const dpi = _internals.readJfifDpi(buf);
+      A.ok(!!dpi && dpi.x === 300 && dpi.y === 300 && dpi.unit === 1, size + ': the file on disk (re-read independently) carries verified 300 DPI JFIF metadata');
+      A.ok(buf.length < _internals.MAX_PRINT_BYTES, size + ': real on-disk JPEG bytes are under the 19.5 MB budget (Etsy rejects anything over 20 MB)');
+      A.ok(result.content.indexOf(size + ' -> outbox/synthetic-4x5-' + size + '-300ppi.jpg') >= 0, size + ': the report names the exact real path');
     }
     A.ok(/full-bleed/.test(result.content), 'a 4:5 source at an exact-4:5 target is reported as full-bleed, not padded');
     A.ok(!/letterboxed/.test(result.content), 'no letterbox language for a ratio-matched size');
@@ -108,7 +128,7 @@ function ctx() { const events = []; return { agentId: AID, room: 'office', emit:
     const srcRel = 'outbox/synthetic-4x5.png';   // reuse — already on disk from the block above
     const c = ctx();
     const result = await prepTool.run({ image: srcRel, sizes: ['11x14'] }, c);
-    const abs = path.join(ROOT, AID, 'outbox', 'synthetic-4x5-11x14-300ppi.png');
+    const abs = path.join(ROOT, AID, 'outbox', 'synthetic-4x5-11x14-300ppi.jpg');
     const buf = fssync.readFileSync(abs);
     const img = new canvasLib.Image(); img.src = buf;
     A.eq(img.width, 3300, '11x14 width is exact regardless of the letterbox');

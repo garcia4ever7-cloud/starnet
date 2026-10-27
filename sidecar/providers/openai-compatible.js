@@ -418,6 +418,9 @@
         ? Math.min(maxTokens || maxChatTokens, maxChatTokens) : maxTokens;
       const outputCap = Number.isFinite(explicitMax) && explicitMax > 0 ? explicitMax : defaultCap;
       if (outputCap > 0 && !skip('max_tokens')) body.max_tokens = outputCap;
+      if (process.env.STARNET_TOOLWIRE_DEBUG) {
+        process.stderr.write('[toolwire] openai-compatible req.tools=' + ((req.tools||[]).length) + '\n');
+      }
       if (req.tools && req.tools.length) {
         // Grammar-safe property keys on every tool, and the Moonshot dialect on a Kimi route (a strict 400 on the
         // whole request otherwise). A well-formed catalog on any other route is req.tools itself, byte-identical.

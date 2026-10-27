@@ -94,7 +94,21 @@ A.ok(/hasOwnProperty\.call\(patch, 'unattendedGrants'\)\) next\.unattendedGrants
   'the PATCH path re-normalizes too (the EDITABLE loop copies raw values)');
 A.ok(/unattendedGrants: Array\.isArray\(job\.unattendedGrants\)/.test(driver), 'the scheduled tick passes the job grant into the run');
 A.ok(/unattendedGrants: Array\.isArray\(job\.unattendedGrants\)/.test(src), 'Run Now passes it too, so "test it now" exercises the real posture');
-A.ok(/const GRANTABLE_UNATTENDED = new Set\(\['workbench', 'connectors'\]\)/.test(policy), 'the authority owns a closed whitelist of grantable families');
+/* The whitelist is CLOSED — that is the property, not its exact length. Pinning the literal
+   `['workbench', 'connectors']` made adding a deliberately-modelled third family (2026-10-27:
+   'orchestrator', unattended delegation) read as a regression. Assert the shape and the exact membership
+   instead, so an UNmodelled name appearing here still fails loudly. */
+{
+  const m = /const GRANTABLE_UNATTENDED = new Set\(\[([^\]]*)\]\)/.exec(policy);
+  A.ok(m, 'the authority owns a closed whitelist of grantable families');
+  const names = m ? m[1].split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean).sort() : [];
+  A.eq(names, ['connectors', 'orchestrator', 'workbench'],
+    'and its members are exactly the three families the host models — a new name here needs its own gate + tier');
+}
+A.ok(/dispatchAutonomy\(call, tool\)\) return \{ allow: true/.test(perms),
+  'the consent broker has a matching delegation tier (the orchestrator grant is useless without it: team.dispatch is scope execute)');
+A.ok(/if \(!dispatchableTool\(tool\.name\)\) return false/.test(perms),
+  'and that tier is narrowed by exact TOOL NAME, so routine.create / loop.* / team.summon stay human-gated');
 A.ok(/function isConnectorTool\(tool\) \{\s*return \/\^mcp:\/\.test/.test(policy), 'connector tools are identified by the mcp: capability prefix');
 A.ok(/connectorsGranted && isConnectorTool\(tool\)/.test(policy),
   'the connector grant is narrowed to REAL connectors — it never opens the external-unknown catch-all');
