@@ -198,10 +198,41 @@ function runGit(args, opts) {
     const idx2 = tiny.list(aid2);
     A.ok(idx2.snapshots.length >= 1, 'index still holds at least the post-sweep baseline');
     const last2 = idx2.snapshots[idx2.snapshots.length - 1].id;
-    A.ok(await tiny.restore(aid2, last2), 'restore works after a size-ceiling re-init');
-    // an explicit enforce call reports it swept (repo is > 1 byte)
-    const rep = await tiny.enforceSizeCeiling(aid2);
-    A.ok(rep.swept, 'enforceSizeCeiling reports a sweep when over the ceiling');
+    A.ok(await tiny.restore(aid2, last2), 'restore works after a size-ceiling sweep');
+    /* ---- 11a. AN UNWINNABLE CEILING SWEEPS ONCE, NOT ON EVERY COMMIT ----
+       Live defect 2026-10-27: NIGHT4CHRIST's shadow repo sat at 1.45GB against the 500MB ceiling because
+       252 tracked 20-27MB print PNGs lived in its work tree. `gc --prune=now` reclaimed 6KB (the objects
+       are reachable and already packed) and the re-init fallback timed out hashing a 1.6GB tree, so the
+       store re-ran the whole sweep before EVERY mutating tool call: ~22s of git at 216% of one core and
+       +28C on the phone's CPU per message to the agent, for a byte-for-byte identical repo. The contract
+       is now: sweep once, remember that it could not win, and defer until the repo actually grows. */
+    const freshStore = () => makeCheckpointStore({ fs, pathMod: path, root, runGit, clock, keep: 5, maxRepoBytes: 1 });
+    const unwinnable = freshStore();
+    const sweep1 = await unwinnable.enforceSizeCeiling(aid2);
+    A.ok(sweep1.swept, 'the first enforce over an unwinnable ceiling does sweep');
+    A.ok(sweep1.bytesAfter > 1, 'and it ends still over the 1-byte ceiling (nothing could shrink it that far)');
+    const sweep2 = await unwinnable.enforceSizeCeiling(aid2);
+    A.eq(sweep2.swept, false, 'a repeat enforce with no growth does NOT sweep again');
+    A.eq(sweep2.deferred, true, 'it reports deferred, so the skip is visible rather than silent');
+    A.ok(fs.existsSync(path.join(gitDir2, 'HEAD')), 'and the repo is still intact after the deferral');
+    // the memo is per-store, so a fresh store re-measures rather than inheriting another instance's verdict
+    A.ok((await freshStore().enforceSizeCeiling(aid2)).swept, 'a new store re-measures (memo is process/instance-local)');
+    /* ---- 11b. RE-INIT IS REFUSED WHEN THE WORK TREE ALONE EXCEEDS THE CEILING ----
+       A re-init baseline is one commit of the current tree, so it can never be smaller than that tree.
+       Attempting it anyway hashes the whole tree and destroys every rollback point to land over the
+       ceiling regardless. The 1-byte ceiling above is exactly that case: the tree is ~1KB. */
+    A.eq(sweep1.reinit, false, 're-init is refused when the work tree alone is over the ceiling');
+    A.ok(unwinnable.list(aid2).snapshots.length >= 1, 'and the rollback history was not sacrificed for nothing');
+    /* ---- 11c. RE-INIT STILL RUNS WHEN IT CAN WIN (the ceiling sits between tree and repo) ---- */
+    {
+      const du = (dir) => { let t = 0; for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); try { t += e.isDirectory() ? du(f) : fs.statSync(f).size; } catch (_) {} } return t; };
+      const treeBytes = du(wt2), repoBytes = du(gitDir2);
+      A.ok(treeBytes < repoBytes, 'precondition: the shadow repo is larger than the tiny work tree');
+      const winnable = makeCheckpointStore({ fs, pathMod: path, root, runGit, clock, keep: 5, maxRepoBytes: Math.floor((treeBytes + repoBytes) / 2) });
+      const rep3 = await winnable.enforceSizeCeiling(aid2);
+      A.eq(rep3.reinit, true, 're-init runs when a one-commit baseline of the tree CAN fit under the ceiling');
+      A.ok(await winnable.restore(aid2, winnable.list(aid2).snapshots.slice(-1)[0].id), 'and the post-re-init baseline is restorable');
+    }
     // a huge ceiling is a no-op
     const big = makeCheckpointStore({ fs, pathMod: path, root, runGit, clock, keep: 5, maxRepoBytes: 1 << 30 });
     const rep2 = await big.enforceSizeCeiling(aid2);

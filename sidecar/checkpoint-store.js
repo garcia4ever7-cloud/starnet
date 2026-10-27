@@ -53,6 +53,17 @@
     const allowWorkTree = typeof d.allowWorkTree === 'function' ? d.allowWorkTree : function () { return false; };
     const keep = d.keep != null ? d.keep : KEEP_DEFAULT;
     const maxRepoBytes = d.maxRepoBytes != null ? d.maxRepoBytes : MAX_REPO_BYTES_DEFAULT;
+    /* SWEEP MEMO — the ceiling sweep must not be re-run on every commit once it has proved it cannot win.
+       Measured on the live station 2026-10-27: NIGHT4CHRIST's shadow repo held 1.45GB (252 tracked 20-27MB
+       print PNGs under workspaces/agent/outbox/) against the 500MB ceiling. `gc --prune=now` reclaimed 6KB
+       of 1,445,275,017B — the objects are reachable and already packed, so there is nothing to reclaim —
+       and the re-init fallback needs 46s to hash a 1.6GB work tree against a 15s execFile timeout, so it
+       was killed, cleaned up and reported false every time. Net effect per MUTATING TOOL CALL: ~22s of git
+       at 216% of one core, +28C on the phone's CPU, and a repo byte-for-byte as large as before. Keyed per
+       (agent, scope) and process-local on purpose: one sweep per repo per boot is a bounded, honest cost,
+       and a restart is exactly when re-measuring is cheap. Cleared whenever the repo comes back under. */
+    const sweepMemo = new Map();                        // "<aid>::<scopeId>" -> { bytesAfter }
+    const SWEEP_RETRY_GROWTH = 1.25;                    // re-sweep only after the repo grows 25% past the last failed sweep
     if (!fs || !pathMod || !root || typeof runGit !== 'function') throw new Error('checkpoint-store: fs/pathMod/root/runGit are required');
 
     const defaultWorkTreeFor = (aid) => pathMod.join(root, aid);
@@ -281,21 +292,49 @@
           fresh single-commit repo of the current worktree, then RE-STAMPS the index to that one commit. This
           sacrifices the older in-index rollback points to keep disk bounded — a disclosed, honest tradeoff, taken
           ONLY past the ceiling. Fail-open: any git failure leaves the repo as-is (never crash a run).
-       Returns { swept, reinit, bytesBefore, bytesAfter } for tests/telemetry. */
+       3) a sweep that ENDS still over the ceiling is remembered (sweepMemo) and not retried until the repo
+          has grown SWEEP_RETRY_GROWTH past that size. Without this, a repo the sweep cannot shrink pays the
+          full gc + re-init cost on every single mutating tool call, forever — see the memo's note above.
+       Returns { swept, reinit, deferred, bytesBefore, bytesAfter } for tests/telemetry. */
     async function enforceSizeCeiling(aid, scope) {
       if (!(maxRepoBytes > 0) || !repoExists(aid, scope)) return { swept: false, reinit: false };
       const gitDir = gitDirFor(aid, scope);
+      const memoKey = String(aid) + '::' + String((scope && scope.id) || '');
       const before = dirBytes(gitDir);
-      if (before <= maxRepoBytes) return { swept: false, reinit: false, bytesBefore: before, bytesAfter: before };
+      if (before <= maxRepoBytes) { sweepMemo.delete(memoKey); return { swept: false, reinit: false, bytesBefore: before, bytesAfter: before }; }
+      // A sweep already proved it cannot get THIS repo under the ceiling and the repo has not grown
+      // materially since. Repeating it costs seconds of pegged CPU and reclaims nothing — skip, and say so.
+      const memo = sweepMemo.get(memoKey);
+      if (memo && before < memo.bytesAfter * SWEEP_RETRY_GROWTH) {
+        return { swept: false, reinit: false, deferred: true, bytesBefore: before, bytesAfter: before };
+      }
       try { await git(aid, scope, ['gc', '--prune=now', '-q']); } catch (_) {}
       let after = dirBytes(gitDir);
       let reinit = false;
-      if (after > maxRepoBytes) {
+      /* A re-init baseline is ONE commit of the CURRENT work tree, so the replacement repo can never be
+         smaller than that tree. When the tree ALONE is over the ceiling the re-init is provably futile:
+         attempting it burns a full content hash of the tree and then throws away every rollback point the
+         Commander has, to land over the ceiling anyway. Refuse it and keep the history. dirBytes on the
+         live 1.6GB tree measured 8ms, so the check is free next to what it prevents. */
+      const treeBytes = after > maxRepoBytes ? dirBytes(workTreeFor(aid, scope)) : 0;
+      const reinitFutile = after > maxRepoBytes && treeBytes > maxRepoBytes;
+      if (after > maxRepoBytes && !reinitFutile) {
         reinit = await reinitFromCurrentTree(aid, scope);
         after = dirBytes(gitDir);
       }
-      try { console.warn('[checkpoint] shadow repo for ' + aid + ' over ceiling (' + before + 'B) -> ' + (reinit ? 're-init' : 'gc') + ' -> ' + after + 'B'); } catch (_) {}
-      return { swept: true, reinit: reinit, bytesBefore: before, bytesAfter: after };
+      if (after > maxRepoBytes) sweepMemo.set(memoKey, { bytesAfter: after });
+      else sweepMemo.delete(memoKey);
+      try {
+        // Truthful telemetry: when the sweep cannot win, the log says so and names the reason, instead of
+        // printing a reassuring "-> gc ->" beside two numbers that are identical.
+        const how = reinit ? 're-init' : 'gc';
+        const verdict = after > maxRepoBytes
+          ? ' — STILL OVER CEILING (' + maxRepoBytes + 'B)' + (reinitFutile ? '; re-init refused: work tree alone is ' + treeBytes + 'B' : '')
+            + '; no further sweeps until it grows past ' + Math.floor(after * SWEEP_RETRY_GROWTH) + 'B'
+          : '';
+        console.warn('[checkpoint] shadow repo for ' + aid + ' over ceiling (' + before + 'B) -> ' + how + ' -> ' + after + 'B' + verdict);
+      } catch (_) {}
+      return { swept: true, reinit: reinit, deferred: false, bytesBefore: before, bytesAfter: after };
     }
     // wipe the shadow git-dir and re-create a single baseline commit of the CURRENT worktree, then re-stamp the
     // index to that one snapshot. Returns true on success. Fail-open (false) leaves the repo untouched on error.
