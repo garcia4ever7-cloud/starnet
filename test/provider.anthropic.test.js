@@ -377,15 +377,63 @@ async function collect(provider, req) { const out = []; for await (const e of pr
     const evs2 = await collect(makeAnthropicProvider({ fetch: sseFetch(unsigned), key: 'k' }), { model: 'claude-opus-5', messages: [{ role: 'user', content: 'hi' }] });
     A.eq(evs2.filter(e => e.type === 'reasoning').length, 0, 'an unsigned thinking block is dropped, not replayed');
 
+    /* ONLY THIS RUN'S OWN BLOCKS MAY BE REPLAYED (2026-10-27 crash).
+       Anthropic binds a thinking block's signature to the provider, the model AND the conversation prefix
+       that produced it:
+         400 Invalid signature in thinking block. The block is bound to a different conversation.
+       The block that caused it had survived a COMPACTION — the fold swaps the earlier history for a summary
+       note but keeps the tail's original message objects, so a block that was valid before the fold ends up
+       in front of a conversation it was never signed against. loop.js stamps each block with `__src`
+       {provider, model, runId, epoch} and bumps the epoch on every history rewrite; the adapter replays a
+       block only when all four match the live request's `reasoningScope`. */
+    const SCOPE = { provider: 'anthropic', model: 'claude-opus-5', runId: 'r1', epoch: 0 };
+    const stamped = (over) => ({ type: 'thinking', thinking: 't', signature: 's', __src: Object.assign({}, SCOPE, over || {}) });
+
     // REPLAY ORDER is load-bearing: the thinking block must precede the tool_use it reasoned toward.
     const conv = _internals.messagesToAnthropic([
       { role: 'user', content: 'go' },
-      { role: 'assistant', content: 'ok', reasoning: [{ type: 'thinking', thinking: 't', signature: 's' }], tool_calls: [{ id: 'c1', function: { name: 'fs_read', arguments: '{}' } }] }
-    ]);
+      { role: 'assistant', content: 'ok', reasoning: [stamped()], tool_calls: [{ id: 'c1', function: { name: 'fs_read', arguments: '{}' } }] }
+    ], SCOPE);
     const a = conv.messages[1].content;
     A.eq(a[0], { type: 'thinking', thinking: 't', signature: 's' }, 'reasoning block replays FIRST in the assistant turn');
     A.eq(a[1].type, 'text', 'text follows the thinking block');
     A.eq(a[2].type, 'tool_use', 'tool_use follows both');
+    A.eq(Object.prototype.hasOwnProperty.call(a[0], '__src'), false,
+      'the host-only __src stamp never reaches the wire — the adapter rebuilds each block from type/thinking/signature');
+
+    /* THE CRASH ITSELF. Each of these would have been replayed verbatim before the fix and answered 400.
+       A dropped block costs the model one turn's private scratchpad; a foreign one costs the whole run. */
+    const foreign = [
+      ['a pre-compaction block (the reported crash)', stamped({ epoch: 0 }), { epoch: 1 }],
+      ['a block from another run/session', stamped({ runId: 'other-run' }), {}],
+      ['a block from a different model', stamped({ model: 'claude-sonnet-5-5' }), {}],
+      ['a block from a different provider', stamped({ provider: 'openrouter' }), {}]
+    ];
+    for (const [what, block, scopeOver] of foreign) {
+      const got = _internals.messagesToAnthropic(
+        [{ role: 'assistant', content: 'ok', reasoning: [block] }],
+        Object.assign({}, SCOPE, scopeOver));
+      A.eq(got.messages[0].content, [{ type: 'text', text: 'ok' }], what + ' is dropped, not replayed');
+    }
+
+    // An UNSTAMPED block is dropped too, and this is the load-bearing half: anything reaching the adapter
+    // from outside the current loop carries no stamp and so can never be mistaken for ours.
+    A.eq(_internals.messagesToAnthropic(
+      [{ role: 'assistant', content: 'ok', reasoning: [{ type: 'thinking', thinking: 't', signature: 's' }] }], SCOPE
+    ).messages[0].content, [{ type: 'text', text: 'ok' }], 'an UNSTAMPED thinking block is dropped (unknown provenance)');
+
+    // No scope on the request (a caller that never set one) must also refuse rather than guess.
+    A.eq(_internals.messagesToAnthropic(
+      [{ role: 'assistant', content: 'ok', reasoning: [stamped()] }]
+    ).messages[0].content, [{ type: 'text', text: 'ok' }], 'no reasoningScope on the request -> nothing is replayed');
+
+    // redacted_thinking obeys the identical gate (it is signed opaque data, same binding).
+    A.eq(_internals.messagesToAnthropic(
+      [{ role: 'assistant', content: 'ok', reasoning: [{ type: 'redacted_thinking', data: 'zz', __src: Object.assign({}, SCOPE, { runId: 'other' }) }] }], SCOPE
+    ).messages[0].content, [{ type: 'text', text: 'ok' }], 'a foreign redacted_thinking block is dropped too');
+    A.eq(_internals.messagesToAnthropic(
+      [{ role: 'assistant', content: 'ok', reasoning: [{ type: 'redacted_thinking', data: 'zz', __src: SCOPE }] }], SCOPE
+    ).messages[0].content[0], { type: 'redacted_thinking', data: 'zz' }, 'and an in-scope redacted_thinking block still replays');
 
     // A message with no reasoning is byte-identical to the pre-thinking shape (every other provider).
     const plain = _internals.messagesToAnthropic([{ role: 'assistant', content: 'hi' }]);

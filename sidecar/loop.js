@@ -1204,6 +1204,14 @@
     // the run total) see it — not just at run end. After 2 consecutive failed/empty summaries, compaction gives
     // up for the rest of the run, bounding wasted paid calls against a degraded model.
     let compactionFails = 0, compactionOff = false, lowSavingsStreak = 0;
+    /* HISTORY EPOCH — bumped every time this run REWRITES its own message history (compaction).
+       A thinking block's signature is bound to the conversation prefix in front of it. Compaction
+       replaces that prefix with a summary note while KEEPING the tail's original message objects, so a
+       block that was valid a moment ago now sits in front of a conversation it was never signed
+       against — which is exactly the 400 this guards:
+         Invalid signature in thinking block. The block is bound to a different conversation.
+       Blocks minted in an older epoch are unreplayable by construction; anthropic.js drops them. */
+    let historyEpoch = 0;
     // H5.2: a conversation_summary note from an EARLIER fold must be MERGED into the next one (one running summary),
     // never left to stack alongside a new note. Detect/strip it anywhere; its inner text seeds the merge.
     const isSummaryNote = (m) => m && m.role === 'system' && typeof m.content === 'string' && m.content.indexOf('<conversation_summary>') === 0;
@@ -1383,6 +1391,7 @@
               try { summarize.drain(plan.older); } catch (e) { failNote('loop.compaction.microDrain', e); return false; }
             }
             carryMarkers(plan.older, micro.older);   // the drained originals' persisted marker rides onto the elided copies
+            historyEpoch++;   // history rewritten -> every thinking block minted before now is unreplayable (see historyEpoch)
             messages.length = 0; for (const mm of trial) messages.push(mm);
             usageReading = null;
             emit('agent.compact', { agentId, runId, beforeTokens, afterTokens, removed: Math.max(0, beforeTokens - afterTokens), reason: 'micro', elided: micro.elided });
@@ -1399,6 +1408,7 @@
         const rebuilt = appendTodo(prefix.concat([note], plan.tail));
         const afterTokens = context.estimateMessages(rebuilt);
         if (afterTokens >= beforeTokens) return false;                  // didn't shrink — don't spin the overflow retry
+        historyEpoch++;   // history rewritten -> every thinking block minted before now is unreplayable (see historyEpoch)
         messages.length = 0; for (const mm of rebuilt) messages.push(mm);
         usageReading = null;
         emit('agent.compact', { agentId, runId, beforeTokens, afterTokens, removed: Math.max(0, beforeTokens - afterTokens), reason: 'fallback' });
@@ -1445,6 +1455,7 @@
       // re-append the active task plan so it rides through the compaction (folded into the after-count below)
       if (todoNote) { try { const tn = todoNote(); if (tn) rebuilt = rebuilt.concat([{ role: 'system', content: String(tn) }]); } catch (e) { failNote('loop.compaction.todoNote', e); } }
       const afterTokens = context.estimateMessages(rebuilt);
+      historyEpoch++;   // history rewritten -> every thinking block minted before now is unreplayable (see historyEpoch)
       messages.length = 0; for (const mm of rebuilt) messages.push(mm);
       if (r && typeof r === 'object') {
         spentUsd += r.usd || 0; spentTokens += r.tokens || 0;   // count the summarizer's own spend
@@ -1584,6 +1595,13 @@
         retrySent = false;
         try {
           const req = { model, messages: wireMessages(), tools, signal, stream: true };   // stale screen captures -> placeholders
+          /* WHOSE THINKING BLOCKS MAY BE REPLAYED ON THIS REQUEST. Anthropic binds a block's signature to
+             the provider, model and conversation prefix that produced it; anything else is a hard 400
+             ("bound to a different conversation"). The adapter compares this against the `__src` stamp on
+             each parked block and replays only exact matches, so a block from another run, another model
+             or a pre-compaction history is dropped instead of killing the turn. Providers that do not
+             sign thinking blocks ignore the field entirely. */
+          req.reasoningScope = { provider: provider, model: model, runId: runId, epoch: historyEpoch };
           if (typeof o.isTask === 'boolean') req.isTask = o.isTask;
           if (o.cacheSystemPrefix) req.cacheSystemPrefix = o.cacheSystemPrefix;
           if (outputCapTokens > 0) req.maxTokens = outputCapTokens;   // the ceiling a provider named (output_cap)
@@ -1603,7 +1621,17 @@
               if (dedupeAgainst == null) emit('agent.token', { agentId, runId, delta });
               else streamedTextChunks.push(delta);
             }
-            else if (ev.type === 'reasoning') { if (ev.block) acc.reasoning.push(ev.block); }
+            /* STAMP EVERY THINKING BLOCK WITH WHERE IT CAME FROM (2026-10-27).
+               Anthropic signs each block against the provider, the model AND the conversation prefix that
+               produced it, then validates that on replay. The adapter replays msg.reasoning verbatim and
+               has no way to tell its own blocks from a foreign one, so this stamp is what lets it refuse.
+               `__src` is host-only bookkeeping: the adapter rebuilds each wire block from
+               type/thinking/signature alone, so it can never ship to a provider. */
+            else if (ev.type === 'reasoning') {
+              if (ev.block) acc.reasoning.push(Object.assign({}, ev.block, {
+                __src: { provider: provider, model: model, runId: runId, epoch: historyEpoch }
+              }));
+            }
             else if (ev.type === 'tool_start') { acc.toolCalls[ev.index] = { id: ev.id, name: ev.name, args: '' }; waiting.resume('streaming'); }
             else if (ev.type === 'tool_args') { if (acc.toolCalls[ev.index]) acc.toolCalls[ev.index].args += (ev.chunk || ''); waiting.resume('streaming'); }
             else if (ev.type === 'usage') { usage = ev.usage; if (cost) emit('cost.estimate', Object.assign({ agentId, runId }, cost.estimate(usage, model))); }

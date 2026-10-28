@@ -266,11 +266,36 @@
   // Replay-safe thinking blocks: only the two shapes the wire defines, only when they carry the field that
   // makes them verifiable. A half-captured block is worse than none (it fails validation and ends the run),
   // so anything unrecognized is dropped rather than guessed at.
-  function thinkingBlocks(reasoning) {
+  /* ONLY THIS RUN'S OWN BLOCKS MAY BE REPLAYED (2026-10-27).
+     Anthropic binds a thinking block's signature to the provider, the model AND the conversation prefix
+     that produced it, and rejects anything else outright:
+
+       400 Invalid signature in thinking block. The block is bound to a different conversation.
+
+     That is a hard failure, not a degrade — the turn dies. The block that triggered it had survived a
+     COMPACTION: the fold replaces the earlier history with a summary note while keeping the tail's
+     original message objects, so a block that was valid before the fold is afterwards sitting in front
+     of a conversation it was never signed against.
+
+     `want` is this run's identity, stamped onto each block by loop.js when the adapter emitted it. A
+     block is replayed only if every field matches. An UNSTAMPED block is dropped too — that is the
+     load-bearing half: anything reaching this adapter from outside the current loop (a caller-supplied
+     message array, a resumed or recovered history, a future path nobody has written yet) carries no
+     stamp and so can never be mistaken for ours.
+
+     Dropping is safe where replaying is not. A dropped block costs the model that turn's private
+     scratchpad; a foreign block costs the whole run. The current turn's own blocks still replay
+     normally, so thinking + tool-use continuation inside a run is unaffected. */
+  function thinkingBlocks(reasoning, want) {
     if (!Array.isArray(reasoning)) return [];
     const out = [];
     for (const b of reasoning) {
       if (!b || typeof b !== 'object') continue;
+      const src = b.__src;
+      if (!src || typeof src !== 'object') continue;                       // unstamped -> not ours -> never replay
+      if (!want) continue;                                                 // no identity to check against -> refuse
+      if (src.provider !== want.provider || src.model !== want.model) continue;
+      if (src.runId !== want.runId || src.epoch !== want.epoch) continue;  // other run, or pre-compaction history
       if (b.type === 'thinking' && typeof b.signature === 'string' && b.signature) {
         out.push({ type: 'thinking', thinking: String(b.thinking == null ? '' : b.thinking), signature: b.signature });
         continue;
@@ -279,7 +304,7 @@
     }
     return out;
   }
-  function messagesToAnthropic(messages) {
+  function messagesToAnthropic(messages, reasoningScope) {
     const picked = extractLeadingSystem(messages || []);
     const out = [];
     for (const msg of picked.rest) {
@@ -300,7 +325,7 @@
         // degrade: it fails the ordering/signature check and kills the turn. loop.js parks whatever this
         // adapter emitted on `msg.reasoning`, so a replay is a passthrough, never a reconstruction. Absent
         // (every other provider, every pre-thinking transcript) = byte-identical to the old behavior.
-        appendMessage(out, 'assistant', thinkingBlocks(msg.reasoning)
+        appendMessage(out, 'assistant', thinkingBlocks(msg.reasoning, reasoningScope)
           .concat(contentToTextBlocks(msg.content))
           .concat(assistantToolBlocks(msg.tool_calls)));
         continue;
@@ -486,7 +511,7 @@
       // ONE pre-send normalization (provider.js prepareWireMessages): every tool_use gets its tool_result in the
       // next turn (a run that died at the tool boundary left one mid-history), and ids minted by another provider
       // (Kimi's functions.read_file:0) are rewritten into this wire's ^[a-zA-Z0-9_-]+$ grammar, call and result alike.
-      const converted = messagesToAnthropic(provider.prepareWireMessages(req.messages || [], 'anthropic'));
+      const converted = messagesToAnthropic(provider.prepareWireMessages(req.messages || [], 'anthropic'), req.reasoningScope);
       const body = {
         model: req.model,
         max_tokens: resolveMaxTokens(req),

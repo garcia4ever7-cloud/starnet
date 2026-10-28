@@ -136,6 +136,7 @@ test/loop.tool-images.test.js
 test/loop.media-cost.test.js
 test/loop.turn-budget.test.js
 test/loop.provider-recovery.test.js
+test/loop.thinking-scope.test.js
 test/loop.failure-recovery.test.js
 test/loop.stop-means-stop.test.js
 test/output-continuation.test.js
