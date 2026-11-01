@@ -38,6 +38,12 @@ const ToolProps = (() => {
     // Studio work, but it carries no image_/resolve_ prefix, so it needs an exact row or the floor stays dark
     // while the agent is visibly producing deliverables. (Alternative image source to OpenRouter.)
     'higgsfield.generate': 'studio',
+    // higgsfield.enhance takes an existing workspace image and enhances it via Higgsfield's REST API.
+    // Studio work, same reason — needs an exact row.
+    'higgsfield.enhance': 'studio',
+    // openai_image_generate renders via OpenAI's /v1/images/generations on its own
+    // dedicated route — studio work, no prefix match, so it needs an exact row.
+    'openai_image_generate': 'studio',
     // vector_export renders a workspace SVG into 300-PPI PNG/PDF print files. Studio work, but it
     // carries no image_/resolve_ prefix, so it needs an exact row or the floor stays dark while the
     // agent is visibly producing deliverables. (image_stock_fetch rides the image_ prefix below.)

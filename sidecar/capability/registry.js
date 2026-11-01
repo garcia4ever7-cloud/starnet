@@ -296,6 +296,17 @@
       // HF_API_KEY+HF_API_SECRET environment. Write + network + consent-gated like image_generate.
       // (see tools/builtin/higgsfield.js)
       { capId: 'studio', tool: 'higgsfield.generate', scope: 'write', requiresConsent: true, network: true },
+      // higgsfield.enhance submits an image-to-image enhancement job via Higgsfield's REST API,
+      // reads an existing workspace image, uploads it to Higgsfield CDN, polls for completion, and
+      // saves the enhanced result back into the workspace. Write + network + consent-gated like
+      // higgsfield.generate. (see tools/builtin/higgsfield.js)
+      { capId: 'studio', tool: 'higgsfield.enhance', scope: 'write', requiresConsent: true, network: true },
+      // openai_image_generate renders via OpenAI's /v1/images/generations (gpt-image-2 / dall-e-*)
+      // on a DEDICATED route — it does not change the default studio visual path (image_generate).
+      // Credentials from OPENAI_API_KEY, resolved independently of Higgsfield (HF_CREDENTIALS) and
+      // OpenRouter (OPENROUTER_API_KEY). Write + network + consent-gated like higgsfield.generate.
+      // (see tools/builtin/openai-image.js)
+      { capId: 'studio', tool: 'openai_image_generate', scope: 'write', requiresConsent: true, network: true },
       // image_print_prep turns an already-generated image into genuine 300-PPI print files (local
       // @napi-rs/canvas upscale + PNG pHYs metadata, no network, no provider credential) — write-gated
       // like image_generate because it publishes new files into the workspace.

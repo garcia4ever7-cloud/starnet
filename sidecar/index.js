@@ -79,6 +79,7 @@ const { makeImageQcTools } = require('./tools/builtin/image-qc.js');      // STU
 const { makeStockImageTools } = require('./tools/builtin/stock-image.js');     // STUDIO: image_stock_fetch — CC0/public-domain source imagery with a per-asset licence record (Commons needs no key; Pexels deliberately excluded, its licence forbids standalone resale)
 const { makeVectorExportTools } = require('./tools/builtin/vector-export.js'); // STUDIO: vector_export — SVG re-rasterised at full target resolution into 300-PPI PNG + real single-page PDF (zero-dep PDF writer; the sidecar has no runtime npm deps)
 const { makeHiggsfieldTools } = require('./tools/builtin/higgsfield.js');   // STUDIO: higgsfield.generate — text-to-image via Higgsfield's REST API with async job polling
+const { makeOpenAIImageTools } = require('./tools/builtin/openai-image.js'); // STUDIO: openai_image_generate — dedicated OpenAI Images API route
 const { makeKlingUpscaleTools } = require('./tools/builtin/image-kling-upscale.js');  // STUDIO: image_upscale_kling — 2x/3x/4x neural AI image upscaling via official Kling 3.0 API
 const { makeConnectorTools } = require('./tools/builtin/connectors.js');  // WEB: connectors.list — what the station HAS wired, and what it could (read-only, no secrets)
 const { makeVoiceTools } = require('./tools/builtin/voice.js');           // STUDIO: voice_generate — speech saved into the workspace as a playable clip
@@ -1038,6 +1039,42 @@ const ledgerIo = {
   }
 };
 const ledger = makeLedger({ io: ledgerIo, clock: { now: () => Date.now() }, nextId: () => crypto.randomUUID() });
+/* SAY IT OUT LOUD AT BOOT (2026-10-27, Rule 1).
+   When ledgerIo.readAll() refuses — an orphaned dispatch receipt from a run the sidecar died mid-flight, i.e.
+   UNSETTLED_SPEND — makeLedger swallows the throw into readError and the station comes up looking perfectly
+   healthy. Every metered agent then fails individually with "spend_history_unavailable" while the boot log says
+   nothing at all. That silence is the actual cost: this has recurred FOUR times on this station and each time
+   the fix was trivial, but only AFTER someone noticed and worked out why nothing was running.
+
+   The refusal itself is deliberate and stays: an interrupted run's real cost is unrecoverable, and writing it
+   off as $0 would hand a capped Commander headroom it never earned (test/spend-authority.http.test.js —
+   "unknown interrupted spend is not guessed zero after restart"). Availability is not worth silently
+   corrupting the day's spend total, so this fixes the DIAGNOSIS, not the invariant: name the blocker, name the
+   files, and name the exact recovery, so the owner spends seconds on it instead of an evening. */
+if (require.main === module) {
+  try {
+    const lh = ledger.health();
+    if (lh && !lh.complete) {
+      let orphans = [];
+      try { orphans = fs.readdirSync(SPEND_PENDING_DIR).filter(n => n.endsWith('.json')); } catch (_) { orphans = []; }
+      console.warn('\n' + '='.repeat(74));
+      console.warn('  ** NO AGENT WILL RUN: the spend ledger is fail-closed (' + lh.readError + ') **');
+      if (lh.readError === 'UNSETTLED_SPEND') {
+        console.warn('  A run was admitted and this process died before its spend was settled, so the');
+        console.warn('  day\'s true total is unknown. Metered runs refuse rather than guess it at $0.');
+      }
+      if (orphans.length) {
+        console.warn('  Unsettled receipt(s) in ' + SPEND_PENDING_DIR + ':');
+        for (const n of orphans.slice(0, 10)) console.warn('    - ' + n);
+        if (orphans.length > 10) console.warn('    ... and ' + (orphans.length - 10) + ' more');
+        console.warn('  The real cost cannot be recovered. To clear it and accept that gap, remove them:');
+        console.warn('    rm ' + path.join(SPEND_PENDING_DIR, '*.json') + '   # then restart');
+      }
+      console.warn('  Detail: STATION_FIELD_NOTES.md section 13h');
+      console.warn('='.repeat(74) + '\n');
+    }
+  } catch (e) { failNote('ledger.bootHealthWarning', e); }
+}
 const budget = makeBudget({ caps: { agent: BUDGET_CAPS.perAgent, day: BUDGET_CAPS.perDay, global: BUDGET_CAPS.global }, ledger, clock: { now: () => Date.now() }, strictScope: budgetScopeIsExplicit });
 // A cap someone CHOSE is strict (fail-closed on uncertain spend history); the SHIPPED $25/day default is a soft rail
 // nobody chose (budget.js strictScope). agent/global ship at 0, so any governed value there was chosen. Read at
@@ -17037,7 +17074,19 @@ async function runOnceCore(o) {
   // filled there, and every tool dispatch happens after the run starts, so the late bind is always resolved by
   // first use. One-shot text collect over the SAME provider.stream interface the loop drives.
   const pendingMediaCosts = [];
-  const mediaCostEngine = makeCostEngine(); // Only the media provider can price image output.
+  // Media pricing: OpenRouter reports usage.cost (real dollars) on the wire, but OpenAI's Images API and
+  // Gemini's generateContent report TOKENS only — with no priceOf here those booked $0 for real spend
+  // (the truthful-telemetry failure class; same as the Higgsfield $0 booking, field notes §13j). Map the
+  // media model to its vendor pricing family and price through the station catalog (liveprices at boot,
+  // prices.js as the offline fallback). Anything unrecognized stays provider-priced-or-unpriced as before.
+  const mediaPriceOf = (m) => {
+    const s = String(m || '');
+    const prices = require('./providers/prices.js');
+    if (/^(?:gpt-image|chatgpt-image|dall-e)/i.test(s)) return prices.priceOf('openai', s);
+    if (/^gemini-/i.test(s)) return prices.priceOf('gemini', s);
+    return null;
+  };
+  const mediaCostEngine = makeCostEngine({ priceOf: mediaPriceOf }); // provider-reported cost still wins when present
   let mediaUsd = 0;
   const recordMediaUsage = (usage, mediaModel) => {
     const cost = mediaCostEngine.reconcile(usage, mediaModel);
@@ -17060,7 +17109,11 @@ async function runOnceCore(o) {
       return out;
     } finally { clearTimeout(t); }
   };
-  const imageTools = makeImageTools({ openrouter: studioRoute.ok ? { apiKey: studioRoute.key, model, baseUrl: studioRoute.baseUrl, provider: studioRoute.provider, protocol: studioRoute.protocol } : null, fsp, pathMod: path, root: WORKSPACES, imageModel: String(ENV('IMAGE_MODEL') || '').trim() || undefined, auxVision: auxVisionCall, signal, onUsage: recordMediaUsage });
+  // openaiImages: the SECONDARY direct-OpenAI route — gpt-image-*/dall-e-* models live only on OpenAI's
+  // Images API and OpenRouter proxies none of them, so a station whose primary studio route resolved to
+  // OpenRouter (the common case: OPENROUTER_API_KEY set) could never reach them. Only an explicit
+  // model:"gpt-image-…" request uses it; the primary route is untouched otherwise.
+  const imageTools = makeImageTools({ openrouter: studioRoute.ok ? { apiKey: studioRoute.key, model, baseUrl: studioRoute.baseUrl, provider: studioRoute.provider, protocol: studioRoute.protocol } : null, openaiImages: providerRuntimeKey('openai', '') ? { apiKey: providerRuntimeKey('openai', ''), baseUrl: providerRuntimeBaseUrl('openai', '') } : null, fsp, pathMod: path, root: WORKSPACES, imageModel: String(ENV('IMAGE_MODEL') || '').trim() || undefined, auxVision: auxVisionCall, signal, onUsage: recordMediaUsage });
   // browser.vision uses the SAME vision model as image_analyze when a key exists; with no key it
   // reports "unavailable" honestly (never a success-shaped stub). Pass the dep only when usable.
   runBrowser = makeBrowserTools({
@@ -17172,6 +17225,17 @@ async function runOnceCore(o) {
   // polls for completion, and downloads the result into the workspace. Credentials from environment
   // (HF_CREDENTIALS or HF_API_KEY + HF_API_SECRET). Integrates with the print-prep pipeline.
   makeHiggsfieldTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  // STUDIO, OpenAI Images (dedicated route): openai_image_generate renders via
+  // OpenAI's /v1/images/generations (gpt-image-2 / dall-e-*). Credentials from OPENAI_API_KEY
+  // via providerRuntimeKey('openai', '') — loaded independently of Higgsfield (HF_CREDENTIALS)
+  // and OpenRouter (OPENROUTER_API_KEY). Default visual routing is unchanged; this tool only
+  // fires on an explicit openai_image_generate call.
+  makeOpenAIImageTools({
+    openaiApiKey: providerRuntimeKey('openai', ''),
+    openaiBaseUrl: providerRuntimeBaseUrl('openai', ''),
+    imageModel: String(ENV('OPENAI_IMAGE_MODEL') || '').trim() || undefined,
+    fsp, pathMod: path, root: WORKSPACES, signal, onUsage: recordMediaUsage
+  }).register(registry);
   // STUDIO, Kling image upscaling: image_upscale_kling submits an image upscaling job to the official
   // Kling 3.0 API (2x/3x/4x neural upscaling), polls for completion, and saves the result. Credentials
   // from KLING_API_KEY environment variable. Integrates with image generation pipeline.

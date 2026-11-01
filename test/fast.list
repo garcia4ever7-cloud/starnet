@@ -62,6 +62,7 @@ test/connector-readback.test.js
 test/recipe-drift.test.js
 test/task-postconditions-ui.test.js
 test/recovery-policy.test.js
+test/recovery-exhausted-fallback.test.js
 test/tool-recovery.test.js
 test/run-journal-disk-boundary.test.js
 test/todo.durability.test.js
@@ -354,9 +355,11 @@ test/computer-control.test.js
 test/win32desktop.test.js
 test/inputpolicy.test.js
 test/image.test.js
+test/image-gptimage2.test.js
 test/higgsfield.test.js
 test/higgsfield-integration.test.js
 test/higgsfield-registry.test.js
+test/openai-image.test.js
 test/agent-capabilities.test.js
 test/agent-capabilities-integration.test.js
 test/refit.test.js
