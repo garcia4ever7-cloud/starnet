@@ -16288,6 +16288,13 @@ async function handleRun(req, res) {
   // (2026-09-27). The "missing key/model" prefix stays; older pages and tests classify on it.
   if (!model) { res.writeHead(400); return res.end('no model selected — pick a model for ' + oauthLabel(runProvider) + ' first'); }
   if (!providerHasCredential(runProvider, key, baseUrl)) { res.writeHead(400); return res.end('missing key/model — ' + providerCredentialError(runProvider)); }
+  // The field is `messages` (an ARRAY). `message` (singular) is silently ignored — the run carries no
+  // user turn, and providers either 400 (anthropic) or succeed on nothing (OpenRouter). Fail fast here
+  // so the caller sees a clear error instead of a run that did nothing.
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.writeHead(400);
+    return res.end('no user turn — POST /api/run requires a non-empty "messages" array (not "message")');
+  }
 
   // Consume a continuation before opening the response stream or doing provider/tool work. The durable start
   // record is intentionally one-way: losing this response may require another review, but retrying cannot run
@@ -19379,7 +19386,10 @@ async function runOnceCore(o) {
         }
       }
       const completionError = ImageTask.enforceCompletion(result, execution.artifactList(), { clarifying });
-      if (completionError) emit('agent.run.error', { agentId, runId, transient: false, message: completionError });
+      if (completionError) {
+        emit('agent.run.error', { agentId, runId, transient: false, message: completionError });
+        execution.recordFailure('image_completion', 'no_image_artifact');
+      }
     }
     // TYPED POSTCONDITIONS. The contract comes from the run caller/Commander, never from model output. Every
     // artifact predicate is evaluated through the workspace jail after the loop settles, and only an artifact
