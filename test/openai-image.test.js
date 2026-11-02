@@ -14,7 +14,9 @@
    7. url-form responses download and save the same way.
    8. Default size comes from aspect_ratio; error responses surface the provider message.
    9. Size/quality normalization in the tool internals.
-   10. OPENAI_API_KEY is independent of Higgsfield (HF_CREDENTIALS) and OpenRouter keys. */
+   10. OPENAI_API_KEY is independent of Higgsfield (HF_CREDENTIALS) and OpenRouter keys.
+   11. Default model is gpt-image-2.5-flare; gpt-image-2.5-sunburst is supported via
+       args.model; both pass the gpt-image-* model validation regex. */
 'use strict';
 const A = require('./_assert.js');
 const fsp = require('node:fs/promises');
@@ -153,7 +155,7 @@ async function main() {
     A.eq(call.body.n, 1, 'payload n');
     A.eq(call.body.size, '1792x1024', 'payload size');
     A.eq(call.body.quality, 'high', 'payload quality');
-    A.eq(call.body.response_format, 'b64_json', 'payload response_format b64_json');
+    A.eq(call.body.response_format, undefined, 'payload has NO response_format (OpenAI rejects it)');
   })
 
   // ---------- url-form response downloads and saves ----------
@@ -189,6 +191,41 @@ async function main() {
     });
     try { await tools.generateTool.run({ prompt: 'x' }, ctx()); } catch (e) { threw = true; A.ok(/Insufficient credits/.test(e.message), 'provider message surfaced'); }
     A.ok(threw, '402 throws');
+  })
+
+  // ---------- GPT Image 2.5 models: default flare + explicit sunburst ----------
+  await withDir(async () => {
+    emitted = [];
+    calls = 0; captured = [];
+
+    // Default model is gpt-image-2.5-flare (no args.model -> default used)
+    const resA = await runTool({ filename: 'images/flare.png' });
+    const callA = captured[0];
+    A.eq(callA.body.model, 'gpt-image-2.5-flare', 'default model is gpt-image-2.5-flare');
+    A.ok(resA.detail.model === 'gpt-image-2.5-flare', 'result names flare model');
+    A.eq(emitted.length, 1, 'flare deliverable emitted');
+    const savedA = await fsp.stat(path.join(ROOT, AID, 'images', 'flare.png')).catch(() => null);
+    A.ok(savedA && savedA.isFile(), 'flare image saved into workspace jail');
+
+    // Explicit gpt-image-2.5-sunburst via args.model
+    const resB = await runTool({ filename: 'images/sunburst.png', model: 'gpt-image-2.5-sunburst' });
+    const callB = captured[1];
+    A.eq(callB.body.model, 'gpt-image-2.5-sunburst', 'sunburst model passed through');
+    A.ok(resB.detail.model === 'gpt-image-2.5-sunburst', 'result names sunburst model');
+    const savedB = await fsp.stat(path.join(ROOT, AID, 'images', 'sunburst.png')).catch(() => null);
+    A.ok(savedB && savedB.isFile(), 'sunburst image saved into workspace jail');
+  })
+
+  // ---------- Explicit gpt-image-2 still works (backward compat) ----------
+  await withDir(async () => {
+    emitted = [];
+    calls = 0; captured = [];
+    const res = await runTool({ filename: 'images/legacy.png', model: 'gpt-image-2' });
+    const call = captured[0];
+    A.eq(call.body.model, 'gpt-image-2', 'explicit gpt-image-2 passes validation');
+    A.ok(res.detail.model === 'gpt-image-2', 'result names gpt-image-2');
+    const saved = await fsp.stat(path.join(ROOT, AID, 'images', 'legacy.png')).catch(() => null);
+    A.ok(saved && saved.isFile(), 'gpt-image-2 image saved into workspace jail');
   })
 
   A.report('openai-image.test');

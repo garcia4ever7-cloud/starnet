@@ -1,8 +1,8 @@
 /* sidecar/tools/builtin/openai-image.js — STUDIO capability: openai_image_generate(prompt)
 
    DEDICATED, ISOLATED utility that renders through OpenAI's /v1/images/generations
-   (gpt-image-2 / dall-e-2 family). It does NOT touch the default studio route
-   (image_generate rides OpenRouter/Gemini first); an explicit openai_image_generate
+   (gpt-image-2 / gpt-image-2.5-* / dall-e-2 family). It does NOT touch the default studio
+   route (image_generate rides OpenRouter/Gemini first); an explicit openai_image_generate
    call is the only way this tool fires — default visual routing is unchanged.
 
    Credentials come from OPENAI_API_KEY in the sidecar process environment, resolved
@@ -21,10 +21,13 @@
    OpenAI Images API protocol:
      POST https://api.openai.com/v1/images/generations
      Authorization: Bearer <OPENAI_API_KEY>
-     Body: { model, prompt, n, size, quality?, response_format: 'b64_json' | 'url' }
+     Body: { model, prompt, n, size, quality? }
 
-   response_format:'b64_json' is requested so bytes come back inline and are saved
-   into the workspace without a second network hop to a hosted URL. */
+   Supported models: gpt-image-2, gpt-image-2.5-flare (default, strict upgrade at same
+   price), gpt-image-2.5-sunburst (slower, higher cost, opt-in via args.model), dall-e-*.
+   response_format is NOT sent — OpenAI's Images API rejects it. b64_json responses are
+   decoded inline and saved into the workspace without a second network hop to a hosted
+   URL. url-form responses are downloaded and saved the same way. */
 'use strict';
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) module.exports = factory(require('./fs.js'));
@@ -34,10 +37,11 @@
 
   const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
   const DEFAULT_IMAGE_URL = DEFAULT_BASE_URL + '/images/generations';
-  // Default model for this dedicated route. gpt-image-2 is OpenAI's current image-output
-  // model; gpt-image-2.5-flare (image.js's OPENAI_IMAGE_MODEL) is the strict upgrade at
-  // the same price but is left as an explicit opt-in via args.model, mirroring image.js.
-  const OPENAI_IMAGE_MODEL = 'gpt-image-2';
+  // Default model for this dedicated route. gpt-image-2.5-flare is the strict upgrade over
+  // gpt-image-2 at the same price (verified in image.js's OPENAI_IMAGE_MODEL). Both
+  // gpt-image-2.5-flare and gpt-image-2.5-sunburst pass the existing gpt-image-* model
+  // validation regex; sunburst is left as an explicit opt-in via args.model.
+  const OPENAI_IMAGE_MODEL = 'gpt-image-2.5-flare';
   const DEFAULT_SIZE = '1024x1024';
   const MAX_POLL_SECONDS = 120;   // generations complete in seconds, not minutes
   const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
@@ -157,7 +161,9 @@
         'Dedicated route: does not route through OpenRouter or Gemini, and does not change ' +
         'the default studio visual path (image_generate). Requires OPENAI_API_KEY in the ' +
         'sidecar environment, resolved independently of Higgsfield (HF_CREDENTIALS) and OpenRouter (OPENROUTER_API_KEY). ' +
-        'Prompt is required; model/size/quality can be customized.',
+        'Prompt is required; model/size/quality can be customized. Default model is ' +
+        OPENAI_IMAGE_MODEL + '; pass model:"gpt-image-2.5-sunburst" for the slower, higher-' +
+        'quality variant (costs more), or any gpt-image-*/dall-e-* model.',
       schema: {
         type: 'object',
         required: ['prompt'],
@@ -168,7 +174,8 @@
           },
           model: {
             type: 'string',
-            description: 'OpenAI image model id (default gpt-image-2; any gpt-image-*/dall-e-*)'
+            description: 'OpenAI image model id (default ' + OPENAI_IMAGE_MODEL +
+              '; gpt-image-2.5-sunburst, gpt-image-2, dall-e-* also supported)'
           },
           size: {
             type: 'string',
@@ -221,7 +228,7 @@
         const signal = (ctx && ctx.signal) || globalSignal || null;
 
         try {
-          const body = { model, prompt, n: 1, size, response_format: 'b64_json' };
+          const body = { model, prompt, n: 1, size };
           if (quality && quality !== 'auto') body.quality = quality;
 
           const data = await postGenerate(body, signal);

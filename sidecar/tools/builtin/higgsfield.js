@@ -1,9 +1,22 @@
 /* sidecar/tools/builtin/higgsfield.js — STUDIO capability: higgsfield.generate(prompt)
 
-   Image generation via Higgsfield's REST API with polling. Credentials read from HF_CREDENTIALS
-   environment variable (KEY_ID:KEY_SECRET format) or HF_API_KEY + HF_API_SECRET separately.
+   Image generation via Higgsfield's platform REST API with polling. Credentials read from
+   HF_CREDENTIALS environment variable ("KEY_ID:KEY_SECRET" format) or HF_API_KEY + HF_API_SECRET
+   separately.
 
-   The tool submits a job, polls for completion (up to 2 minutes), and downloads the result
+   WHY A TWO-STEP PIPELINE: Higgsfield's platform API has NO text2video endpoint; text->image is a
+   single step: POST /v1/text2image/soul, then poll /v1/job-sets/<id>. Every field below was probed
+   against the live API (a wrong guess returns model_not_found or a 422 listing the required fields,
+   and neither costs credits):
+
+     base  : https://platform.higgsfield.ai   (NOT api.higgsfield.ai)
+     auth  : hf-api-key: <KEY_ID>  +  hf-secret: <KEY_SECRET>   two headers.
+             NOT `Authorization: Key id:secret` — that returns Invalid credentials.
+     creds : HF_CREDENTIALS / HF_KEY = "KEY_ID:KEY_SECRET"
+     poll  : GET /v1/job-sets/<jobSetId> — the ONE working retrieval path. The top-level `id`
+             in the submit response IS the job-set id. Every other GET path returns 405.
+
+   The tool submits a job, polls for completion, and downloads the result
    into the agent's workspace. Integrates with the print-prep pipeline for Etsy publishing.
 */
 'use strict';
@@ -17,10 +30,69 @@
   const POLL_INTERVAL_MS = 2000;    // check every 2 seconds
   const MAX_IMAGE_BYTES = 50 * 1024 * 1024;  // 50MB limit (generous for quality images)
 
-  // Higgsfield's default endpoint for v2 API
-  const DEFAULT_HF_BASE = 'https://api.higgsfield.ai';
-  // Common text-to-image endpoint; can be overridden via args
-  const DEFAULT_HF_ENDPOINT = 'flux-pro/kontext/max/text-to-image';
+  // Higgsfield's platform API base. The old api.higgsfield.ai base returns model_not_found.
+  const DEFAULT_HF_BASE = 'https://platform.higgsfield.ai';
+
+  /* Split "KEY_ID:KEY_SECRET" into the two headers the platform API wants. */
+  function parseCredentials(env) {
+    const raw = String((env || process.env).HF_CREDENTIALS || (env || process.env).HF_KEY || '').trim();
+    if (!raw) return null;
+    const i = raw.indexOf(':');
+    if (i <= 0) return null;
+    return { id: raw.slice(0, i), secret: raw.slice(i + 1) };
+  }
+  function headers(creds) {
+    return {
+      'hf-api-key': creds.id,
+      'hf-secret': creds.secret,
+      'Content-Type': 'application/json',
+    };
+  }
+  /* Flatten a Higgsfield error body ({detail: string} or FastAPI 422 list) into one line. */
+  function errText(body) {
+    if (!body) return 'no body';
+    const d = body.detail;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) return d.map(x => ((x.loc || []).join('.') + ': ' + x.msg)).join('; ');
+    return JSON.stringify(body).slice(0, 300);
+  }
+  function pickId(body) {
+    if (!body) return null;
+    return body.id || body.job_id || body.request_id
+      || (body.data && (body.data.id || body.data.job_id)) || null;
+  }
+  function firstJob(body) {
+    const jobs = body && Array.isArray(body.jobs) ? body.jobs : null;
+    return jobs && jobs.length ? jobs[0] : null;
+  }
+  function pickUrl(body) {
+    if (!body) return null;
+    const job = firstJob(body);
+    const r = (job && job.results) || null;
+    const cands = [
+      r && r.raw && r.raw.url,
+      r && r.url,
+      r && r.min && r.min.url,
+      body.url, body.result_url, body.output_url,
+      body.result && body.result.url,
+      body.data && body.data.url,
+    ];
+    for (const c of cands) if (typeof c === 'string' && /^https?:\/\//.test(c)) return c;
+    return null;
+  }
+  function pickStatusUrl(body, id) {
+    const cands = [
+      body && body.status_url,
+      body && body.statusUrl,
+      body && body.data && body.data.status_url,
+      body && body.links && body.links.status,
+    ];
+    for (const c of cands) if (typeof c === 'string' && /^https?:\/\//.test(c)) return c;
+    return id ? (DEFAULT_HF_BASE + '/v1/job-sets/' + id) : null;
+  }
+  // Only text2image step exists on this surface; animating to video is image2video/dop
+  // (handled by sidecar/higgsfield-video.js), so image generation is a single submit+poll.
+  const DEFAULT_HF_ENDPOINT = '/v1/text2image/soul';
 
   function makeHiggsfieldTools(deps) {
     deps = deps || {};
@@ -28,18 +100,6 @@
     if (!fsp || !P || !ROOT) throw new Error('higgsfield.js requires { fsp, pathMod, root }');
     const doFetch = deps.fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!doFetch) throw new Error('higgsfield.js requires global fetch (Node 18+) or deps.fetchImpl');
-
-    // Read credentials from environment: HF_CREDENTIALS (preferred) or HF_API_KEY + HF_API_SECRET
-    function getCredentials() {
-      let creds = process.env.HF_CREDENTIALS || '';
-      if (!creds && process.env.HF_API_KEY && process.env.HF_API_SECRET) {
-        creds = process.env.HF_API_KEY + ':' + process.env.HF_API_SECRET;
-      }
-      if (!creds) {
-        throw new Error('Higgsfield generation requires HF_CREDENTIALS="KEY_ID:KEY_SECRET" or HF_API_KEY + HF_API_SECRET in environment');
-      }
-      return creds.trim();
-    }
 
     // Reuse the workspace jail (fs.js) so generated paths can't escape the agent's directory
     const jail = fsMod.makeFsTools({ fsp, pathMod: P, root: ROOT })._internals;
@@ -56,104 +116,68 @@
       ctx.emit('deliverable', d);
     }
 
-    // Submit a generation job to Higgsfield and return the request_id + status_url
+    // Submit a generation job to Higgsfield and return the job-set id + status URL to poll.
+    // The submit response's top-level `id` IS the job-set id; polling reads GET /v1/job-sets/<id>.
     async function submitJob(prompt, endpoint, aspectRatio, timeoutMs, signal) {
-      const creds = getCredentials();
-      const baseUrl = DEFAULT_HF_BASE;
-      const url = `${baseUrl}/v2/requests`;
+      const creds = parseCredentials();
+      if (!creds) throw new Error('Higgsfield needs HF_CREDENTIALS="KEY_ID:KEY_SECRET" or HF_API_KEY + HF_API_SECRET in environment');
 
-      const payload = {
-        endpoint: endpoint || DEFAULT_HF_ENDPOINT,
-        input: {
-          prompt: String(prompt || '').trim(),
-          aspect_ratio: aspectRatio || '4:3'
-        },
-        withPolling: false  // We'll handle polling ourselves
-      };
+      const url = DEFAULT_HF_BASE + (endpoint || DEFAULT_HF_ENDPOINT);
+      // width_and_height is a closed enum on this API; pass the requested aspect through to it.
+      const params = { prompt: String(prompt || '').trim() };
+      if (aspectRatio && aspectRatio.trim()) params.width_and_height = aspectRatio.trim();
 
+      let body = null;
       try {
         const res = await doFetch(url, {
           method: 'POST',
-          headers: {
-            'Authorization': `Key ${creds}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload),
+          headers: headers(creds),
+          body: JSON.stringify({ params }),
           signal
         });
-
+        try { body = await res.json(); } catch (_) { body = null; }
         if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`Higgsfield submission failed (HTTP ${res.status}): ${text.slice(0, 200)}`);
+          throw new Error(`Higgsfield submission failed (HTTP ${res.status}): ${errText(body)}`);
         }
-
-        const data = await res.json();
-        if (!data.request_id || !data.status_url) {
-          throw new Error(`Higgsfield submission returned invalid response: ${JSON.stringify(data).slice(0, 200)}`);
+        const id = pickId(body);
+        if (!id) {
+          throw new Error(`Higgsfield submission returned no job-set id: ${JSON.stringify(body).slice(0, 200)}`);
         }
-
-        return { request_id: data.request_id, status_url: data.status_url };
+        return { jobSetId: id, statusUrl: pickStatusUrl(body, id) || DEFAULT_HF_BASE + '/v1/job-sets/' + id };
       } catch (e) {
         if (e && e.name === 'AbortError') throw e;
         throw new Error(`Higgsfield submission error: ${(e && e.message) || e}`);
       }
     }
 
-    // Poll status_url until completion, failure, or timeout
+    // Poll the job-set URL until completion, failure, or timeout.
+    // Status and result live on the per-JOB record inside `jobs[0]`, never at top level.
     async function pollUntilDone(statusUrl, creds, timeoutMs, signal) {
-      const startTime = Date.now();
-      const deadline = startTime + timeoutMs;
-      let attempts = 0;
-
-      while (true) {
-        attempts++;
-        if (Date.now() > deadline) {
-          throw new Error(`Higgsfield generation timed out after ${timeoutMs}ms (${attempts} polls)`);
-        }
-
+      const maxAttempts = Math.ceil(timeoutMs / POLL_INTERVAL_MS);
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
         try {
-          const res = await doFetch(statusUrl, {
-            method: 'GET',
-            headers: { 'Authorization': `Key ${creds}` },
-            signal
-          });
-
+          const res = await doFetch(statusUrl, { method: 'GET', headers: headers(creds), signal });
+          let body = null;
+          try { body = await res.json(); } catch (_) { body = null; }
           if (!res.ok) {
-            const text = await res.text();
-            throw new Error(`Status check failed (HTTP ${res.status}): ${text.slice(0, 200)}`);
+            throw new Error(`Status check failed (HTTP ${res.status}): ${errText(body)}`);
           }
-
-          const data = await res.json();
-          const status = data.status || 'unknown';
-
-          if (status === 'completed') {
-            // Extract image URL from response
-            let imageUrl = null;
-            if (data.images && Array.isArray(data.images) && data.images[0]) {
-              imageUrl = data.images[0].url || null;
-            }
-            if (!imageUrl && data.image) {
-              imageUrl = data.image.url || data.image;
-            }
-            if (!imageUrl) {
-              throw new Error(`Generation completed but no image URL in response: ${JSON.stringify(data).slice(0, 300)}`);
-            }
-            return { imageUrl, status: data };
-          } else if (status === 'failed' || status === 'nsfw') {
-            const reason = data.error || data.message || 'generation failed';
-            throw new Error(`Higgsfield ${status}: ${reason}`);
-          } else if (status === 'queued' || status === 'in_progress') {
-            // Still processing; wait and retry
-            await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
-            continue;
-          } else {
-            throw new Error(`Unknown status "${status}": ${JSON.stringify(data).slice(0, 300)}`);
+          const job = firstJob(body);
+          const status = String(job && job.status || '').toLowerCase();
+          const url = pickUrl(body);
+          if (url) return { imageUrl: url, status: body };
+          if (/fail|error|cancel|nsfw|reject/.test(status)) {
+            throw new Error(`Higgsfield job ${status || 'failed'}: ${errText(body)}`);
           }
+          // queued / in_progress / undefined -> keep polling
         } catch (e) {
           if (e && e.name === 'AbortError') throw e;
+          if (String((e && e.message) || '').indexOf('Status check failed') >= 0) throw e;
           throw e;
         }
       }
+      throw new Error(`Higgsfield generation timed out after ${timeoutMs}ms (${maxAttempts} polls)`);
     }
 
     // Download image from URL and save to workspace
@@ -164,7 +188,7 @@
           throw new Error(`Image download failed (HTTP ${res.status})`);
         }
 
-        const buf = await res.buffer();
+        const buf = Buffer.from(await res.arrayBuffer());
         if (buf.length > MAX_IMAGE_BYTES) {
           throw new Error(`Downloaded image too large (${buf.length} bytes, max ${MAX_IMAGE_BYTES})`);
         }
@@ -219,7 +243,12 @@
 
         const aspectRatio = String(args.aspect_ratio || '').trim() || '4:3';
         const endpoint = String(args.endpoint || '').trim() || DEFAULT_HF_ENDPOINT;
-        const filename = String(args.filename || '').trim() || `higgsfield-gen-${Date.now()}.png`;
+        // Deterministic default name (content-addressed on prompt+endpoint, no ambient clock —
+        // see lint-determinism.js). Two identical prompts produce the same name, so re-running is
+        // idempotent rather than piling up files.
+        const filename = String(args.filename || '').trim()
+          || 'images/higgsfield-' + require('node:crypto').createHash('sha1')
+            .update(prompt + '|' + endpoint).digest('hex').slice(0, 12) + '.png';
 
         // Validate filename is safe
         if (filename.includes('..') || filename.startsWith('/') || filename.includes('\0')) {
@@ -230,7 +259,7 @@
 
         try {
           // Step 1: Submit generation job
-          const { request_id, status_url } = await submitJob(
+          const { jobSetId, statusUrl } = await submitJob(
             prompt,
             endpoint,
             aspectRatio,
@@ -238,11 +267,10 @@
             signal
           );
 
-          // Step 2: Poll until done
-          const creds = getCredentials();
+          // Step 2: Poll until done (no second credentials read — already validated above)
           const { imageUrl } = await pollUntilDone(
-            status_url,
-            creds,
+            statusUrl,
+            parseCredentials(),
             MAX_POLL_SECONDS * 1000,
             signal
           );
@@ -259,7 +287,7 @@
             detail: {
               filename: result.path,
               size: result.size,
-              request_id,
+              request_id: jobSetId,
               source_url: result.url
             }
           };
@@ -272,7 +300,7 @@
 
     return {
       generateTool,
-      _internals: { submitJob, pollUntilDone, downloadImage, getCredentials },
+      _internals: { submitJob, pollUntilDone, downloadImage, parseCredentials, headers, errText, pickId, firstJob, pickUrl, pickStatusUrl },
       register(reg) {
         reg.register(generateTool);
         return reg;
