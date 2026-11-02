@@ -209,7 +209,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
   // F. USER ATTACHMENTS: a user message with image_url parts maps to native Anthropic image blocks (base64 +
   //    url source), text parts are preserved, and a plain-string user turn is unchanged.
   {
-    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42m"';   // shape only; content is opaque
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';   // valid minimal 1x1 PNG base64
     const conv = _internals.messagesToAnthropic([
       { role: 'user', content: [
         { type: 'text', text: 'what is this?' },

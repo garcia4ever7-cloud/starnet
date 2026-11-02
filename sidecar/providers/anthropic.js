@@ -13,6 +13,7 @@
   const timeouts = provider.timeouts;
   const isAbort = provider.runtime.isAbort;
   const delay = provider.runtime.abortableDelay;
+  const preserveClaudeContinuations = provider.preserveClaudeContinuations;
   const DEFAULT_BASE = 'https://api.anthropic.com/v1';
   const ANTHROPIC_VERSION = '2023-06-01';
   const RETRY_DELAYS = [400, 1200];
@@ -201,12 +202,22 @@
   // Anthropic's native vision shape is {type:'image', source:{type:'base64'|'url', …}}, so map image_url → that.
   // Only USER messages get this (assistant/tool turns never carry images); an unrecognized part degrades to its
   // text or is dropped — never throws.
+  // Strict base64 validation before provider submission: Anthropic rejects malformed
+  // base64 image data with HTTP 400. Catch it locally with a clear message instead.
+  function isValidBase64ImageData(data) {
+    if (!data || typeof data !== 'string') return false;
+    // Base64 alphabet with optional padding; length must be a multiple of 4.
+    return /^[A-Za-z0-9+/]*={0,2}$/.test(data) && data.length % 4 === 0 && data.length > 0;
+  }
   function anthImageBlock(url) {
     const s = String(url == null ? '' : url);
     const m = /^data:([^;,]*?)(;base64)?,([\s\S]*)$/.exec(s);
     if (m) {
       const media_type = (m[1] || 'image/png').toLowerCase();
       const data = m[2] ? (m[3] || '') : Buffer.from(decodeURIComponent(m[3] || ''), 'utf8').toString('base64');
+      if (m[2] && !isValidBase64ImageData(data)) {
+        throw new Error('invalid image base64: malformed base64 image data in user message');
+      }
       return { type: 'image', source: { type: 'base64', media_type, data } };
     }
     if (/^https?:\/\//i.test(s)) return { type: 'image', source: { type: 'url', url: s } };
@@ -511,7 +522,11 @@
       // ONE pre-send normalization (provider.js prepareWireMessages): every tool_use gets its tool_result in the
       // next turn (a run that died at the tool boundary left one mid-history), and ids minted by another provider
       // (Kimi's functions.read_file:0) are rewritten into this wire's ^[a-zA-Z0-9_-]+$ grammar, call and result alike.
-      const converted = messagesToAnthropic(provider.prepareWireMessages(req.messages || [], 'anthropic'), req.reasoningScope);
+      // PRE-FILL GUARD: collapse non-leading system blocks to user so Anthropic never sees a second system block,
+      // which it would interpret as assistant prefill and reject with HTTP 400 "assistant message prefill unsupported".
+      // (OpenRouter and OpenAI-compatible already apply preserveClaudeContinuations; Anthropic must too.)
+      const wireMsgs = preserveClaudeContinuations(provider.prepareWireMessages(req.messages || [], 'anthropic'), req.model);
+      const converted = messagesToAnthropic(wireMsgs, req.reasoningScope);
       const body = {
         model: req.model,
         max_tokens: resolveMaxTokens(req),
@@ -790,5 +805,5 @@
     return { stream, listModels, contextLimit, priceOf, supportsTools, reasoningEfforts };
   }
 
-  return { makeAnthropicProvider, _internals: { messagesToAnthropic, toAnthropicTools, normalizeUsage, normalizeModel, cleanBaseUrl } };
+  return { makeAnthropicProvider, _internals: { messagesToAnthropic, toAnthropicTools, normalizeUsage, normalizeModel, cleanBaseUrl, anthImageBlock, isValidBase64ImageData } };
 });
