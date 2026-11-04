@@ -125,9 +125,14 @@ This repo doubles as the live runtime for the owner's actual Etsy business, so a
   `unattendedGrants:['orchestrator']` lets its agent call `team.dispatch` headlessly; the host then writes every
   lead→worker exchange to `workspaces/<leadId>/outbox/<utc-stamp>-<lead>-to-<worker>.md` (`sidecar/handoff-store.js`)
   — the host writes it because an ASK-mode worker cannot `fs.write` on an unattended run and because an agent asked
-  to persist its own state demonstrably does not. Two routines exist and are **DISABLED** (`nextRunAt: null`): the
-  full Etsy chain `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909` and a smoke test `ec4436a4-e1a0-432a-be75-3606b843ad51`.
-  Arm with `POST /api/cron/update {id, enabled:true}`; fire once without arming via `POST /api/cron/run {id}`.
+  to persist its own state demonstrably does not. **CORRECTED 2026-11-02 — the Etsy chain is no longer disabled.**
+  The full Etsy chain `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909` was found `enabled:true` during a live pipeline test
+  and had already auto-fired on its own schedule that same day, before the test session started — someone armed
+  it between 2026-10-27 and 2026-11-02 and this file was never updated. The smoke test
+  `ec4436a4-e1a0-432a-be75-3606b843ad51` is still `enabled:false`/`nextRunAt: null`, unchanged.
+  Arm/disarm with `POST /api/cron/update {id, enabled:true|false}`; fire once without arming via `POST /api/cron/run {id}`.
+  **Always check `GET /api/cron` for the live `enabled`/`nextRunAt` state before trusting this file's claim about
+  either routine** — see `STATION_FIELD_NOTES.md` for the live-test writeup.
 - **The Apify 8/day cap is now real code, and it meters the MCP connector, not just HTTP.** `sidecar/hostquota.js`
   keeps ONE team-wide daily counter (`workspaces/.host-daily-quota.json`) shared by `mcp:apify` actor-run tools and
   direct `web_request` to `apify.com`, counted before the call leaves and never decremented (failures cost one).
@@ -436,10 +441,33 @@ host-local bookkeeping, but their capIds were missing from `SAFE_BUILTIN_CAPS`, 
 not name a deliverable or keep a task list on any cron fire. `channel.send`, `spotify_*` and
 `shell.exec` stay refused — the widening is narrow on purpose and `shell.exec` went to nobody new.
 
-Airtable/Apify for the two ASK agents (SCOUT, PUBLISHER) is **not** code-fixable and should not be:
-they are MCP connector tools, so an ASK agent's own routine needs the existing `connectors` tick.
-The path that already works is delegation — a worker inherits the lead's `connectorAuthority`, so
-SCOUT dispatched by NIGHT4CHRIST has Apify/Airtable reach that SCOUT firing its own routine does not.
+Airtable/Apify for an ASK agent's OWN routine is **not** code-fixable and should not be: they are MCP
+connector tools, so that routine needs the existing `connectors` tick. The path that already works is
+delegation — a worker inherits the lead's `connectorAuthority`, so an agent dispatched by NIGHT4CHRIST
+has Apify/Airtable reach it does not have when firing its own routine. (Live-proved 2026-11-02: SCOUT
+dispatched by the lead read an Apify dataset fine.)
+
+**CORRECTED 2026-11-02 — SCOUT is NOT an ASK agent.** This paragraph used to say "the two ASK agents
+(SCOUT, PUBLISHER)". The live roster (`workspaces/agent.roster.json`) says otherwise, and the only
+ASK agent in the Etsy chain is PUBLISHER:
+
+| agent | model | approvalMode |
+|---|---|---|
+| NIGHT4CHRIST (`agent`) | `claude-sonnet-5-5` | **full** |
+| DESIGNER (`webdesigner`) | `claude-sonnet-5-5` | **full** |
+| SCOUT (`scout`) | `claude-haiku-5-5` | **full** |
+| PUBLISHER (`publisher`) | `claude-haiku-5-5` | **ask** |
+| HARVEST (`harvest`) | `claude-haiku-5-5` | **full** |
+| QC_EDITOR / DIRECTOR / PRODUCER / COPYWRITER | `opus-5` / `sonnet-5-5` | ask |
+
+Why it matters, and why the error was invisible: the ASK-mode `fs.write` ban is real, but it applies
+to **PUBLISHER**, not SCOUT. SCOUT has been saving files unattended all along — `scout-read-*.md`
+and `verses-for-hard-days-stage1.md` are its own writes on cron fires — so any session that predicted
+"SCOUT cannot persist its research" was reasoning from this line and was wrong. DESIGNER is `full`
+too, so artwork is gated by image-generation CREDIT (the `HTTP 429` below), not by permissions.
+**Read `approvalMode` out of the live roster before asserting what an agent can persist** — the same
+drift rule this file already applies to models and cron `enabled` flags. Whether SCOUT was `ask` when
+this was first written and someone later changed it is unknown; what is verified is the table above.
 
 ### Test results — state them this way, not as "the gate is green"
 
@@ -457,16 +485,26 @@ its name fence, so an UNmodelled name still fails loudly.
 
 ### OPEN — two owner decisions, and one thing to stop trusting
 
-1. **Two routines exist and are DISABLED** (`enabled:false`, `nextRunAt: null`) — they never fire
-   until armed, because arming starts unattended spend on a schedule:
+1. **CORRECTED 2026-11-02 — only ONE of these two routines is still disabled.** This used to say
+   both were `enabled:false`/`nextRunAt: null`. A live pipeline test on 2026-11-02 found:
    - Etsy chain `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909` (NIGHT4CHRIST leads SCOUT → DESIGNER → PUBLISHER)
-   - smoke test `ec4436a4-e1a0-432a-be75-3606b843ad51`
-   Arm with `POST /api/cron/update {id, enabled:true}`; fire once without arming via
+     is **`enabled:true`**, `nextRunAt` set to the next day, and had already auto-fired that same
+     morning (2026-11-02T11:09 UTC) before the test session even started — on its own schedule, not
+     triggered by anyone's manual action that session. Someone armed it at some point after
+     2026-10-27 and this file was never corrected.
+   - smoke test `ec4436a4-e1a0-432a-be75-3606b843ad51` is still `enabled:false`/`nextRunAt: null`,
+     unchanged.
+   Arm/disarm with `POST /api/cron/update {id, enabled:true|false}`; fire once without arming via
    `POST /api/cron/run {id}`. Auth header is `X-StarNet-Token`, **not** `Authorization: Bearer`.
-2. **The chain routine has never been run end to end.** ONE dispatch hop is live-verified
+   **Treat this file's enabled/disabled claims as a snapshot, not current truth — check `GET /api/cron`
+   first**, the same lesson as the model-routing drift noted elsewhere in this file.
+2. **The chain routine has still never been run end to end**, including in its 2026-11-02 auto-fire.
+   That run's `team_dispatch` call dispatched to SCOUT (which completed normally) but then itself
+   reported `isError:true`/"timeout" after 9 minutes, and the outbox shows only lead→SCOUT handoffs —
+   it never reached DESIGNER or PUBLISHER. An earlier dispatch hop is separately live-verified
    (`agent.tool_call team_dispatch` → SCOUT's own loop `done` → host-written handoff file; lead
    $0.0066 on openrouter `anthropic/claude-haiku-5.5`, worker $0, two fires = **$0.013** total).
-   All three stages have not been. Do not describe the chain as working.
+   Do not describe the chain as working.
 3. **SCOUT's assigned model returns number-stripped text** — reproduced twice:
    `"The price is $. for a -page Christian scripture printable bundle."` The harness carried it
    verbatim and the lead correctly reported it unusable rather than inventing a figure, so this is a
@@ -898,7 +936,9 @@ QC_EDITOR could not independently verify the video because `video.inspect` and s
 
 ### Next mission (NOT yet launched)
 
-Run one complete Etsy team test using SCOUT → DESIGNER → PUBLISHER → HARVEST. Two routines exist and are **DISABLED** (`nextRunAt: null`): the full Etsy chain `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909` (NIGHT4CHRIST leads SCOUT → DESIGNER → PUBLISHER) and a smoke test `ec4436a4-e1a0-432a-be75-3606b843ad51`. Arm with `POST /api/cron/update {id, enabled:true}`; fire once without arming via `POST /api/cron/run {id}`. Auth header is `X-StarNet-Token`, not `Authorization: Bearer`. ONE dispatch hop is live-verified; the full chain has not been run end to end — do not describe it as working.
+Run one complete Etsy team test using SCOUT → DESIGNER → PUBLISHER → HARVEST. **CORRECTED 2026-11-02:** the full Etsy chain `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909` (NIGHT4CHRIST leads SCOUT → DESIGNER → PUBLISHER) is **no longer disabled** — it was found `enabled:true` and had already auto-fired on its own schedule earlier that same day (2026-11-02T11:09 UTC), reaching only SCOUT before `team_dispatch` timed out. The smoke test `ec4436a4-e1a0-432a-be75-3606b843ad51` is still disabled (`nextRunAt: null`). Check `GET /api/cron` for current state before relying on this note. Arm/disarm with `POST /api/cron/update {id, enabled:true|false}`; fire once without arming via `POST /api/cron/run {id}`. Auth header is `X-StarNet-Token`, not `Authorization: Bearer`. The full chain still has not been run end to end — do not describe it as working.
+
+A separate live test on 2026-11-02 ran SCOUT → DESIGNER → QC (QC_EDITOR standing in, no Etsy QC agent exists) → PUBLISHER → HARVEST manually via `/api/run`, not via this cron routine. Result: SCOUT and HARVEST produced real saved files; QC_EDITOR and PUBLISHER produced real output but could not save it themselves (ASK-mode agents, `fs.write` denied/stalled with no approver present on an unattended run — confirms the ASK-vs-Full-Access design documented above, live); DESIGNER's one authorized `openai_image_generate` call returned a real `HTTP 429` — **the OpenAI account has no image-generation credits**, cost $0. QC verdict: FAIL, no sellable product exists. Total real spend: $0.2595. Full writeup and saved artifacts: `workspaces/agent/pipeline-live-test-20261102T124646Z/`.
 
 ### Existing Etsy product and outbox preservation
 
@@ -918,3 +958,161 @@ Run one complete Etsy team test using SCOUT → DESIGNER → PUBLISHER → HARVE
 - Preserve OmniRoute, free-model routing, and agent model assignments as shown by `node scripts/station-models.mjs list`. NIGHT4CHRIST currently routes via OmniRoute `aug/sonnet5-high`; studio pipeline stages use `STUDIO_PROVIDER`/`STUDIO_MODEL` env defaults (openrouter/anthropic/claude-sonnet-4.5).
 - Do not reset, reinstall, clean, checkout, stash, or bulk-modify StarNet without explicit owner approval.
 - Before editing any existing file, make a same-directory backup (`cp path/to/file path/to/file.bak`) unless that exact backup already exists.
+
+## 2026-11-02 (session 2) — Outbox, dispatch reliability, and three security findings
+
+Five fixes shipped, each provoked by a real failure. Every claim below was verified by a live run or a
+named test; where it was not, it says so.
+
+### CORRECTION FIRST — NIGHT4CHRIST's roster model was dead
+
+The note above says NIGHT4CHRIST "currently routes via OmniRoute `aug/sonnet5-high`". That model **does not
+work**: `aug/*` resolves to a provider plugin that shells out to the Auggie CLI, which is not installed —
+every call returned `HTTP 502 "Auggie CLI not found: auggie"`. OmniRoute has only **4 connections, all free
+tier** (cloudflare-ai x2, `gemini-free`, `openrouter-free`) and **no `aug` provider and no combo by that
+name** (`GET /api/providers`, `GET /api/combos` — only `cloude-free` and `cloude-free-copy` exist). Fixed to
+`anthropic/claude-sonnet-5-5`, verified with a live 1-token call. It did not break the Etsy chain only because
+that cron job carries its own explicit `provider`/`model` override.
+
+### The dispatch reliability chain (three separate bugs, found in order)
+
+1. **A healthy run was killed by its own lease.** `ORCH_DISPATCH_TIMEOUT_MS`, `CRON_HEARTBEAT_STALE_MS` and the
+   registry backstop were all derived from `CRON_MAX_RUN_MS`, so the lease staleness window and the dispatch
+   budget expired together while the backstop sat 60s *beyond* the lease — the reclaim always won. Live run
+   `c1bce71a`: SCOUT finished in 26s, the dispatch then stalled, and at 480s `cron-driver.js:636` cancelled the
+   whole run (`stale-lock-reclaimed`), discarding a completed paid-for worker AND re-arming the routine, which
+   **auto-re-fired and spent again** (`b7003a7a`). NEW `sidecar/dispatch-budget.js` derives the budget from the
+   staleness window; invariant `leaseOutlivesTool` pinned by `test/dispatch-lease-invariant.test.js`.
+2. **A completed worker's handoff was written too late.** `recordHandoff` ran only in the outer `withHandoff`
+   wrapper — after a post-worker phase that has no wall clock (the per-worker timer is cleared the instant
+   `runOnce` settles) and emits no events. `sidecar/tools/builtin/orchestration.js` now files the handoff the
+   moment the row exists, idempotently. `test/dispatch-handoff-race.test.js` fails against the pre-fix module.
+3. **`CRON_MAX_RUN_MS=900000`** added to `~/.config/starnet/env` (was unset → 480000). DESIGNER was being cut
+   off mid-work at 360s. Verified present in the running process env. Cost: a genuinely hung routine now takes
+   ~15 min to reclaim instead of ~8.
+
+**The 501-second stall itself is still UNEXPLAINED.** Instrumentation (`phaseClock` in orchestration.js) now
+names the blocking phase on stdout if it recurs. Two calibration lessons: a single threshold cried wolf on
+every healthy SCOUT run (~26s), so `worker-runOnce` gets 90s and post-worker phases 10s; and the log line must
+fire from a TIMER, because the phase being hunted never completes and an `end()`-only log would never run.
+
+### Anthropic thinking-block 400 — fixed server-side, cause still unknown
+
+DESIGNER died at 17 turns / $0.603 with `Invalid signature in thinking block … Content before this block was
+rewritten`. The host guard (`thinkingBlocks` replays only blocks stamped with this run/model/epoch/tools) is
+sound and all three compaction paths bump the epoch; a read-only audit of every history mutation found nothing
+(all four non-compaction rewrites are terminal). So the fix is Anthropic's own escape hatch, **probed, never
+assumed** — one deliberately-invalid field returned the enum:
+
+```
+thinking.adaptive.block_binding.prefix_mismatch_behavior: Input should be 'error' or 'drop_block'
+adaptive + block_binding -> 200 (incl. claude-sonnet-5-5)   between_tools + block_binding -> 400 refused
+enabled  + block_binding -> 200 (claude-haiku-4-5)          disabled      + block_binding -> 400 refused
+no anthropic-beta header -> 400 "Extra inputs are not permitted"
+```
+
+`sidecar/providers/anthropic.js` sends `drop_block` on the two thinking-ON shapes only, with the
+`thinking-binding-controls-2026-08-01` beta attached only when the field rides. **Result: DESIGNER ran 25
+turns, `reason: done`, zero signature 400s** (run `dc3e312b`) — first time all three Etsy stages dispatched.
+Sending the field on an off-switch would 400 every thinking-OFF run, which is how this adapter broke the
+Commander once before — hence the probe table, pinned in `test/anthropic-block-binding.test.js`.
+
+### THE CENTRAL OUTBOX — the DESIGNER -> PUBLISHER bridge
+
+PUBLISHER drafted nothing on `dc3e312b`: *"The PNGs are in DESIGNER's workspace, which PUBLISHER cannot read."*
+**That is correct behaviour, not a bug.** `pathtrust.js` — the one sanctioned way out of the per-agent fs jail
+— refuses it twice: *"standing grants and Full Access do NOT override ownership beneath this root"* and *"only
+an INTERACTIVE run with a live prompt() may bless a NEW root"*. **Do not widen the jail to fix this.**
+
+- NEW `sidecar/deliverable-manifest.js` — shared index at `workspaces/.deliverables/manifest.jsonl`, owned by
+  no agent. **Metadata only; a 28MB master is indexed, never copied.** Host-registered from
+  `execution.artifactList()` using the host's own agentId/runId (an agent asked to persist its own state
+  demonstrably does not — see handoff-store.js).
+- **Four independent axes, never merged**: `completion` (producer) · `verification` (host: decode/ffprobe/
+  checksum) · `qc` (independent reviewer — `setQc` REFUSES a reviewer equal to the owner) · `approval`
+  (Commander only). `lifecycleOf()` derives the coarse state so the two cannot drift. Merging them is how a
+  1,056-byte placeholder once shipped as a finished video.
+- `GET /api/outbox` (feed) + `GET /api/artifact?id=` (retrieval, scoped `artifact` ticket, 5-min cap).
+  **ID-addressed, never path-addressed**; the displayed path is information, not authorization.
+- NEW `sidecar/tools/builtin/outbox.js` — `outbox_list`/`outbox_read`, scope `read`, no consent, no network.
+  **`outbox` had to be added to `SAFE_BUILTIN_CAPS`** or `enforceRunAuthority` strips it from every ASK-mode
+  unattended run — the same trap that once left SCOUT unable to name a deliverable. PUBLISHER is ASK-mode.
+- NEW `frontend/app/outbox.js` + script tag. **`website/app` is generated — run `npm run sync:website`, never
+  hand-edit.** A same-directory `.bak` inside `frontend/` gets mirrored into the generated site; keep frontend
+  backups OUTSIDE that tree (`.backups-outbox-20261102/`).
+
+**Matthew 11:28 is the verified fixture**: 4800x6000 and 2400x3000, both 300 DPI, checksums verified, served
+byte-identical through a real ticket (7,686,872 bytes). `build_matthew_11_28.py` was correctly REFUSED as a
+scratch helper (reuses `deliverable-files.js`). States are honest: `verification: passed`, **`qc: needs_review`,
+`approval: pending`** — print-ready, NOT commercially approved (DESIGNER itself called the art "flatter than
+the reference style"). No Airtable status was fabricated; a genuine `designed` row is still outstanding.
+
+### Three security findings — two were mine, one was pre-existing
+
+1. **Symlink escape (HIGH)** in the manifest: the containment check was purely lexical. `P.resolve` collapses
+   `..` but never follows links, so `outbox/x.png -> /etc/passwd` passed and was read. The station already
+   treats this as a hardline (`fs.js`: "path escapes workspace via symlink"; `pathtrust.js`: "re-proven on
+   every access") — **I had read both files and still shipped without it.** Now realpaths both ends, refuses a
+   leaf symlink, catches intermediate directory links, and re-proves on every access + `O_NOFOLLOW` reads.
+   Pre-fix the test indexed 3 real escapes; post-fix 0.
+2. **Stored XSS via inline serving (MEDIUM)** on `/api/artifact`. Real here, not theoretical: the type map
+   includes `image/svg+xml` and DESIGNER ships SVG, so an agent-produced deliverable opened from the Outbox
+   would execute `<script>` in the sidecar's own origin — the origin holding the master API token. `nosniff`
+   does NOT help: it stops type *sniffing*, and the declared type is already the scriptable one.
+3. **The same hole on `/api/studio-file`** (pre-existing, NOT flagged by the scanner) — unconditional `inline`
+   with `MIME[ext]`, and agents write into `~/outbox/<projectId>/`.
+
+**Root cause of 2 and 3 was building a parallel file server.** `/api/file` already solved this with
+`file-response.js` `isActiveDeliverable()` (`.html .htm .xhtml .js .mjs .cjs .svg .xml .xsl .xslt .wasm`) →
+force `application/octet-stream` + `attachment` + strict CSP. Both routes now **reuse that one control**, so
+widening the list can never leave a route behind. My first attempt used a private `PASSIVE_INLINE` regex — a
+second opinion that would drift — and I threw it away. Live-verified: `evil.svg`/`evil.html` download,
+PNG/MP4 still render inline.
+
+### RESEARCH: Etsy requires AI disclosure — the listing draft must carry it
+
+Checked on the live Etsy policy pages because this decides whether the pipeline's output is sellable, and no
+session had verified it:
+
+- **Sellers must disclose in the listing description when an item is created using AI**, and may not present
+  machine output as handmade or entirely their own. AI art is allowed when the seller plays a clear creative
+  role and is transparent.
+- **Digital downloads with a visual component (printables) must show a preview of the ACTUAL content** buyers
+  receive — representative/AI imagery is only acceptable for items with no visual component.
+- California SB 1050 may require disclosure for AI "synthetic performers" in listing media from 2027-01-01.
+
+**CORRECTED immediately after writing the above — the first claim here was FALSE.** I wrote that neither
+constraint "is currently in PUBLISHER's prompt or the `etsy-rules` skill" **without reading the skill**. The
+skill already covers AI disclosure thoroughly: `~/.claude/skills/etsy-rules/SKILL.md` §3 "Etsy AI rules"
+requires a disclosure line in every listing description, says to mark the item *designed by the seller* and
+tick any generative-AI checkbox, and to disclose AI-made photos/mockups; the listing-text template carries an
+`AI-DISCLOSURE` block and the done-checklist re-checks it. §5 likewise requires photos that "show the actual
+product honestly" and a standard set including "print alone, clean" and a "what you get" graphic — which
+substantially covers the real-preview rule. **This is the exact failure this file's laws exist to stop: I
+asserted a gap from memory instead of grepping one file.**
+
+What is genuinely missing is narrower: the skill does not state the POLICY BASIS that representative or
+AI-generated imagery is acceptable only for items with **no** visual component (so a printable must preview
+its real content), and it does not mention California SB 1050 (2027-01-01). Those two specifics were added to
+§3/§5 of the skill. PUBLISHER's own roster prompt still does not restate any of it — it relies on the skill,
+which is the correct place for it.
+Sources: etsy.com/legal/creativity, etsy.com/seller-handbook/article/1522733284810,
+etsy.com/legal/policy/listing-image-requirements/253962679005
+
+### Still open after this session
+
+- The Outbox panel is **not mounted into a visible tab** and has **no CSS** — the module loads and the API
+  works, but the Commander cannot click to it yet.
+- The registration hook has **never run inside a real pipeline run** (proven only by retroactive registration).
+- Video verification is not auto-wired to the `verification` axis (ffprobe 8.1.3 IS present; `sharp` is not,
+  as documented — use `@napi-rs/canvas`).
+- Per-agent judgment criteria ("biblical accuracy", "narrative strength") are prompt/skill content, not code.
+  The manifest carries verdicts; it cannot compute them. **There is no service named "Judgment Engine"** — the
+  real equivalents are `completion-evidence.js`, `video-verify.js`, `image_quality_check`.
+- DESIGNER's paid image route is still blocked (OpenRouter 402 under $1, OpenAI 429 no image credits), so art
+  is Pillow/canvas-drawn and DESIGNER itself rates it below the reference style.
+
+Tests added, all in `test/fast.list`: `dispatch-lease-invariant` (21), `dispatch-handoff-race` (35),
+`anthropic-block-binding` (14), `deliverable-manifest` (126), `outbox-route` (49), `outbox-tools` (36),
+`outbox-ui` (51). `failopen-ratchet` stays at its 8 pre-existing problems; `index.js` empty-catch count
+unchanged at 362.

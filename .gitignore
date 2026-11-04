@@ -217,6 +217,16 @@ src-tauri/frontend-embed/
 # never be committed, and they must never reach the generated website mirror.
 *.bak
 website/**/*.bak
+# `*.bak` matches only names ENDING in .bak. Every SUFFIXED backup this station actually makes
+# (.bak-rotation, .bak-costcap-20261103, .bak-<epoch>) was therefore untracked but COMMITTABLE —
+# including a 1.7MB sidecar/index.js copy. Verified 2026-11-04 with `git check-ignore -v`, which is
+# the only reliable check; eyeballing these patterns is what let it sit unnoticed.
+*.bak-*
+*.bak.*
+.backups-*/
 
 # live Higgsfield credential — never commit
 .env.local
+# ...and any dated copy of it. `.env.local.bak-20261030` holds a real HF_KEY value and was NOT
+# matched by either `.env.local` or `*.bak`, so a single `git add -A` would have published the key.
+.env.local.*

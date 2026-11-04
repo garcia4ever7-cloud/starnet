@@ -40,6 +40,18 @@
       // nagged). It can NEVER assert status, crew or byte counts: the tool takes a four-key allowlist and drops
       // everything else, because those facts are the harness's to derive. (see tools/builtin/deliverable.js)
       { capId: 'deliverable', tool: 'deliverable_note', scope: 'write', requiresConsent: false, network: false },
+      /* CENTRAL OUTBOX (2026-11-02). Reads deliverables ANOTHER agent published to this one. Rides `computer`
+         for the same reason deliverable_note does — it is the ONE object present in both the compute-only
+         interactive office and fullOffice, so a consumer is never stranded without the door (PUBLISHER firing
+         its own cron routine is exactly that case). capId is 'outbox', NOT 'compute': resolve.js treats a
+         'compute' grant as the COMPUTE GATE and never emits it as a callable tool.
+         SAFE BY SHAPE, not by trust: scope 'read', no consent, no network — it writes nothing, spends nothing,
+         reaches no third party, and takes a manifest ID rather than a path, so it cannot be steered into
+         another agent's private workspace. It is the published door that let the fs jail stay closed
+         (pathtrust.js refuses a cross-agent path grant, and must keep refusing it).
+         (see tools/builtin/outbox.js + sidecar/deliverable-manifest.js) */
+      { capId: 'outbox', tool: 'outbox_list', scope: 'read', requiresConsent: false, network: false },
+      { capId: 'outbox', tool: 'outbox_read', scope: 'read', requiresConsent: false, network: false },
       // TOOL SEARCH: how the agent reaches a DEFERRED tool. Rides `computer` for the same reason quest.update
       // does — it is the ONE object in both the compute-only interactive office and fullOffice, so a deferred
       // tool is never stranded on a surface that cannot look it up. capId is 'toolsearch', NOT 'compute'

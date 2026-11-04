@@ -478,6 +478,27 @@
         // RELAYED TAINT (additive): a tool that hands back ANOTHER run's text (team.dispatch / team.subagents …)
         // reports that run's host-proven taint; the run host latches it on the ingesting run (see taint.relayedTaint).
         if (shaped && typeof out.taintedBy === 'string' && out.taintedBy) done.taintedBy = out.taintedBy.slice(0, 200);
+        /* PRODUCED FILES (additive, 2026-11-03) — forwarded for the same reason taintedBy is, one line above:
+           okResult() rebuilds the result from an explicit field list, so ANY extra field a tool returns is
+           dropped here unless it is carried across deliberately. sidecar/artifacts.js has a generic
+           `result.producedFiles` escape hatch (added 2026-10-22) precisely so tools whose names are not in its
+           allowlist — vector_export, image_print_prep, image_stock_fetch, mockup_compose — still get their real
+           writes recorded into run.artifacts, which is what sidecar/index.js's Outbox hook registers from.
+           That hatch could never fire: the field never survived dispatch. The visible symptom was a DESIGNER
+           print deliverable that existed on disk and was invisible to PUBLISHER (the central Outbox is the only
+           sanctioned cross-agent bridge), i.e. the DESIGNER -> PUBLISHER handoff was silently broken.
+           Host-shaped and bounded, never model-authored: each entry is one write the tool already performed. */
+        if (shaped && Array.isArray(out.producedFiles) && out.producedFiles.length) {
+          const files = [];
+          for (const f of out.producedFiles.slice(0, 50)) {
+            const p = f && typeof f.path === 'string' ? f.path.slice(0, 400) : '';
+            if (!p) continue;
+            const row = { path: p };
+            if (f && typeof f.bytes === 'number' && isFinite(f.bytes) && f.bytes >= 0) row.bytes = Math.floor(f.bytes);
+            files.push(row);
+          }
+          if (files.length) done.producedFiles = files;
+        }
         return await notifyPost(done, elapsed());
       } catch (e) {
         /* A TIMEOUT IS NOT A NO-OP (h1 audit 2026-09-22). "timed out" read like "nothing happened", the failure-recovery

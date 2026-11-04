@@ -58,7 +58,36 @@
   const iso = cron._internals.iso;            // ms(arg) -> ISO; deterministic (no zero-arg new Date)
 
   // fields a user may edit via updateJob. `id`, timestamps, run-state and counters are NOT editable here.
-  const EDITABLE = ['name', 'prompt', 'agentId', 'model', 'provider', 'deliver', 'skills', 'script', 'scriptTimeoutMs', 'workdir', 'contextFrom', 'monitorMode', 'misfire', 'unattendedGrants', 'noAgent', 'enabledToolsets', 'attachToSession', 'origin', 'runsLine', 'dockId'];
+  const EDITABLE = ['name', 'prompt', 'agentId', 'model', 'provider', 'deliver', 'skills', 'script', 'scriptTimeoutMs', 'workdir', 'contextFrom', 'monitorMode', 'misfire', 'unattendedGrants', 'noAgent', 'enabledToolsets', 'attachToSession', 'origin', 'runsLine', 'dockId', 'maxCostUsd'];
+
+  /* PER-ROUTINE SPEND CEILING (2026-11-03). An unattended routine had NO spend ceiling of its own: this
+     module stored no such field, so the only governor on a scheduled fire was the station-wide
+     budgetcaps perDay rail (which on this station is $25 while perRun is 0 = ungoverned). A single
+     routine could therefore consume the whole day's budget before anything stopped it.
+
+     perRun cannot substitute for this, because it is ONE number for every agent and the legitimate costs
+     differ by ~20x: a Commander-led chain that dispatches a crew runs ~$0.11 and up, while a SCOUT
+     research fire is ~$0.005. A station perRun tight enough for SCOUT strangles the chain; one roomy
+     enough for the chain gives SCOUT 20x more headroom than it can ever need. The ceiling belongs on the
+     routine.
+
+     SEMANTICS, deliberately identical to budgetcaps.js so there is one mental model:
+       absent/null  -> no per-routine ceiling; the station default applies (purely additive for old jobs)
+       0            -> an explicit "no cap" choice, same as the budget panel dialling a cap OFF
+       > 0          -> this routine's ceiling in USD
+
+     AUTHORITY: this is STORAGE, not authority — the same rule as normGrants above. cron-driver.js forwards
+     it as `callerMaxCostUsd`, which sidecar/index.js applies with Math.min (search `callerMaxCostUsd`), so
+     a routine's cap can only ever TIGHTEN the station ceiling, never raise it. A hand-edited or migrated
+     cron.jobs.json claiming maxCostUsd:999 therefore buys nothing. That lower-only lane already exists and
+     was already security-reviewed; reusing it is why this change needs no new authority of its own. */
+  const COST_CAP_MAX = 1000;        // a fat-finger guard, far above any legitimate single-run cost here
+  function normCostCap(v) {
+    if (v === null || v === undefined || v === '') return null;   // not set -> station default
+    const n = Number(v);
+    if (!isFinite(n) || n < 0) return null;                       // junk can never grant headroom
+    return Math.min(COST_CAP_MAX, n);
+  }
 
   /* UNATTENDED CAPABILITY GRANT (2026-07-25) — the capability families the Commander explicitly approved for
      THIS routine to use with nobody watching. Default EMPTY: a routine grants nothing extra unless the user
@@ -186,6 +215,8 @@
       // ---- record-the-field, defer-the-consumer (no v1 runtime consumer; stored so a later commit wires it) ----
       // UNATTENDED CAPABILITY GRANT (see normGrants): [] on every existing job, so this is purely additive.
       unattendedGrants: normGrants(spec.unattendedGrants),
+      // PER-ROUTINE SPEND CEILING (see normCostCap): null on every existing job, so this is purely additive.
+      maxCostUsd: normCostCap(spec.maxCostUsd),
       skills: normList(spec.skills, 8, /^[A-Za-z0-9_. -]{1,120}$/),
       script: spec.script != null ? String(spec.script) : null,
       scriptTimeoutMs: spec.scriptTimeoutMs != null ? Math.min(120000, Math.max(1000, parseInt(spec.scriptTimeoutMs, 10) || 30000)) : 30000,
@@ -270,6 +301,8 @@
       // re-normalize through the whitelist: the EDITABLE loop above copies the RAW patch value, so without this
       // a patch could persist an ungrantable capability name (same trap misfire guards against).
       if (Object.prototype.hasOwnProperty.call(patch, 'unattendedGrants')) next.unattendedGrants = normGrants(patch.unattendedGrants);
+      // A per-routine ceiling is re-normalised on every edit, so junk or a raise-attempt can never persist.
+      if (Object.prototype.hasOwnProperty.call(patch, 'maxCostUsd')) next.maxCostUsd = normCostCap(patch.maxCostUsd);
       if (Object.prototype.hasOwnProperty.call(patch, 'origin')) next.origin = normOrigin(patch.origin);
       if (Object.prototype.hasOwnProperty.call(patch, 'noAgent')) next.noAgent = patch.noAgent === true;
       // re-normalize through the same === true rule as creation: a patch may never persist a truthy-ish value
@@ -529,6 +562,38 @@
       // NS-0: clear the liveness heartbeat on the SAME settlement — the run is no longer in flight, so a
       // stale heartbeat must never suppress a legitimately-re-arming (transient-backoff) one-shot.
       next.heartbeatAt = null;
+
+      /* DECLINED BY POLICY (2026-11-03) — a THIRD outcome class, neither success nor failure.
+         The owner-authorization gate (sidecar/production-gate.js) refuses an unattended PAID run before any
+         provider call when production is disarmed. That is the control working as designed; the routine is
+         healthy and correctly configured. Settling it as a failure is wrong in two concrete ways, both of
+         which were observed live on 2026-11-03 before this branch existed:
+
+           transient:true  -> took the retry path below: retryCount 1, nextRunAt rewound to now+90s, so the
+                              routine churned a fire-and-refuse loop every ~90s while disarmed.
+           transient:false -> would take the terminal path: consecutiveFailures++ and, at the default
+                              ceiling of 5, AUTO-DISABLE the routine (`disabledReason:'consecutive-failures'`).
+                              A safety refusal must never end up disabling the owner's schedule — that is
+                              precisely the outcome the gate exists to avoid having to cause.
+
+         So a declined occurrence is SKIPPED: the failure streak is untouched (it cannot auto-pause), no
+         retry is armed, and nextRunAt advances to the normal next occurrence. It stays visible — lastStatus
+         'declined' with the reason in lastError — because a silently-skipped run would be the lie. state
+         stays 'scheduled' because the routine genuinely is scheduled and healthy.
+
+         Checked BEFORE the transient branch so the gate's `transient` flag cannot route it either way. */
+      if (!ok && String(result.reason || '') === 'refused') {
+        next.lastStatus = 'declined';
+        next.consecutiveFailures = Number(job.consecutiveFailures) || 0;   // untouched: this is not a failure
+        next.consecutiveFailureWarning = job.consecutiveFailureWarning;
+        next.retryCount = 0;
+        next.retryAnchorAt = null;
+        next.lastRunAt = iso(now);
+        next.nextRunAt = armAt(job.schedule, next.lastRunAt, now, ctx && ctx.defaultTz) || job.nextRunAt;
+        next.state = 'scheduled';            // healthy and still armed — not an error state
+        next.enabled = job.enabled;          // explicitly preserved: a decline can never disable a routine
+        return next;
+      }
 
       // transient failure with retries left: back off, stay eligible, do NOT finalize the occurrence.
       if (!ok && result.transient && (job.retryCount || 0) < maxRetries) {

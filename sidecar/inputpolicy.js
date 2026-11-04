@@ -44,7 +44,14 @@ const IMPACT_SET = new Set(Object.keys(IMPACTS).map(k => IMPACTS[k]));
 // model ever saw them (measured 2026-10-27: SCOUT and PUBLISHER lost deliverable_note, todo and
 // routine.notepad on every cron fire). Exactly the failure already recorded for 'taskbrief' and 'toolsearch'
 // above: an unclassified local tool reads from the outside as merely "not found".
-const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo', 'deliverable', 'taskplan', 'routinescratch']);
+/* 'outbox' joined 2026-11-02 for the SAME reason 'deliverable'/'taskplan'/'routinescratch' did: without a
+   SAFE_BUILTIN_CAPS row a capability falls to EXTERNAL_UNKNOWN and enforceRunAuthority strips the tool BEFORE
+   THE MODEL SEES IT on every ASK-mode unattended run. That bug once left SCOUT unable to name a deliverable or
+   keep a task list on any cron fire; here it would have made the central Outbox invisible to PUBLISHER — the
+   one ASK-mode agent in the Etsy chain and the exact consumer the Outbox was built for. outbox_list/outbox_read
+   are host-local reads: scope 'read', requiresConsent false, network false, ID-addressed (never a path), and
+   they write nothing — the same freebie class as the three above, impact NONE. */
+const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo', 'deliverable', 'taskplan', 'routinescratch', 'outbox']);
 
 function impactOfTool(tool) {
   tool = tool || {};

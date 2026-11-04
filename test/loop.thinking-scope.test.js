@@ -80,6 +80,7 @@ const wireThinking = (messages, scope) =>
     A.eq(scope.model, 'claude-sonnet-5-5', 'scope names the model');
     A.eq(scope.runId, 'run-1', 'scope names the run');
     A.eq(scope.epoch, 0, 'epoch starts at 0');
+    A.eq(scope.tools, '[{"description":"","input_schema":{"type":"object"},"name":"noop"}]', 'scope has tools hash');
 
     const asst = messages.find(m => m.role === 'assistant' && m.reasoning);
     A.ok(asst, 'the streamed thinking block was parked on the assistant turn');

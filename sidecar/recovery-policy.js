@@ -21,6 +21,14 @@ const RETRY_JITTER = 0.2;
    non-retryable anyway, and `unknown` is excluded because "the same unrecognized refusal three times in a row"
    is evidence, not a blip. */
 const PRESTREAM_CONTINUABLE = { overloaded: 1, server_error: 1, timeout: 1, rate_limit: 1 };
+/*
+   The exhaustion escape: once a transport ladder is fully spent (no rungs left AND/OR patience exhausted),
+   only classes in this allowlist may cross to the next provider instead of ending the run. `timeout` is the
+   sole entry — a long stream dropping on a mobile radio is a transport problem, not a broken request. Every
+   other class (auth, billing, format, content-policy, output_cap, unknown…) fails in place so a bug in
+   provider A can never quietly start spending on provider B.
+*/
+const EXHAUSTED_FALLBACK = { timeout: 1 };
 
 function finite(v, fallback) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
 
@@ -96,6 +104,15 @@ function providerFailure(input) {
   /* An adapter-exhausted pre-stream failure used to end the run outright (a 4x503 blip killed a single-provider
      run in 1.6s). It now CONTINUES the same bounded ladder for the transient classes — the caller has already
      advanced retriesUsed/waitedMs by the adapter's spend (preStreamSpend), so nothing is multiplied. */
+  /* EXHAUSTED LADDER: the local ladder is fully spent (no rungs left AND/OR patience exhausted). A spent
+     `timeout` is a transport problem — cross to the next provider instead of ending the run. Everything else
+     fails in place (the money rule). */
+  const patienceSpent = i.waitedMs != null && Math.max(0, finite(i.patienceMs, RETRY_PATIENCE_MS)) - Math.max(0, finite(i.waitedMs, 0)) <= 0;
+  if ((retriesUsed >= maxRetries || patienceSpent) && EXHAUSTED_FALLBACK[cls.reason] === 1 && i.hasFallback
+      && finite(i.recoveriesUsed, 0) < finite(i.maxRecoveries, 0)) {
+    return { action: 'fallback', reason: String(cls.reason || 'provider_failure'), retryable: true, delayMs: 0, rotate: false };
+  }
+
   const ladderOpen = !i.preStreamRetriesExhausted || PRESTREAM_CONTINUABLE[cls.reason] === 1;
   if (ladderOpen && cls.retryable && fallbackUnavailable && retriesUsed < maxRetries) {
     const local = jitteredDelay(RETRY_DELAYS_MS[Math.min(retriesUsed, RETRY_DELAYS_MS.length - 1)], i.jitterSample);
@@ -148,5 +165,5 @@ function toolFailure(input) {
 
 module.exports = {
   providerFailure, preStreamSpend, jitteredDelay, toolFailure, transientToolReason, isIdleStall,
-  RETRY_DELAYS_MS, RETRY_PATIENCE_MS, RETRY_JITTER, PRESTREAM_CONTINUABLE, MAX_IDLE_STALLS
+  RETRY_DELAYS_MS, RETRY_PATIENCE_MS, RETRY_JITTER, PRESTREAM_CONTINUABLE, MAX_IDLE_STALLS, EXHAUSTED_FALLBACK
 };

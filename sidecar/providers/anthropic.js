@@ -19,6 +19,10 @@
   const RETRY_DELAYS = [400, 1200];
   const REWARM_MIN_MS = 5 * 60 * 1000;
   const DEFAULT_CONTEXT = 200000;
+  // failopen.note — the tagged SYNC swallow (per-tag count + throttled warn): a fail-open catch must never be
+  // invisible. Same UMD-safe shape as providers/ratelimits.js, so the browser build stays dependency-free.
+  const { note: failNote } = (typeof require === 'function') ? require('../failopen.js')
+    : { note: function (tag, e) { console.warn('[failopen] ' + tag + ':', (e && e.message) || e); } };
   const FALLBACK_MAX_TOKENS = 32000;   // Anthropic requires max_tokens; when the model's real ceiling is unknown, cap here
                                        // (well above the old 4096 so long deliverables aren't silently truncated) — decided 2026-07-04.
   // resolve the env override once, tolerant of a garbage value (a typo must never wedge generation).
@@ -164,13 +168,22 @@
   function cleanBaseUrl(value) {
     return String(value || DEFAULT_BASE).trim().replace(/\/+$/, '');
   }
-  function headerBag(key, accept) {
+  /* THINKING-BLOCK BINDING CONTROLS (2026-11-02). The beta that lets `thinking.block_binding` through; without
+     it the field is refused outright ("thinking.adaptive.block_binding: Extra inputs are not permitted").
+     PROBED, not assumed — a deliberately-invalid enum returned the allowed set:
+       thinking.adaptive.block_binding.prefix_mismatch_behavior: Input should be 'error' or 'drop_block'
+     Sent ONLY on requests that actually carry block_binding (see applyThinking), so a third-party
+     Anthropic-compatible endpoint behind a custom baseUrl never receives a beta it does not know. */
+  const BLOCK_BINDING_BETA = 'thinking-binding-controls-2026-08-01';
+  function headerBag(key, accept, betas) {
     const h = {
       'anthropic-version': ANTHROPIC_VERSION,
       'Content-Type': 'application/json',
       'Accept': accept || 'text/event-stream'
     };
     if (key) h['x-api-key'] = key;
+    const list = Array.isArray(betas) ? betas.filter(Boolean) : [];
+    if (list.length) h['anthropic-beta'] = list.join(',');
     return h;
   }
   function safeJson(value, fallback) {
@@ -307,6 +320,7 @@
       if (!want) continue;                                                 // no identity to check against -> refuse
       if (src.provider !== want.provider || src.model !== want.model) continue;
       if (src.runId !== want.runId || src.epoch !== want.epoch) continue;  // other run, or pre-compaction history
+      if (String(want.tools || '') && String(src.tools || '') !== String(want.tools || '')) continue; // tools changed -> stale block
       if (b.type === 'thinking' && typeof b.signature === 'string' && b.signature) {
         out.push({ type: 'thinking', thinking: String(b.thinking == null ? '' : b.thinking), signature: b.signature });
         continue;
@@ -492,6 +506,41 @@
        and caches by prefix, so these keys never shift the cached prefix — but they DO invalidate it when they
        CHANGE, which is why effort is resolved once per request from a value that is stable for a run's life
        rather than recomputed per turn. */
+    /* LET THE SERVER DROP A MISMATCHED BLOCK INSTEAD OF KILLING THE RUN (2026-11-02).
+       thinkingBlocks() already refuses to replay a block whose stamp does not match this exact
+       run/model/epoch/tools, and every compaction path bumps the epoch — yet a live cron run still died:
+
+         DESIGNER (webdesigner 7971fbcc, claude-sonnet-5-5, 17 turns, $0.603 spent) ->
+         400 Invalid `signature` in `thinking` block. The block is bound to a different conversation.
+             Content before this block was rewritten since it was created, first at messages.8.content.3
+
+       The host-side guard is necessary but evidently not sufficient: something re-derives the prefix in a way
+       the epoch does not model, and a read-only audit of every history mutation could not identify it (all
+       four non-compaction rewrites are terminal — they are followed immediately by `return end('error')`).
+       So this is the SERVER-side half, and it is Anthropic's own documented escape hatch: 'drop_block' makes
+       the API discard a block whose binding no longer matches instead of refusing the whole request. That
+       turns a fatal, run-ending, money-already-spent 400 into the graceful degrade thinkingBlocks' own
+       comment says it wants — "a dropped block costs the model that turn's private scratchpad; a foreign
+       block costs the whole run".
+
+       WHERE IT MAY BE SENT — probed against the live API, one deliberately-invalid field at a time, never
+       inferred from the docs or from this error text:
+         thinking.type 'adaptive'      -> accepted (HTTP 200, incl. claude-sonnet-5-5)
+         thinking.type 'enabled'       -> accepted (HTTP 200, claude-haiku-4-5)
+         thinking.type 'between_tools' -> REFUSED  "thinking.between_tools.block_binding: Extra inputs are not permitted"
+         thinking.type 'disabled'      -> REFUSED  "thinking.disabled.block_binding: Extra inputs are not permitted"
+       Hence it is applied only on the two thinking-ON shapes; the off-switches must stay byte-identical, or
+       turning thinking OFF would start 400ing on every model. */
+    function applyBlockBinding(body) {
+      if (!body || !body.thinking) return;
+      const t = body.thinking.type;
+      if (t !== 'adaptive' && t !== 'enabled') return;   // off-switches refuse the field — see the probe table
+      body.thinking.block_binding = { prefix_mismatch_behavior: 'drop_block' };
+    }
+    // The beta rides only when the field it unlocks is actually present (keeps third-party endpoints clean).
+    function betasFor(body) {
+      return (body && body.thinking && body.thinking.block_binding) ? [BLOCK_BINDING_BETA] : [];
+    }
     function applyThinking(body, req) {
       const model = body.model;
       if (!isClaude(model)) return;                        // third-party Anthropic-compatible endpoint: send nothing
@@ -508,6 +557,7 @@
         if (cap > 0) budget = Math.min(budget, Math.floor(cap * 0.75));
         if (budget < LEGACY_MIN_BUDGET) return;            // no room to think without starving the answer -> don't ask
         body.thinking = { type: 'enabled', budget_tokens: budget };
+        applyBlockBinding(body);
         return;
       }
       // MODERN. A disable is sent WITHOUT an effort: the wire refuses an off-switch above `high`, and an
@@ -516,6 +566,7 @@
       // {type:'disabled'} (which broke every run by this station's Commander). See thinkingOffType.
       if (effort === 'none') { body.thinking = { type: thinkingOffType(model) }; return; }
       body.thinking = { type: 'adaptive' };
+      applyBlockBinding(body);
       body.output_config = Object.assign({}, body.output_config, { effort });
     }
     function buildBody(req) {
@@ -735,7 +786,7 @@
         try {
           res = await doFetch(baseUrl + '/messages', {
             method: 'POST',
-            headers: headerBag(key),
+            headers: headerBag(key, null, betasFor(body)),
             body: JSON.stringify(body),
             signal: guard.signal
           });
@@ -755,6 +806,26 @@
         const err = new Error('anthropic http ' + res.status + ' - ' + detail);
         err.status = res.status;
         err.headers = res.headers;
+        /* NAME THE SHAPE WHEN A SIGNATURE 400 HAPPENS ANYWAY (2026-11-02). The run that provoked the
+           block_binding work above died with "Invalid `signature` in `thinking` block … Content before this
+           block was rewritten", and nothing on the station recorded WHICH message the API was pointing at —
+           the error cites wire indices (messages.3.content.0, messages.8.content.3) and our array does not map
+           1:1 onto the wire's (appendMessage merges consecutive same-role turns, and every `tool` message
+           becomes a `user` one), so the read-only audit could not align them. This prints the wire SKELETON —
+           role + block types + per-message block count, indices as the API numbers them — so a recurrence is
+           diagnosable from the log instead of costing another live run. CONTENT IS NEVER PRINTED: block types
+           and counts only, so no prompt text, tool output, secret or customer data can reach the log. */
+        if (res.status === 400 && /\bsignature\b/i.test(String(detail)) && /thinking/i.test(String(detail))) {
+          try {
+            const skeleton = (body.messages || []).map((m, i) => i + ':' + m.role + '[' + (Array.isArray(m.content)
+              ? m.content.map(c => (c && c.type) || '?').join(',')
+              : typeof m.content) + ']');
+            process.stderr.write('[anthropic] signature-400 wire skeleton (' + skeleton.length + ' msgs, no content): '
+              + skeleton.join(' ') + '\n');
+            process.stderr.write('[anthropic] signature-400 thinking=' + JSON.stringify(body.thinking || null)
+              + ' betas=' + JSON.stringify(betasFor(body)) + ' model=' + body.model + '\n');
+          } catch (e) { failNote('anthropic.signature400.skeleton', e); }
+        }
         /* KEEP THE PROVIDER'S ERROR BODY (same law as codex.js). The message above keeps only error.message, but the
            classifier's decisive signal can be the typed error ({error:{type:'overloaded_error'|'rate_limit_error'|…}});
            dropping the body left errorClass reading prose. The message stays the adapter's own sentence (label +

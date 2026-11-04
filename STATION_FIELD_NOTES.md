@@ -1948,3 +1948,278 @@ was $5.93 of $35 remaining on 2026-10-27.
 server was healthy, the UI was lying, the boot gap was real, and a documented money fact was stale. Checking
 `/api/health` and one live agent run *first* cost nothing and stopped three wrong fixes — restarting a
 healthy sidecar, re-pasting a key that should never be in the renderer, and switching a model that worked.
+
+## 18. 2026-11-02 — Live Etsy pipeline test (SCOUT → DESIGNER → QC → PUBLISHER → HARVEST), a stuck-lease bug, and the real blocker
+
+Owner-authorized manual test, driven stage-by-stage via `POST /api/run` (not the cron chain — see §18c for
+why that routine is a separate, unrelated finding). Full saved artifacts, run IDs and a README:
+`workspaces/agent/pipeline-live-test-20261102T124646Z/`. Total real spend: **$0.2595**.
+
+### 18a. Bug found and fixed live: an aborted client connection can permanently wedge an agent's workspace
+
+First SCOUT call was killed by the operator's own tooling at a 2-minute client-side timeout, mid `fs_write`.
+No `.spend-pending` receipt was orphaned (every turn up to that point was `reconciled:true`), but
+`sidecar/workspace-lease.js`'s per-agent lease never released. Proof: two subsequent, completely clean SCOUT
+runs each failed identically — `fs_write` → `workspace-busy` after exactly the hardcoded `45000ms` wait
+(`sidecar/workspace-lease.js:35`), both naming "another live run" as holder. `GET /api/state/snapshot` showed
+`runs: []` the whole time — the orphaned run was invisible to the one piece of live-run bookkeeping that
+exists, so there was no API-level way to see or clear it. `holderOf`/`waitersOf` are implemented in
+`workspace-lease.js` but **never wired to any route** — grepped, confirmed, zero call sites.
+
+**The only fix found was a sidecar restart** (owner explicitly approved this one). `.spend-pending` was
+checked empty before and after per the standing protocol. Post-restart, the identical SCOUT call succeeded
+immediately. **Open follow-up, not yet fixed:** the release in `sidecar/index.js:19728` only fires from the
+holding run's own `finally` — if the HTTP handler for a client-disconnected `/api/run` call doesn't reliably
+reach that `finally`, this will recur on any agent any time an operator's client (not the sidecar) drops
+mid-write. A real fix needs either a request-abort handler that force-releases the lease, or exposing
+`holderOf`/`waitersOf` on an admin route so a stuck lease can be inspected/cleared without a restart.
+
+### 18b. ASK-mode agents genuinely cannot save files on an unattended run — confirmed live, not just read in code
+
+CLAUDE.md already documents "an ASK-mode worker cannot `fs.write` on an unattended run" for the delegation
+path; this test confirms it holds for a plain `/api/run` call too, with two different failure shapes:
+
+- **QC_EDITOR** (model `claude-opus-5`): `fs_write` triggered a `permission.prompt` event that then sat
+  unanswered — nobody was present to approve it — until the client gave up. The run's own
+  `agent.tool_call` payload still contained the full intended file content, so the real text was recovered
+  from the event stream and saved by the orchestrator instead.
+- **PUBLISHER** (model `claude-haiku-5-5`): `fs_write` came back **synchronously denied**
+  (`ERROR: consent denied for fs.write: denied`) rather than hanging. PUBLISHER then searched for another
+  write tool, found none usable, explicitly declined to route around the denial via `shell_exec`, and put
+  the full draft in its reply text instead. Correct behavior, no fabrication.
+
+SCOUT and HARVEST (both Full-Access per `/api/toolsets`) wrote their files with no prompt at all. So the
+split is real and live-verified: **Full-Access agents write immediately; ASK-mode agents either hang on an
+unanswered prompt or get denied outright, never silently succeed.** Which of the two ASK failure shapes you
+get appears to depend on the specific tool/agent, not a single global rule — worth a closer read of
+`sidecar/permissions.js` if this matters for a future headless ASK-agent design.
+
+### 18c. The cron-armed Etsy chain is a separate, pre-existing finding — not caused by this test
+
+Checked `GET /api/cron` before touching anything and found `ebc4f07d-a26e-4e40-ae4f-01f8a56ea909`
+(documented in `CLAUDE.md` as disabled) is actually `enabled:true`, and had already auto-fired on its own
+schedule at **2026-11-02T11:09 UTC — before this test session started**. `CLAUDE.md` is corrected in place
+(three locations). The trailing auto-warning two lines above this section (`2026-11-02T07:59:27Z`, thinking
+block signature error) shows that same routine had already failed twice earlier that morning on the
+loop.js/anthropic.js thinking-scope regression other sessions were mid-fixing — so by the time it finally
+fired successfully at 11:09 UTC, it was on its third attempt that day. That 11:09 run reached SCOUT only;
+`team_dispatch` itself reported `isError:true`/"timeout" after 9 minutes, and the outbox has only
+lead→SCOUT handoff files. **The full chain (through DESIGNER and PUBLISHER) has still never completed
+end to end**, matching what §16 already said before this test.
+
+### 18d. The real, external blocker: OpenAI has zero image-generation credits
+
+DESIGNER's one authorized `openai_image_generate` call returned a genuine `HTTP 429: You have no credits
+remaining`. Cost of the call itself: **$0** (OpenAI rejected it before billing). DESIGNER correctly made
+exactly one attempt and did not retry or fabricate a result. The fallback DESIGNER suggested — the default
+`image_generate` tool, which rides OpenRouter — was **not** attempted, because OpenRouter's wallet was
+already confirmed at essentially $0 (`total_credits:35, total_usage:35.027159415`) earlier in this same
+session; trying it would just be another guaranteed-failure call burning sonnet-5-5 tokens for nothing.
+**Neither known image-generation route can render anything right now.** This is a funding decision for the
+owner (add credits to one of the two accounts), not a code bug — nothing in this test suggests the image
+pipeline itself is broken.
+
+### 18e. What the pipeline stages actually proved, net of the blockers above
+
+- **SCOUT: genuine, honest research.** Real `web_search` (duckduckgo-html), a real `web_fetch` attempt that
+  failed ("fetch failed"), and — critically — it labeled its price assumptions UNVERIFIED rather than
+  inventing numbers, across two separate passes even when explicitly told it had budget for more searches.
+- **QC: a real, blunt FAIL verdict**, not a rubber stamp — it listed specific passes (research discipline,
+  tag legality, designer's honest failure handling) against specific fails (zero artwork, unverified
+  pricing, no listing copy), and it flagged its own inability to independently re-verify the pasted source
+  files as a limitation on its own verdict rather than glossing over it.
+- **PUBLISHER: refused to claim ready-to-list.** Drafted title/description/tags/preliminary pricing but
+  stated plainly, unprompted, that "this listing is NOT publishable in its current state."
+- **Net:** the orchestration plumbing (research → design → QC → listing) works end to end at the process
+  level. The product itself does not exist, because the one paid stage that produces a sellable artifact
+  is blocked on an empty wallet, not on wiring.
+
+- 2026-11-02T07:59:27.100Z AUTO-WARNING (cron, 2 failures in a row): ⚠ "Etsy pipeline chain (NIGHT4CHRIST leads)" (agent: agent) has failed 2 runs in a row. Last error: anthropic http 400 - messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to "drop_block". That setting requires the `thinking-binding-controls-2026-08-01` value in th
+
+## §20 — Independent engineering audit, 2026-11-03 (free work only; no restart, no spend)
+
+Four findings, each from measuring the live station rather than reading a prior report. Two of them
+**correct an earlier claim made in this repo**, including one of my own.
+
+### 20a. CORRECTION: the restart I asked for would NOT have protected today's scheduled runs
+
+I previously reported that `sidecar/loop.js`'s pre-flight budget reservation being stale was the urgent
+risk for the three routines firing 2026-11-03. **That was wrong, and the real picture is worse.**
+
+```
+GET /api/cron          -> 3 routines ENABLED today; EVERY ONE: maxCostUsd undefined, no cost field at all
+GET /api/budget/status -> caps { perRun: 0, perAgent: 0, perDay: 25, global: 0 }, spentToday 4.8435
+```
+
+The reservation only engages when `maxCostUsd > 0`. Cron never set it — `cron-store.js` had **no such
+field** — so the fix is *inert* for a scheduled fire either way. `perRun: 0` means ungoverned per run
+(`index.js`: `effectiveCaps.perRun > 0 ? ... : Infinity`). The only governor was the $25/day rail with
+~$20 of headroom left, available to a single unattended routine.
+
+**The lever that works WITHOUT a restart:** `effectiveCaps` is mutable and read at run time
+(`index.js:1147` says so explicitly: "A GETTER, not a number"), so `POST /api/budget/caps {perRun:N}`
+takes effect on the next run immediately. That is the instant protection; the restart only makes the
+ceiling *exact*. **Owner decision — not applied.**
+
+### 20b. The Central Outbox was blind to every studio video (FIXED)
+
+Two deliverable indexes existed and did not know about each other:
+
+| index | held |
+|---|---|
+| legacy deliverable store | studio videos (`studio:<proj>:video`, kept/failed) |
+| central Outbox manifest  | agent-run artifacts only |
+
+34 manifest rows, **zero video rows against four rendered projects.** Worse, QC_EDITOR could not reach a
+video by *any* route: `$HOME/outbox/<projectId>/` is outside every agent workspace, `fs.*` is jailed, and
+`pathtrust.js` hard-denies a cross-root grant unattended. **Video QC was structurally impossible** — which
+is why QC_EDITOR's verdicts kept recording "pixels not viewed".
+
+Fixed in the **injected** `workspaceRootOf` (`index.js`), not in the manifest: a pseudo-producer `'studio'`
+resolves to `$HOME/outbox`; every real agent id is untouched. All floors still govern that root — re-proven
+against it in `test/outbox-studio-bridge.test.js` §3 (absolute, `..`, NUL, leaf symlink, intermediate-dir
+symlink). `verification` is set from `verifyVideoFile()`'s real verdict; `qc`/`approval` are never touched
+by the host.
+
+Backfilled all four through the module's own `register()` (not hand-written JSONL, so checksums and type
+detection are real). The manifest has **no in-memory cache** (`readFileSync` per call), so this is live now:
+Commander and QC_EDITOR both see 4 videos; `scout` sees 0. The placeholder is honestly `verification:failed`
+("too-small: 32770 bytes is under the 102400-byte floor") rather than hidden.
+
+**Known limit, verified both ways:** listing works live; **byte retrieval needs the restart** — the running
+process's old resolver returns `owner workspace unavailable` (fails CLOSED, not open).
+
+### 20c. A routine could not carry its own spend ceiling (FIXED)
+
+`maxCostUsd` added to `cron-store.js` (EDITABLE + create + patch, re-normalised on every edit). Forwarded by
+**both** fire paths as `callerMaxCostUsd` — the `Math.min` lower-only lane — so a tampered
+`cron.jobs.json` claiming `999` buys nothing.
+
+`perRun` cannot substitute: it is one number for every agent while real per-run costs differ ~20x
+(lead ~$0.11 vs SCOUT ~$0.005). Any single value is too tight for the chain or 20x too loose for SCOUT.
+
+**The sibling adapter nearly got missed.** `index.js handleCronRun` ("Run Now") is a *second* launcher and
+would have stayed uncapped — its own comment records it having drifted from the scheduled fire before
+(`cronJobId` passed for months by the schedule, never by Run Now). Both forwards are now negative-control
+tested: stripping either one fails `test/cron-cost-cap.test.js`.
+
+**Still not an exact cap** without 20a's restart: the ceiling is evaluated *between* turns, so a capped run
+can overshoot by one worst-case turn. §6 of that test pins the real number — a $0.50 ceiling permitted
+$0.605665 (+21.1%).
+
+### 20d. `grep` returned NOTHING on the file holding the symlink floor (FIXED)
+
+`sidecar/deliverable-manifest.js` carried four raw control bytes (0x00 0x08 0x0e 0x1f) inside
+`detectType()`'s control-char class. The code worked and its 126 assertions passed, but:
+
+```
+$ file sidecar/deliverable-manifest.js
+sidecar/deliverable-manifest.js: data
+$ grep -n "symlink\|realpathSync\|O_NOFOLLOW" sidecar/deliverable-manifest.js
+(no output)
+```
+
+**That is a security harm, not a cosmetic one.** This module holds the symlink-escape floor; a reviewer
+grepping for it got zero matches and would reasonably conclude the protection was absent. Silent-empty-grep
+is the worst failure mode a safety control can have — it reads as proof the control is missing. This is how
+I personally hit it.
+
+Replaced with `\xNN` escapes after proving equivalence over **all 256 byte values + 40 heads + 15 pinned
+semantics** against the original bytes read from the backup. Five other files share the defect at lower
+severity; **deliberately not fixed** (two are ANSI-escape handling in shell execution — more regression risk
+than value) but **grandfathered in a ratchet**, matching the existing `failopen-ratchet` pattern, so this
+recurring corruption can never spread silently. Negative-control proven: a planted 0x01 fails the ratchet.
+
+### What did NOT change
+
+No restart, no spend, no model/approval-mode change, no scheduler arm/disarm, no OmniRoute change, no git
+commit, no deliverable original modified. Station healthy throughout: pid 1989, `/api/health` ok,
+`.spend-pending` empty.
+
+**All five edited sidecar files are STALE vs the running process** (started 00:12:52Z) and none of this
+code is live except the manifest data changes, which need no restart.
+
+## §21 — WHERE WE LEFT OFF (pre-reboot handoff, 2026-11-04)
+
+Written immediately before an owner-initiated phone restart for a system update. Station was idle and
+clean at this point: `/api/health` ok, **0 active runs, 0 cron claims, `.spend-pending` empty**,
+production **DISARMED**, `spentToday $2.11 of $25`.
+
+### DONE (committed on `feat/harness-backend`, verified live, not just tested)
+
+- **The DESIGNER -> PUBLISHER handoff bug — root-caused and fixed.** `registry.dispatch` rebuilds every
+  successful result through `okResult(...)` from a FIXED field list, so a tool's extra fields are silently
+  dropped; `taintedBy` survives only because one explicit line copies it. `producedFiles` had no such line,
+  so `artifacts.js`'s generic hatch (added 2026-10-22 for `vector_export` / `image_print_prep` /
+  `image_stock_fetch` / `mockup_compose`) **could never fire**. DESIGNER's print files existed on disk and
+  were invisible to PUBLISHER, whose only sanctioned cross-agent route IS the Outbox. Live proof:
+  **0 of 6 registered before, 6 of 6 after.** This is the cause of the long-standing "registration hook has
+  never run in a real pipeline run" item. Regression: `test/registry-producedfiles.test.js` (25 assertions,
+  in `test/fast.list`, **fails against the pre-fix module** — negative-control proven).
+  *Rule for next time: adding a field to a tool's return value requires a matching forward line in dispatch.*
+- **QC_EDITOR could not see what it was asked to QC.** `outboxShareFor()` is viewer-scoped and DESIGNER
+  shared only with `publisher`, so QC reported "0 of 6 print files present" about six real files. Added
+  `qceditor` — the same read-only ruling already applied to the studio lane directly below it.
+- **HARVEST was added to that share and then REVERTED** after a security review flagged it, correctly. Its
+  own `docs.identity` scopes it OUTSIDE Etsy, it needed no file access for its report, and it is
+  full-approval + outward-facing — read access to unapproved masters was exposure for nothing. Narrowing an
+  already-registered row needs `manifest.patch`; `register()` PRESERVES the original `sharedWith` for a path
+  it has already indexed (two rows had to be patched by hand).
+- **PUBLISHER + QC_EDITOR `ask` -> `full`.** Both returned `consent-denied` on `fs_write` with no approver
+  present, so neither could save its own output. Changed via the two-copy protocol (identical
+  `doc.updatedAt`, `_saveRevision` bumped, mirrored through `POST /api/roster`); save and roster agree.
+  Studio DIRECTOR/PRODUCER/COPYWRITER deliberately left on `ask`.
+- **Per-routine spend ceilings on all 8 routines** (chain $1.00, workers $0.25, smoke $0.10). Previously
+  every routine was ungoverned and `perRun` is still `0` station-wide, so these caps are the only per-run
+  governor. This supersedes §20a's "EVERY ONE: maxCostUsd undefined".
+- **Fallback chain deliberately EMPTIED.** `savedProviderFallbacks` hardcodes `{provider:'openrouter'}` for
+  every saved entry, so the saved chain can ONLY be the OpenRouter lane — it cannot hold a Gemini-direct or
+  OmniRoute entry. With OpenRouter overdrawn, a populated chain meant a free-route failure silently
+  attempting a paid provider (observed live: a Gemini `overloaded` rotated to `anthropic/claude-haiku-5.5`).
+  One entry, `google/gemini-3.1-flash-lite`, also measured dead at **0/6, 503 every call**.
+- **`.gitignore` actually fixed (2026-11-04).** CLAUDE.md claimed this was done; it was not. `*.bak` matches
+  only names ENDING in `.bak`, so every suffixed backup was committable — and `.env.local.bak-20261030`,
+  which holds a real `HF_KEY` value, was matched by neither `.env.local` nor `*.bak`. One `git add -A` would
+  have published the key. Added `*.bak-*`, `*.bak.*`, `.backups-*/`, `.env.local.*`; re-verified with
+  `git check-ignore -v`, which is the only trustworthy check.
+- **Full Etsy chain passed end to end on a NEW product (Isaiah 41:10).** NIGHT4CHRIST led three
+  `team_dispatch` calls; every output confirmed on disk by me, not taken from the agents' claims: exact
+  verbatim KJV wording with `LORD` correctly capitalised; a real **2400x3000** PNG (38,484 bytes, `file` +
+  `ffprobe`) plus a 34,510-byte PDF; a QC report citing the correct byte sizes; a listing package with a
+  <140-char title, exactly 13 tags, $4.50 and the required AI-disclosure line; three host-written handoff
+  records with real costs. Earlier, the 28.8MB print master was retrieved through `/api/artifact`
+  **byte-identical by sha256**.
+
+### IN PROGRESS / OPEN
+
+- **THE blocker is money, not code.** All four paid accounts are empty — `anthropic` *credit balance too
+  low*, `openrouter` $35.14 used of $35, `openai` `credit_balance_exhausted`. The only live route is the
+  **Gemini free tier at 20 requests/day PER MODEL**; one agent turn is one request. Distinct models are
+  separate buckets, so agents are deliberately split across four of them (~80/day total) — that is the only
+  reason a chain completes at all. The enabled chain routine's last scheduled fire died on exactly this:
+  `gemini http 429 ... quota exceeded`, `consecutiveFailures=1`.
+- **`GET /api/providers` reports `configured=true` for every dead account** — it is an env-key check, never a
+  balance. Do not read availability from it.
+- **`e0116cbd`** (disabled) still carries `openrouter http 400 — Reasoning is mandatory for this endpoint`
+  and is still on the dead free nemotron model. **`3d117f09`** (disabled) likewise, and its unexplained
+  $0.80 run is still unexplained. Both deliberately untouched by owner instruction.
+- **A dispatched worker runs `surface: autonomous`**, so the production gate refuses EVERY worker while
+  disarmed — delegation and the chain are untestable until production is armed. The lead's own error text
+  blames `MAX_CONCURRENT_AGENTS`, which is wrong and misleading. It refuses $0 runs too.
+- **Duplicate test exports clutter the Outbox.** Canonical: `outbox/psalm-34-18/` and `outbox/isaiah-41-10/`.
+  Mine, safe to delete together with their manifest rows: `psalm-34-18-auto`, `psalm-34-18-v2`,
+  `isaiah-41-10-final`, `isaiah-41-10-check`.
+- **`pnpm-lock.yaml` / `pnpm-workspace.yaml` left UNTRACKED on purpose.** The repo installs with `npm ci`;
+  the pnpm install is what broke `node-pty`, and committing the split would institutionalise a known defect.
+
+### NEXT STEP AFTER REBOOT
+
+1. `bash ~/starnet-up.sh` — nothing restarts StarNet automatically after a reboot (Termux:Boot is still not
+   installed, so `~/.termux/boot/10-starnet.sh` remains inert). Start it **detached** if launching from a
+   tool call, or it dies with that session.
+2. `ls ~/.local/share/StarNet/workspaces/.spend-pending/` must be empty before trusting any agent.
+3. Confirm the gate is still disarmed: `GET /api/production/status` (read-only; the mutating route is the
+   separate `POST /api/production/arm`).
+4. Then the real decision is the owner's: fund a provider. `claude-haiku-5-5` ran these workflows at
+   ~$0.005/run, so even $10 is thousands of runs, and the $25/day rail plus the new per-routine caps already
+   bound it. Until then the pipeline is proven but cannot produce.

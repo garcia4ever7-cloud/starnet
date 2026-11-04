@@ -34,13 +34,20 @@ const KINDS = Object.freeze({
   studio: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false }),  // streaming ONE studio/outbox video
   run: Object.freeze({ method: 'GET', maxTtlMs: 10 * 60 * 1000, once: false }),    // ONE workshop run dir (page + its relative assets)
   sse: Object.freeze({ method: 'GET', maxTtlMs: 2 * 60 * 1000, once: true }),      // one EventSource CONNECT (a live stream outlives it)
-  save: Object.freeze({ method: 'POST', maxTtlMs: 2 * 60 * 1000, once: true })     // one unload beacon
+  save: Object.freeze({ method: 'POST', maxTtlMs: 2 * 60 * 1000, once: true }),    // one unload beacon
+  // central Outbox: retrieve ONE registered artifact BY ID. Same 5-minute cap as 'file' — it is the same
+  // capability shape ("read this one thing"), but scoped to a manifest id instead of a caller-supplied path,
+  // so the authorization never depends on a path the requester chose. See sidecar/deliverable-manifest.js.
+  artifact: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false })
 });
 
 function b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function scopeFile(agent, relPath) { return 'file\n' + String(agent || 'agent') + '\n' + String(relPath || ''); }
 function scopeStudio(projectId, fileName) { return 'studio\n' + String(projectId || '') + '\n' + String(fileName || ''); }
 function scopeRun(agent, runId) { return 'run\n' + String(agent || '') + '\n' + String(runId || ''); }
+// The scope is (viewer, artifact id): a ticket minted for the Commander cannot be replayed as PUBLISHER, and
+// a ticket for one artifact cannot fetch another — verify() re-derives both from the ACTUAL request.
+function scopeArtifact(agent, id) { return 'artifact\n' + String(agent || '') + '\n' + String(id || ''); }
 const SCOPE_SSE = 'sse\n/api/channels/events';
 const SCOPE_SAVE = 'save\n/api/save';
 
@@ -133,6 +140,8 @@ function apiTicketClaim(req) {
   // Christian Story Studio video streaming (2026-10-26): similar to /api/file but for studio/outbox files.
   // Uses project + file scope, scoped identically to prevent cross-project access.
   if ((m === 'GET' || m === 'HEAD') && p === '/api/studio-file') return { kind: 'studio', scope: scopeStudio(q.get('project') || '', q.get('file') || ''), ticket };
+  // Central Outbox original-file retrieval (2026-11-02): id-addressed, never path-addressed.
+  if ((m === 'GET' || m === 'HEAD') && p === '/api/artifact') return { kind: 'artifact', scope: scopeArtifact(q.get('agent') || 'agent', q.get('id') || ''), ticket };
   if (m === 'GET' && p === '/api/channels/events') return { kind: 'sse', scope: SCOPE_SSE, ticket };
   if (m === 'POST' && p === '/api/save') return { kind: 'save', scope: SCOPE_SAVE, ticket };
   return null;
@@ -154,5 +163,5 @@ function splitRunTicket(rawPath) {
 
 module.exports = {
   KINDS, SKEW_MS, mint, verify, parse, replayGuard, apiTicketClaim, splitRunTicket,
-  scopeFile, scopeStudio, scopeRun, SCOPE_SSE, SCOPE_SAVE, message
+  scopeFile, scopeStudio, scopeRun, scopeArtifact, SCOPE_SSE, SCOPE_SAVE, message
 };

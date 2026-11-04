@@ -515,6 +515,14 @@
           // routine, read straight off the durable job record. Empty on every routine that was not granted, so an
           // ungranted fire is byte-identical to the pre-grant behavior. Never sourced from the prompt.
           unattendedGrants: Array.isArray(job.unattendedGrants) ? job.unattendedGrants.slice() : [],
+          /* PER-ROUTINE SPEND CEILING (2026-11-03). Forwarded as `callerMaxCostUsd`, NOT `maxCostUsd`:
+             index.js applies that lane with Math.min (search `callerMaxCostUsd`), so a routine's stored cap
+             can only ever TIGHTEN the station ceiling and a tampered cron.jobs.json cannot raise it. Omitted
+             entirely when unset or 0, so an uncapped routine's opts are byte-identical to before this field
+             existed. The same stored number is what the UI shows, so the display and the enforced ceiling
+             can never disagree. */
+          ...(Number(job.maxCostUsd) > 0 && isFinite(Number(job.maxCostUsd))
+            ? { callerMaxCostUsd: Number(job.maxCostUsd) } : {}),
           preloadSkills: Array.isArray(job.skills) ? job.skills.slice() : [],
           requiredPreloads: true,
           cronScript: job.script || null,

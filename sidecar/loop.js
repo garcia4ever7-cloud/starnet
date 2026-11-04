@@ -591,6 +591,19 @@
     if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + canonicalJson(value[k])).join(',') + '}';
     return JSON.stringify(value);
   }
+  // A stable fingerprint of the tool set a turn was sent with. Anthropic now binds a thinking block's
+  // signature to the tools list that produced it; when the tools change (model rotation, grant changes)
+  // old blocks must be dropped rather than replayed into a hard 400.
+  function toolsHash(tools) {
+    if (!Array.isArray(tools)) return '';
+    // The tools provided to runAgentLoop are in wire format (OpenAI-style {type, function: {name, description, parameters}}).
+    // The hash must match this structure, not assume an OpenAI flat structure.
+    return canonicalJson(tools.map(t => ({
+      name: (t && t.function && t.function.name) || (t && t.name) || '',
+      description: (t && t.function && t.function.description) || '',
+      input_schema: (t && t.function && (t.function.parameters || t.function.input_schema)) || (t && (t.input_schema || t.parameters)) || {}
+    })));
+  }
 
   /* ONE TURN, ONE EFFECT PER DISTINCT CALL (2026-09-22 audit, reference-harness parity). Two seams let a single
      model turn repeat a side effect:
@@ -940,6 +953,8 @@
     let refundsUsed = 0;
 
     let spentUsd = 0, turns = 0, spentTokens = 0;
+    /* WORST OBSERVED TURN — the reservation the per-run cap needs (2026-11-03). See the budget check below. */
+    let maxTurnUsd = 0;
     const unpricedUsage = [];
     let unpricedTokens = 0;          // tokens reconciled at $0 on a model nothing could price (feeds maxUnpricedTokens)
     let unpricedFlagged = false;     // agent.cost carries unpriced:true ONCE per run — the first turn it happens
@@ -1127,6 +1142,7 @@
     function bookUsage(u, modelId) {
       if (!u || !cost) return null;
       const c = cost.reconcile(u, modelId);
+      if ((c.usd || 0) > maxTurnUsd) maxTurnUsd = c.usd || 0;   // feeds the next turn's affordability check
       spentUsd += c.usd || 0;
       spentTokens += (c.tokensIn || 0) + (c.tokensOut || 0);
       noteUnpriced(modelId, c);
@@ -1500,6 +1516,29 @@
         // the stream) — but any call it emits is dropped, never executed, and the run ends max_iters.
       }
       if (spentUsd >= maxCostUsd) return end('budget', { budgetScope: 'run', budgetCapUsd: maxCostUsd });   // per-RUN hard ceiling
+      /* DO NOT START A TURN THE BUDGET CANNOT AFFORD (2026-11-03).
+         The check above only asks "have we ALREADY spent the cap?", so a run sitting just under it was allowed
+         to start one more turn of unbounded size. Measured harm, not theory: a QC_EDITOR run with a $0.50 cap
+         stood at $0.4819 after turn 4, started turn 5, and that turn cost $0.1237 — final $0.6057, 21% over,
+         and the run was then killed before it wrote the verdict it existed to produce. The money bought the
+         reading and none of the writing. A DESIGNER run overran a $0.12 cap the same way.
+
+         So the cap becomes a REAL ceiling: refuse the next turn unless the worst turn seen so far still fits
+         in what is left. Replaying both incidents against this rule ends them at $0.4819 and $0.1021 —
+         both inside their caps.
+
+         Deliberate properties:
+           • the FIRST turn is never blocked (maxTurnUsd is 0) — a run must be able to start, and a cap
+             smaller than one turn is a budgeting error to surface, not a run to silently refuse;
+           • it is a stop, never a resize — nothing here raises a cap or alters a request;
+           • `budgetScope: 'run'` is unchanged, so every existing consumer of the 'budget' end reason keeps
+             working; `budgetReserved` is additive telemetry so the honest reason is visible in the stream. */
+      if (maxTurnUsd > 0 && isFinite(maxCostUsd) && (spentUsd + maxTurnUsd) > maxCostUsd) {
+        return end('budget', {
+          budgetScope: 'run', budgetCapUsd: maxCostUsd,
+          budgetReserved: Number(maxTurnUsd.toFixed(6)), budgetSpent: Number(spentUsd.toFixed(6))
+        });
+      }
       // per-RUN token ceiling for turns nothing could price (the $ ceiling above is blind to them — see maxUnpricedTokens)
       if (unpricedTokens >= maxUnpricedTokens) {
         return end('budget', { budgetScope: 'run', unpricedModel: unpricedModel || model, unpricedTokens, unpricedCapTokens: maxUnpricedTokens });
@@ -1601,7 +1640,7 @@
              each parked block and replays only exact matches, so a block from another run, another model
              or a pre-compaction history is dropped instead of killing the turn. Providers that do not
              sign thinking blocks ignore the field entirely. */
-          req.reasoningScope = { provider: provider, model: model, runId: runId, epoch: historyEpoch };
+          req.reasoningScope = { provider: provider, model: model, runId: runId, epoch: historyEpoch, tools: toolsHash(tools) };
           if (typeof o.isTask === 'boolean') req.isTask = o.isTask;
           if (o.cacheSystemPrefix) req.cacheSystemPrefix = o.cacheSystemPrefix;
           if (outputCapTokens > 0) req.maxTokens = outputCapTokens;   // the ceiling a provider named (output_cap)
@@ -1629,7 +1668,7 @@
                type/thinking/signature alone, so it can never ship to a provider. */
             else if (ev.type === 'reasoning') {
               if (ev.block) acc.reasoning.push(Object.assign({}, ev.block, {
-                __src: { provider: provider, model: model, runId: runId, epoch: historyEpoch }
+                __src: { provider: provider, model: model, runId: runId, epoch: historyEpoch, tools: toolsHash(tools) }
               }));
             }
             else if (ev.type === 'tool_start') { acc.toolCalls[ev.index] = { id: ev.id, name: ev.name, args: '' }; waiting.resume('streaming'); }

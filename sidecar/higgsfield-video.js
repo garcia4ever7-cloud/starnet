@@ -229,7 +229,7 @@ async function generateVideo(opts) {
   }
 
   // --- Step 2: animate it --------------------------------------------------------------
-  const vid = await submit(fetchImpl, '/v1/image2video/dop', { prompt: promptWithNeg, input_images: [imageUrl] }, creds);
+  const vid = await submit(fetchImpl, '/v1/image2video/dop', { prompt: promptWithNeg, input_images: [{ type: 'image_url', image_url: imageUrl }] }, creds);
   if (!vid.ok) return { ok: false, error: 'stage 2 (image2video/dop) — ' + vid.error, outOfCredits: vid.outOfCredits, stage: 'image2video' };
 
   let videoUrl = pickUrl(vid.body);

@@ -602,17 +602,35 @@
           }
         }
 
-        /* THE HOST'S OWN HANDOFF FILE (2026-10-27). Wraps every runWorker outcome — done, timeout, error,
+        /* THE HOST'S OWN HANDOFF FILE (2026-10-27). Covers every runWorker outcome — done, timeout, error,
            refused, invalid-result alike — and writes the lead→worker exchange into the LEAD's outbox as a file
            the owner can read with no browser and the next routine in the chain can parse. Written HERE, from
            the row the dispatch really produced, because a handoff an agent is merely ASKED to save is a claim,
            not evidence (the studio pipeline's four phantom timeouts were exactly that) — and because an
            ASK-mode worker cannot fs.write on an unattended run at all. Fail-open on the WRITE only: a full
            disk must not void a worker's result, so the failure rides back on the row as `handoffError` where
-           the lead (and the owner) can see it, rather than being swallowed. */
-        const withHandoff = (fn) => async (job, o2) => {
-          const row = await fn(job, o2);
+           the lead (and the owner) can see it, rather than being swallowed.
+
+           EVIDENCE BEFORE DELIVERY (2026-11-02). This used to run ONLY as the outer wrapper — i.e. after the
+           entire post-worker phase (structured-result repair, session delivery, row assembly). That phase has
+           NO wall clock, because runWorker clears the per-worker timer the instant runOnce settles, and it
+           emits no events, so a stall inside it is both invisible and unbounded: live cron run c1bce71a had
+           SCOUT finish in 39s and save its artifact, then team.dispatch sat silent until the driver's
+           stale-lease sweep reclaimed the run ('stale-lock-reclaimed', sidecar/cron-driver.js:636) ~480s
+           later. The tool returned 'cancelled - unconfirmed' and NOTHING was filed, so a completed, paid-for
+           worker left no record at all — exactly the lie this store exists to prevent. The row is now filed
+           the moment it is in hand (runWorker calls persistHandoff directly); this stays as the catch-all for
+           the early-return rows, and `handoffDone` keeps one exchange from being written twice. */
+        const handoffDone = new Set();
+        let handoffSeq = 0;
+        const persistHandoff = (job, row, idem) => {
           if (!recordHandoff || !row) return row;
+          // A worker that never started has no runId, and the refusal retry pass runs the SAME job again, so
+          // fall back to a per-dispatch sequence rather than collapsing two real attempts into one file.
+          const key = String((ctx && ctx.runId) || '') + '|' + String(job.agentId || '')
+            + '|' + String(idem || row.runId || ('nostart:' + (++handoffSeq)));
+          if (handoffDone.has(key)) return row;
+          handoffDone.add(key);
           try {
             const h = recordHandoff({
               leadId: leadId, workerId: job.agentId,
@@ -625,8 +643,76 @@
             });
             if (h && h.ok) row.handoffFile = h.relPath;
             else if (h) row.handoffError = h.error || 'handoff not written';
-          } catch (e) { row.handoffError = 'handoff not written: ' + ((e && e.message) || e); failNote('orchestration.handoff', e); }
+          } catch (e) {
+            handoffDone.delete(key);   // nothing reached disk — leave the outer wrapper its one attempt
+            row.handoffError = 'handoff not written: ' + ((e && e.message) || e);
+            failNote('orchestration.handoff', e);
+          }
           return row;
+        };
+        const withHandoff = (fn) => async (job, o2) => persistHandoff(job, await fn(job, o2));
+
+        /* POST-WORKER PHASE CLOCK (2026-11-02 diagnostic). Live run c1bce71a stalled for 501 SECONDS entirely
+           AFTER the worker's runOnce returned — its run record was written at +29.9s (runs.jsonl, and
+           index.js stamps that record after every post-loop await) while the dispatch stayed pending until
+           +530.8s — and it emitted NOTHING in between. Neither the event stream nor the run store could say
+           which step was wedged, and every await on this path reads as a no-op in source: enforceStructured
+           returns immediately without a resultSchema, deliverToSession early-returns without a streamId (no
+           dispatch call passed `session`), fitAggregate returns under budget, recordHandoff is a small
+           synchronous write. Reading found nothing, so the next occurrence has to name itself.
+           Deliberately stdout and NOT an event: shared/events.js is additive-only and frozen, and a plain
+           line is the lightest inspectable sink (same choice as the aux-governor line in index.js). Two clock
+           reads per phase on the fast path, nothing allocated unless a phase is genuinely slow. */
+        /* TWO THRESHOLDS, NOT ONE (corrected 2026-11-02 after the first live firing). A single 20s bar was
+           useless in both directions: SCOUT's normal run is ~26s (f3091ccd durationMs 26406), so it fired on
+           every HEALTHY dispatch and reported a working run as a stall — while a 90s bar wide enough for a
+           real worker loop would hide a 60s wedge in the bookkeeping. So the worker's own agent-loop gets a
+           loose bar (minutes are legitimate) and everything after it gets a tight one, because those phases
+           are local bookkeeping that should complete in milliseconds. A post-worker phase pending even 10s
+           is the anomaly worth a line; worker-runOnce at 60s is just work.
+           `slowPhaseMs` overrides BOTH so the regression test can prove the timer fires at all. */
+        const WORKER_SLOW_MS = 90000;
+        const POST_PHASE_SLOW_MS = 10000;
+        const injectedSlowMs = (typeof deps.slowPhaseMs === 'number' && deps.slowPhaseMs > 0) ? deps.slowPhaseMs : 0;
+        const slowMsFor = (label) => injectedSlowMs
+          || (label === 'worker-runOnce' ? WORKER_SLOW_MS : POST_PHASE_SLOW_MS);
+        const phaseClock = (label, job) => {
+          if (!hasClock) return () => {};
+          const t0 = now();
+          const who = () => ' worker=' + String((job && job.agentId) || '-')
+            + ' lead=' + String(leadId) + ' leadRun=' + String((ctx && ctx.runId) || '');
+          /* A TIMER, NOT AN ON-COMPLETION CHECK. The phase being hunted NEVER completes — it stays pending
+             until the tool is killed — so a line emitted from the returned end() callback would never run at
+             all, failing at precisely the case this exists for. The timer fires WHILE the phase is still
+             wedged, which is the only moment the evidence exists. unref'd so it can never hold the event
+             loop open or delay process exit. */
+          /* STATE WHAT WAS OBSERVED, NOT WHAT IT MEANS. The first version asserted "THIS is the operation
+             that discarded a completed worker in run c1bce71a" on every firing — which was false the moment
+             it fired on a healthy 20s SCOUT run, and is exactly the confident-but-wrong telemetry this
+             project's laws forbid. The line now reports the phase, the elapsed time, and whether that is
+             expected for this kind of phase. Diagnosis is the reader's job. */
+          const slowMs = slowMsFor(label);
+          const isWorkerLoop = label === 'worker-runOnce';
+          let warned = false;
+          const timer = setTimeout(() => {
+            warned = true;
+            try {
+              console.warn('[dispatch] phase "' + label + '" still pending after '
+                + Math.round(slowMs / 1000) + 's' + who()
+                + (isWorkerLoop
+                  ? ' (a worker agent-loop — minutes can be legitimate).'
+                  : ' (post-worker bookkeeping — expected to be near-instant, so this is anomalous).'));
+            } catch (e) { failNote('orchestration.phaseClock', e); }
+          }, slowMs);
+          if (timer && typeof timer.unref === 'function') timer.unref();
+          return () => {
+            clearTimeout(timer);
+            if (!warned) return;   // fast path: the overwhelming majority of phases, no output
+            try {
+              console.warn('[dispatch] phase "' + label + '" finished after '
+                + Math.round((now() - t0) / 1000) + 's' + who() + ' (it did complete).');
+            } catch (e) { failNote('orchestration.phaseClock', e); }
+          };
         };
 
         const runWorker = withHandoff(async (job, o2) => {
@@ -672,6 +758,9 @@
           const contractedPrompt = openingMessage(job.prompt, job.context, job.resultSchema);
           const previousMessages = job.sessionContext && job.sessionContext.messages || [];
           noteSessionActivity('station.dispatch_start', job, workerRunId);
+          // Clocked so the log distinguishes "the worker itself was slow" from "the worker finished and the
+          // dispatch then hung" — the exact ambiguity that cost a session of investigation on run c1bce71a.
+          const endWorker = phaseClock('worker-runOnce', job);
           try {
             result = await runOnce({
               ...projectOptions(job.sessionContext || ctx), ...connectorOptions(ctx),
@@ -713,13 +802,16 @@
             if (timedOut) return timeoutRow(null);   // the abort we fired surfaced as a throw — still an honest timeout
             return { agentId: job.agentId, reason: 'error', result: 'worker run failed: ' + ((e && e.message) || e), usd: 0 };
           } finally {
+            endWorker();
             if (timer) clearTimeout(timer);
             if (child) child.detach();
           }
           noteSessionActivity('station.dispatch_end', job, workerRunId);
           if (timedOut) return timeoutRow(result);   // keep whatever partial text the aborted run did produce
           if (!result) return { agentId: job.agentId, reason: 'refused', result: 'worker could not start — the station\'s concurrent-agent cap was full at that instant, or a provider sign-in is needed. A parallel dispatch already runs in waves sized to the free capacity and retries a refusal once, so a refusal that survives means the cap is genuinely saturated: raise MAX_CONCURRENT_AGENTS in SETTINGS, or dispatch these workers in a follow-up call.', usd: 0 };
+          // Everything below here ran UNOBSERVED for 501s in run c1bce71a — every phase is now clocked.
           const firstText = lastAssistant(result.messages) || '(the worker returned no text)';
+          const endContract = phaseClock('structured-result', job);
           const contract = await enforceStructured(job.resultSchema, firstText, async (errors) => {
             const spent = Number(result.usd) || 0;
             const remaining = perWorker > 0 ? Math.max(0, perWorker - spent) : 0;
@@ -745,6 +837,7 @@
             });
             return repair ? { text: lastAssistant(repair.messages), result: repair, runId: repairRunId } : null;
           });
+          endContract();
           const repaired = contract.repairResult || null;
           const totalUsd = (Number(result.usd) || 0) + (Number(repaired && repaired.usd) || 0);
           const artifacts = [].concat(Array.isArray(result.artifacts) ? result.artifacts : [], Array.isArray(repaired && repaired.artifacts) ? repaired.artifacts : []);
@@ -773,17 +866,26 @@
           const rowTaint = taintOfRun(result, repaired);
           if (rowTaint) row.taintedBy = rowTaint;
           if (wire.note) row.note = wire.note;   // honest credential-fallback disclosure (never silent)
-          /* Show it where the Commander asked for it. Only a COMPLETED worker delivers: every other outcome
-             (error / refused / timeout) returned above, so a partial or failed run is reported to the lead but
-             never folded into a session as though it were finished work. */
-          await deliverToSession(job, row);
           // WORK VISIBILITY (ghost-file fix): what the worker PROVABLY produced (its runOnce artifact ledger),
           // stamped with the OWNING agentId. Files live in the WORKER's private workspace — the lead cannot
           // fs.read them and must reference them as the worker's (they are already shown to the Commander as
           // cards via the forwarded deliverable events). Never invent paths beyond this list.
+          // Assigned BEFORE the handoff is filed so the record names the files the worker really saved.
           if (artifacts.length) {
             row.artifacts = artifacts.map(a => Object.assign({}, a, { agentId: job.agentId, workspace: job.agentId }));
           }
+          /* EVIDENCE FIRST (2026-11-02): the worker is finished and its text is in hand, so the handoff reaches
+             disk HERE — before session delivery, and before anything else that can stall or be cancelled out
+             from under a result the Commander has already paid for. See persistHandoff's note above. */
+          const endHandoff = phaseClock('handoff-write', job);
+          persistHandoff(job, row, workerRunId);
+          endHandoff();
+          /* Show it where the Commander asked for it. Only a COMPLETED worker delivers: every other outcome
+             (error / refused / timeout) returned above, so a partial or failed run is reported to the lead but
+             never folded into a session as though it were finished work. */
+          const endDeliver = phaseClock('session-deliver', job);
+          await deliverToSession(job, row);
+          endDeliver();
           return row;
         });
 
@@ -850,7 +952,9 @@
         const late = out.filter(r => r.reason === 'timeout').length;
         const unrun = out.filter(r => r.reason === 'not-dispatched').length - overflow.length;
         // every worker's row survives the result cap: fair-share its text, spill the whole text per worker
+        const endAggregate = phaseClock('aggregate-park', null);
         const fit = await fitAggregate(out, { budget: aggregateBudget(ctx), what: r => 'worker ' + r.agentId + '\'s result', park: workerParker(ctx, 'team.dispatch') });
+        endAggregate();
         return withTaint({
           content: JSON.stringify(fit.rows),
           summary: 'dispatched ' + jobs.length + ' worker(s), ' + ok + ' done'

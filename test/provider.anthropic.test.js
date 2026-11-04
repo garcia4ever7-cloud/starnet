@@ -3,6 +3,13 @@
 const A = require('./_assert.js');
 const { makeAnthropicProvider, _internals } = require('../sidecar/providers/anthropic.js');
 
+/* The full modern thinking-ON contract. `block_binding` joined it on 2026-11-02 so the SERVER drops a
+   thinking block whose binding no longer matches instead of answering a run-ending 400 (a live cron run lost
+   DESIGNER at 17 turns and $0.603 to exactly that). Kept as DEEP equality against one shared constant rather
+   than loosened to a `.type` check: these assertions exist to catch an unexpected key reaching the wire, and
+   a `.type` check would have let the off-switch regression below through. See test/anthropic-block-binding.test.js
+   for the probe table proving which thinking types accept the field. */
+const ADAPTIVE = { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } };
 const line = obj => 'data: ' + JSON.stringify(obj);
 const sseFetch = (sseText, status) => async () => new Response(sseText, { status: status || 200, headers: { 'Content-Type': 'text/event-stream' } });
 async function collect(provider, req) { const out = []; for await (const e of provider.stream(req)) out.push(e); return out; }
@@ -243,7 +250,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
 
     // G1: MODERN contract — adaptive thinking + output_config.effort, driven by the construction default.
     let b = await ask('claude-opus-5', { reasoningEffort: 'high' });
-    A.eq(b.thinking, { type: 'adaptive' }, 'modern Claude -> thinking:{type:adaptive}');
+    A.eq(b.thinking, ADAPTIVE, 'modern Claude -> thinking:{type:adaptive}');
     A.eq(b.output_config, { effort: 'high' }, 'modern Claude -> output_config.effort carries the level');
     A.eq(b.budget_tokens, undefined, 'modern Claude never sends budget_tokens (the wire 400s on it)');
 
@@ -272,7 +279,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
 
     // ...and it is ONLY the off-switch that differs: a thinking effort still rides the normal modern contract.
     b = await ask('claude-sonnet-5-5', { reasoningEffort: 'high' });
-    A.eq(b.thinking, { type: 'adaptive' }, 'claude-sonnet-5-5 at a real effort -> the ordinary adaptive contract');
+    A.eq(b.thinking, ADAPTIVE, 'claude-sonnet-5-5 at a real effort -> the ordinary adaptive contract');
     A.eq(b.output_config, { effort: 'high' }, 'and output_config.effort still carries the level');
 
     // The dotted spelling reaches this adapter too (hand-typed model fields, imported dossiers).
@@ -296,7 +303,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
       const efforts = makeAnthropicProvider({ fetch: bodyFetch(), key: 'k' }).reasoningEfforts(m);
       A.eq(efforts.indexOf('none'), -1, m + " publishes no 'none' — it has no off-switch at all");
       b = await ask(m, { reasoningEffort: 'none' });
-      A.eq(b.thinking, { type: 'adaptive' }, m + " clamps a saved OFF up to adaptive, never an off-switch");
+      A.eq(b.thinking, ADAPTIVE, m + " clamps a saved OFF up to adaptive, never an off-switch");
       A.ok(b.output_config && b.output_config.effort, m + ' carries a real effort instead');
     }
 
@@ -318,7 +325,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
     // G7: Fable/Mythos think unconditionally; 'none' is not offered and must never reach the wire as disabled.
     A.eq(makeAnthropicProvider({ fetch: bodyFetch(), key: 'k' }).reasoningEfforts('claude-fable-5').indexOf('none'), -1, 'fable publishes no none (disabled is a 400 there)');
     b = await ask('claude-fable-5', { reasoningEffort: 'none' });
-    A.eq(b.thinking, { type: 'adaptive' }, "'none' on fable clamps up instead of sending a rejected disable");
+    A.eq(b.thinking, ADAPTIVE, "'none' on fable clamps up instead of sending a rejected disable");
 
     // #32: saved OFF settings must not send an unsupported disable to Opus 5.5.
     for (const model of ['claude-opus-5-5', 'claude-opus-5.5', 'claude-opus-5-5-20260922']) {
@@ -330,7 +337,7 @@ async function collect(provider, req) { const out = []; for await (const e of pr
       A.ok(!Dock._internals.effortOptionsFor(row).includes('none'), model + ' picker consumes the supported catalog levels');
       for (const off of ['none', 'off', 'disabled']) {
         b = await ask(model, { reasoningEffort: off });
-        A.eq(b.thinking, { type: 'adaptive' }, model + ' saved ' + off + ' uses adaptive thinking');
+        A.eq(b.thinking, ADAPTIVE, model + ' saved ' + off + ' uses adaptive thinking');
         A.eq(b.output_config, { effort: 'low' }, model + ' saved ' + off + ' clamps to lowest supported effort');
       }
       b = await ask(model, { reasoningEffort: 'high' }, { reasoningEffort: 'none' });

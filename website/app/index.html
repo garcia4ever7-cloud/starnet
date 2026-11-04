@@ -701,6 +701,7 @@
 
         <button class="bb" data-term="tasks" data-hint="task"><span class="bb-i">☑</span><span class="bb-tx"><b>TASKS</b><small>track planned work, review results &amp; mark complete</small></span></button>
         <button class="bb" data-term="deliverables" data-hint="deliverable"><span class="bb-i">▣</span><span class="bb-tx"><b>DELIVERABLES</b><small>outputs, Workshop builds &amp; cleanup</small></span></button>
+        <button class="bb" data-term="centraloutbox" data-hint="deliverable"><span class="bb-i">⊞</span><span class="bb-tx"><b>CENTRAL OUTBOX</b><small>every agent's finished deliverables — previews, quality &amp; the real files</small></span></button>
         <button class="bb" id="bb-missions" data-hint="recipe"><span class="bb-i">❒</span><span class="bb-tx"><b>RECIPES</b><small>ready-made jobs to launch — they land on TASKS</small></span></button>
         <button class="bb" data-term="automation" data-hint="automation"><span class="bb-i">∞</span><span class="bb-tx"><b>AUTOMATION</b><small>routines &amp; loops — any job on a schedule, or repeated until it’s done</small></span></button>
         <button class="bb" data-term="quests" data-hint="quest"><span class="bb-i">⚑</span><span class="bb-tx"><b>QUESTS</b><small>small steps toward your goals &amp; recorded progress</small></span></button>
@@ -898,6 +899,7 @@
 <script src="app/lifecycle.js"></script><!-- Lane 4D: launch-at-login toggle + live "what keeps running when closed" summary -->
 
 <script src="app/deliverables.js"></script><!-- backend-backed run artifact + Workshop library with bounded safe previews -->
+<script src="app/outbox.js"></script><!-- CENTRAL OUTBOX: all nine agents' registered deliverables (GET /api/outbox), four separate state axes, ticketed original-file retrieval -->
 <script src="app/backdrop-preview.js"></script>
 <script src="app/stationui.js"></script>
 <!-- extracted station windows — each registers itself via StationUI.registerWindow, so they MUST load after stationui.js and before app.js init -->

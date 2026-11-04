@@ -231,6 +231,25 @@
     const ratio = parts[0] > 0 && parts[1] > 0 ? parts[0] / parts[1] : 1;
     return ratio > 1.05 ? '1536x1024' : ratio < 0.95 ? '1024x1536' : '1024x1024';
   }
+
+  // Normalize OpenAI Images API usage (input_tokens/output_tokens) into the shape the
+  // cost engine reads (prompt_tokens/completion_tokens). Never overwrites a field the
+  // provider actually sent.
+  function normalizeMediaUsage(u) {
+    if (!u || typeof u !== 'object') return u;
+    const out = Object.assign({}, u);
+    if (out.prompt_tokens == null) {
+      const v = out.input_tokens != null ? out.input_tokens : u.promptTokenCount;
+      if (v != null) out.prompt_tokens = v;
+    }
+    if (out.completion_tokens == null) {
+      const v = out.output_tokens != null ? out.output_tokens : u.candidatesTokenCount;
+      if (v != null) out.completion_tokens = v;
+    }
+    if (out.total_tokens == null && out.totalTokenCount != null) out.total_tokens = out.totalTokenCount;
+    return out;
+  }
+
   // Any plain text the model emitted alongside the image (e.g. a caption / refusal). Used for the tool summary.
   function textFromResponse(data) {
     const msg = data && data.choices && data.choices[0] && data.choices[0].message;
@@ -274,6 +293,11 @@
       ? (/^gemini-/i.test(configuredImageModel) ? configuredImageModel : GEMINI_NATIVE_IMAGE_MODEL)
       : (configuredImageModel || DEFAULT_IMAGE_MODEL);
     const VISION_MODEL = deps.visionModel || or.model || DEFAULT_VISION_MODEL;
+    // Secondary direct-OpenAI route: an explicit gpt-image-*/dall-e-* model on a station whose PRIMARY route is OpenRouter rides api.openai.com via the STATION's own OPENAI key (deps.openaiImages), never being silently substituted onto OpenRouter which proxies NO gpt-image model. Without a station OpenAI key the request fails loudly instead of being drifted.
+    const openAiImagesKey = String((deps.openaiImages || {}).apiKey || '').trim();
+    const openAiImagesBase = String((deps.openaiImages || {}).baseUrl || '').trim().replace(/\/+$/, '');
+    const openAiImagesUrl = openAiImagesBase ? openAiImagesBase + '/images/generations' : DEFAULT_OPENAI_IMAGE_URL;
+
     // Auxiliary vision route: a one-shot text answer from the RUN's own provider/model (injected by the run
     // host). Used when no OpenRouter key exists — and as the rescue when the OpenRouter call FAILS (dead key,
     // out of credits, model rot) — so vision never dead-ends on one vendor.
@@ -312,17 +336,19 @@
       return res.json || {};
     }
 
-    async function openAIImagePost(body, timeoutMs, parentSignal) {
+    async function openAIImagePost(body, timeoutMs, parentSignal, key, imageUrl) {
       checkCancelled(parentSignal);
-      if (!apiKey) throw new Error('STUDIO image generation is unavailable: no media connection is configured. Open SETTINGS and connect an OpenAI or OpenRouter API key for image generation, or link this station to your StarNet account, then retry; no image was produced.');
-      const res = await withDownloadRetry((isFinalAttempt) => withTimeout(signal => doFetch(openAIImageUrl, {
+      const k = String(key || apiKey || '');
+      if (!k) throw new Error('OpenAI API key not configured for image generation. Set OPENAI_API_KEY in the sidecar environment; no image was produced.');
+      const url = imageUrl || openAIImageUrl;
+      const res = await withDownloadRetry((isFinalAttempt) => withTimeout(signal => doFetch(url, {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': 'Bearer ' + k, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal
       }).then(async r => {
         const json = await r.json().catch(e => { if (!isFinalAttempt && isMidDownloadDrop(e)) throw e; require('../../failopen.js').note('image.openai.response-json', e); return null; });
-        if (typeof deps.onUsage === 'function' && (r.status >= 200 && r.status < 300 || json && json.usage)) deps.onUsage(json && json.usage, body.model);
+        if (typeof deps.onUsage === 'function' && (r.status >= 200 && r.status < 300 || json && json.usage)) deps.onUsage(normalizeMediaUsage(json && json.usage), body.model);
         return { status: r.status, json };
       }), timeoutMs, parentSignal || deps.signal), parentSignal || deps.signal);
       if (res.status < 200 || res.status >= 300) {
@@ -371,7 +397,9 @@
             'output). For HERO/MARKETING assets or readable text, pass model:"' + GEMINI_NATIVE_PREMIUM_IMAGE_MODEL + '". Optional "path" sets the output filename. '
           : 'default ' + DEFAULT_IMAGE_MODEL + ' (fast, current-gen). For HERO/MARKETING assets or ANY image that must show ' +
             'READABLE TEXT (UI mockups, landing pages, posters, infographics, product concepts), pass model:"' + PREMIUM_IMAGE_MODEL + '" ' +
-            '— it renders legible text; the fast tier garbles it. Optional "path" sets the output filename. ') +
+            '— it renders legible text; the fast tier garbles it. ' +
+            (openAiImagesKey ? 'An explicit gpt-image-2 / dall-e-* model rides the secondary OpenAI Images API via the station OPENAI key instead of OpenRouter. ' : '') +
+            'Optional "path" sets the output filename. ') +
         'Optional "aspect_ratio" sets the image shape — ANY ratio or size works: "16:9", "4:3", "1920x1080", "1.5", ' +
         'or a word like "landscape"/"portrait"/"wide"/"tall"/"banner"/"story" (default 1:1; the provider renders the nearest of ' +
         ASPECT_RATIOS.join(', ') + '). Optional "width"+"height" (pixels, max ' + MAX_OUTPUT_PX + ') deliver an EXACT resolution — ' +
@@ -442,6 +470,9 @@
               throw e;
             }
           }
+        } else if (/^(?:gpt-image-|dall-e-)/i.test(model)) {
+          if (!openAiImagesKey) throw new Error('OpenAI API key not configured for image generation. Set OPENAI_API_KEY in the sidecar environment; no image was produced.');
+          data = await openAIImagePost({ model, prompt, size: openAIImageSize(shape) }, GEN_TIMEOUT_MS, signal, openAiImagesKey, openAiImagesUrl);
         } else try {
           data = await orPost(Object.assign({ model }, baseBody), GEN_TIMEOUT_MS, signal);
         } catch (e) {
@@ -470,7 +501,8 @@
           }
         }
         checkCancelled(signal);
-        const url = protocol === 'openai-images' ? parseOpenAIImageResponse(data)
+        const isOpenAIImage = protocol === 'openai-images' || /^(?:gpt-image-|dall-e-)/i.test(model);
+        const url = isOpenAIImage ? parseOpenAIImageResponse(data)
           : protocol === 'gemini-native' ? parseGeminiNativeImageResponse(data)
           : parseImageFromResponse(data);
         if (!url) {
@@ -624,7 +656,7 @@
 
     return {
       generateTool, analyzeTool, analyzeImageUrl, browserVision, hasVision,
-      _internals: { parseImageFromResponse, parseOpenAIImageResponse, parseGeminiNativeImageResponse, textFromGeminiNativeResponse, openAIImageSize, textFromResponse, dataUrlToBuffer, imageUrlFromPart, imageToUrl, analyzeImageUrl, resolveShape, fitToSize },
+      _internals: { parseImageFromResponse, parseOpenAIImageResponse, parseGeminiNativeImageResponse, textFromGeminiNativeResponse, openAIImageSize, textFromResponse, dataUrlToBuffer, imageUrlFromPart, imageToUrl, analyzeImageUrl, resolveShape, fitToSize, normalizeMediaUsage },
       register(reg) { reg.register(generateTool); reg.register(analyzeTool); return reg; }
     };
   }

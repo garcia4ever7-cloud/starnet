@@ -99,6 +99,7 @@ test/media-service.test.js
 test/desktop-voice-bundle.test.js
 test/transcript.compaction.e2e.test.js
 test/provider.anthropic.test.js
+test/anthropic-block-binding.test.js
 test/prices.live.test.js
 test/provider.gemini.test.js
 test/provider.toolschema.test.js
@@ -560,6 +561,7 @@ test/confbeats.test.js
 test/cron.test.js
 test/cron-human.test.js
 test/cron-store.test.js
+test/cron-cost-cap.test.js
 test/mint-ledger.test.js
 test/cron.dispatch.test.js
 test/cron.chain.test.js
@@ -983,4 +985,16 @@ test/studio-pipeline-advance.test.js
 test/audio-finish.test.js
 test/headless-tools-granted.test.js
 test/headless-dispatch.test.js
+test/dispatch-handoff-race.test.js
+test/deliverable-manifest.test.js
+test/source-hygiene-ratchet.test.js
+test/outbox-studio-bridge.test.js
+test/outbox-route.test.js
+test/outbox-tools.test.js
+test/registry-producedfiles.test.js
+test/outbox-ui.test.js
+test/outbox-nine-agents.test.js
+test/run-cost-cap.test.js
+test/budget-reservation.test.js
+test/dispatch-lease-invariant.test.js
 test/provider-configured-from-sidecar.test.js

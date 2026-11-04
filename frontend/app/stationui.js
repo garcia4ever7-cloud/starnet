@@ -9632,6 +9632,17 @@ const StationUI = typeof document === 'undefined' ? {} : (() => {
     // itself every time a card's details drawer opens — the row you just clicked would slide out from under you.
     // The `dlv` class owns that height; the card list scrolls inside it.
     deliverables:['DELIVERABLES',         body => { if (typeof Deliverables !== 'undefined') Deliverables.mount(body); }, { console: true, className: 'dlv-win' }],
+    /* CENTRAL OUTBOX (2026-11-02) — every agent's REGISTERED deliverables, read from GET /api/outbox.
+       Separate window from DELIVERABLES on purpose: that one is the Workshop build library (kept/pending
+       rows); this is the cross-agent artifact manifest with four independent state axes. console-WIDE and a
+       steady height for the same reason DELIVERABLES is: a card's details drawer must not re-centre the
+       window under the row you just clicked. */
+    /* KEY IS 'centraloutbox', NOT 'outbox' — frontend/app/windows/outbox.js ALREADY owns the 'outbox' slot
+       (registerWindow('outbox', 'OUTBOX — FINISHED WORK', buildOutbox)). Reusing that key silently overwrites
+       one window with the other depending on load order, and test/outbox-window.test.js would not catch it
+       because it asserts against SOURCE, not the live registry. Two different surfaces, two different keys:
+       'outbox' = the finished-work accordion; 'centraloutbox' = the cross-agent artifact manifest. */
+    centraloutbox: ['CENTRAL OUTBOX',     body => { if (typeof Outbox !== 'undefined') Outbox.mount(body); }, { console: true, className: 'obx-win' }],
     settings: ['SETTINGS',               buildSettings,  { console: true }],
     notifs:   ['NOTIFICATIONS',          buildNotifs,    { console: true, className: 'notifs-win' }],
     // the FIELD MANUAL codex is owned by tutorial.js (P3); this term just hosts its builder
