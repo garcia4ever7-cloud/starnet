@@ -5898,5 +5898,21 @@ body:has(#screen-game.active)::before {
 .obx-prov dt { font-weight: 700; opacity: 0.8; }
 .obx-prov dd { margin: 0 0 4px; overflow-wrap: anywhere; user-select: text; }
 .obx-prov code { font-size: 0.95em; overflow-wrap: anywhere; user-select: text; }
-.obx-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.obx-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .obx-get { font-size: 0.85em; text-decoration: underline; overflow-wrap: anywhere; }
+/* COMMANDER APPROVAL CONTROLS (2026-11-10). Sized for a phone, which is how this station is actually
+   operated: min-height 34px so the two adjacent verdicts are not a mis-tap away from each other. The
+   armed state is deliberately loud — it is the half-second before a business decision is recorded. */
+.obx-act { font-size: 0.82em; min-height: 34px; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid currentColor; background: transparent; color: inherit; opacity: 0.85; }
+.obx-act:hover { opacity: 1; }
+.obx-act:disabled { opacity: 0.4; cursor: progress; }
+.obx-approve { color: #3fa34d; }
+.obx-reject { color: #c0564b; }
+.obx-undo { color: #8a8a8a; }
+.obx-act.obx-armed { background: currentColor; font-weight: 600; }
+.obx-act.obx-armed.obx-approve { color: #fff; background: #3fa34d; }
+.obx-act.obx-armed.obx-reject { color: #fff; background: #c0564b; }
+.obx-act.obx-armed.obx-undo { color: #fff; background: #8a8a8a; }
+/* A failed verdict must not read as "nothing happened" — see the judge() error contract. */
+.obx-count.obx-err { color: #c0564b; opacity: 1; font-weight: 600; }

@@ -70,7 +70,10 @@ const baseRow = (over) => Object.assign({
        payload ever sits in TAG or ATTRIBUTE position — asserted below by counting raw '<' against the
        tags this renderer itself emits. */
     const rawTags = (h.match(/<[a-zA-Z/!]/g) || []).length;
-    const ownTags = (h.match(/<\/?(?:article|header|span|div|p|img|details|summary|dl|dt|dd|code|small|br|a)\b/g) || []).length;
+    /* `button` joined this CLOSED allowlist on 2026-11-10 with the Commander's approve/reject controls.
+       The list is closed on purpose: it is what makes "every raw tag came from this renderer" provable,
+       so a new element must be added here deliberately and never by widening the pattern. */
+    const ownTags = (h.match(/<\/?(?:article|header|span|div|p|img|details|summary|dl|dt|dd|code|small|br|a|button)\b/g) || []).length;
     A.eq(rawTags, ownTags, 'every raw tag in the output is one this renderer emitted — none came from row data');
     A.eq(/<\s*(?:script|iframe|object|embed|svg)\b/i.test(h), false, 'no executable element is ever emitted');
     // A payload in the retrieval URL must not break out of the href attribute either.
@@ -148,6 +151,71 @@ const baseRow = (over) => Object.assign({
     A.ok(/not the same as/.test(empty), 'an empty Outbox says so honestly');
     A.ok(/No deliverables match these filters/.test(Outbox.render({ rows: [], filtered: true })),
       'while a filtered-empty view says the filters matched nothing');
+  }
+
+  /* ---------- 9. THE COMMANDER'S APPROVAL CONTROLS (2026-11-10) ----------
+     Until this landed, approval was readable and unwritable: the pills rendered, the manifest had
+     setApproval(), and nothing anywhere called it — every row on the live station sat at "pending"
+     permanently. These controls are the Commander's half of that fix. */
+  {
+    const pending = Outbox.rowHtml(baseRow());
+    A.ok(/data-act="approved"/.test(pending), 'a pending artifact offers Approve');
+    A.ok(/data-act="rejected"/.test(pending), 'and Reject');
+    A.ok(/data-id="/.test(pending), 'the buttons carry the artifact id the route needs');
+    A.eq(/data-act="pending"/.test(pending), false,
+      'but NOT "reset to pending" — it is already pending, so the control would be a no-op');
+
+    const approved = Outbox.rowHtml(Object.assign(baseRow(), { approval: 'approved' }));
+    A.ok(/data-act="pending"/.test(approved), 'a decided artifact can be reset to pending');
+    A.ok(/approval approved/.test(approved), 'and reads as approved');
+
+    /* QC is deliberately absent: a QC verdict is an INDEPENDENT reviewer's opinion, and a Commander
+       clicking it on a reviewer's behalf would hollow out the independence the axis exists to enforce
+       (the manifest refuses a producer QC-ing its own artifact for exactly that reason). */
+    A.eq(/data-act="passed"|obx-qc-btn|data-qc=/.test(pending), false,
+      'the Commander panel offers NO QC control — QC names an independent reviewer via its own route');
+
+    /* The id must survive escaping: it is attacker-adjacent (it contains agent and project names). */
+    const nasty = Outbox.rowHtml(Object.assign(baseRow(), { id: 'a"><script>x</script>' }));
+    A.eq(/<script>/.test(nasty), false, 'a hostile id cannot break out of the data-id attribute');
+  }
+
+  /* ---------- 10. judge() HONOURS THE PANEL'S ERROR CONTRACT ---------- */
+  {
+    const calls = [];
+    const fakeOk = async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ ok: true, row: { approval: 'approved' } }) }; };
+    const r = await Outbox.judge('some:id@v1', 'approved', 'because', fakeOk);
+    A.eq(r.ok, true, 'a successful verdict reports success');
+    A.ok(/\/api\/outbox\/approval$/.test(calls[0].url), 'it POSTs to the approval route');
+    A.eq(calls[0].init.method, 'POST', 'with POST');
+    const sent = JSON.parse(calls[0].init.body);
+    A.eq(sent.id, 'some:id@v1', 'carrying the artifact id');
+    A.eq(sent.status, 'approved', 'and the verdict');
+    /* harness.js hardens window.fetch to attach X-StarNet-Token to same-origin /api/ URLs. Setting it
+       here by hand would risk leaking the token to a non-same-origin URL. */
+    A.eq(/token/i.test(JSON.stringify(calls[0].init.headers || {})), false,
+      'judge() never hand-rolls a token header — harness.js owns that');
+
+    /* An error must NEVER look like success. On this panel the equivalent mistake is a silent no-op
+       that repaints the old pill and reads as "nothing happened". */
+    const fake403 = async () => ({ ok: false, status: 403, json: async () => ({ ok: false, error: 'forbidden' }) });
+    const e1 = await Outbox.judge('x', 'approved', '', fake403);
+    A.eq(e1.ok, false, 'a 403 is an error');
+    A.eq(e1.error, 'forbidden', 'and the server reason is surfaced verbatim');
+
+    const fakeBodyFalse = async () => ({ ok: true, json: async () => ({ ok: false, error: 'invalid approval status' }) });
+    const e2 = await Outbox.judge('x', 'nope', '', fakeBodyFalse);
+    A.eq(e2.ok, false, 'HTTP 200 with ok:false is still a failure');
+    A.eq(e2.error, 'invalid approval status', 'with the reason the route gave');
+
+    const fakeThrow = async () => { throw new Error('offline'); };
+    const e3 = await Outbox.judge('x', 'approved', '', fakeThrow);
+    A.eq(e3.ok, false, 'a network failure is an error, not a silent success');
+    A.ok(/offline/.test(e3.error), 'and says what happened');
+
+    const fakeUnparsable = async () => ({ ok: true, json: async () => { throw new Error('not json'); } });
+    const e4 = await Outbox.judge('x', 'approved', '', fakeUnparsable);
+    A.eq(e4.ok, true, 'an unparsable 200 body still counts as success (the write happened)');
   }
 
   A.report('outbox ui');

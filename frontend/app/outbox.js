@@ -112,7 +112,18 @@
       + 'resolves it from the registered record and re-checks the checksum every time.</small></dd>'
       + '</dl></details>';
 
-    html += '<div class="obx-actions"><a class="obx-get" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">Open the original file</a></div>';
+    /* COMMANDER CONTROLS (2026-11-10). Approval is the Commander's OWN decision, so it belongs in the
+       Commander's panel. QC is deliberately NOT here: a QC verdict is an INDEPENDENT reviewer's opinion,
+       and a Commander clicking it on a reviewer's behalf would hollow out the independence the axis exists
+       to enforce (the manifest refuses a producer QC-ing itself for the same reason). QC is set by
+       POST /api/outbox/qc, which names the reviewer. */
+    const decided = r.approval === 'approved' || r.approval === 'rejected';
+    html += '<div class="obx-actions">'
+      + '<a class="obx-get" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">Open the original file</a>'
+      + '<button type="button" class="obx-act obx-approve" data-act="approved" data-id="' + esc(r.id) + '">Approve</button>'
+      + '<button type="button" class="obx-act obx-reject" data-act="rejected" data-id="' + esc(r.id) + '">Reject</button>'
+      + (decided ? '<button type="button" class="obx-act obx-undo" data-act="pending" data-id="' + esc(r.id) + '">Reset to pending</button>' : '')
+      + '</div>';
     return html + '</article>';
   }
 
@@ -152,6 +163,28 @@
       const anyFilter = !!(filters && Object.keys(filters).some(k => k !== 'viewer' && filters[k]));
       return { rows: Array.isArray(body.rows) ? body.rows : [], filtered: anyFilter, viewer: body.viewer };
     } catch (e) { return { rows: [], error: String((e && e.message) || e) }; }
+  }
+
+  /* judge — write the Commander's approval verdict. Mirrors load()'s error contract EXACTLY, because the
+     panel's law is that an error must never look like success (there, an empty Outbox; here, a silent
+     no-op that leaves the pill unchanged and the Commander believing they approved something).
+
+     No token header is set here on purpose: harness.js hardens window.fetch to attach X-StarNet-Token to
+     same-origin /api/ URLs, and hand-rolling it risks leaking the token to a third-party URL. */
+  async function judge(id, status, detail, fetchImpl) {
+    const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!doFetch) return { ok: false, error: 'no fetch available' };
+    try {
+      const res = await doFetch(apiBase() + '/api/outbox/approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ id: String(id || ''), status: String(status || ''), detail: String(detail || '') })
+      });
+      let body = {};
+      try { body = await res.json(); } catch (_) { body = {}; }
+      if (!res.ok || body.ok === false) return { ok: false, error: String(body.error || ('HTTP ' + res.status)) };
+      return { ok: true, row: body.row || null };
+    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   }
 
   // Distinct agent/project values present in the feed — the filter dropdowns are built from what actually
@@ -236,11 +269,52 @@
       if (!state.filters[key]) delete state.filters[key];
       refresh();
     });
+    /* TWO-STEP COMMIT. Approving or rejecting a deliverable is a business decision, and on the phone this
+       station is actually operated from these are small targets next to each other. The first tap ARMS the
+       button and the second commits; the armed state lapses after 5s so a stray tap cannot sit waiting to
+       fire later. Tapping anywhere else disarms. */
+    let armed = null;
+    let armedTimer = null;
+    function disarm() {
+      if (armedTimer) { clearTimeout(armedTimer); armedTimer = null; }
+      if (armed && armed.el) { armed.el.textContent = armed.label; armed.el.classList.remove('obx-armed'); }
+      armed = null;
+    }
+    body.addEventListener('click', async (ev) => {
+      const el = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+      if (!el) { disarm(); return; }
+      const id = el.getAttribute('data-id');
+      const act = el.getAttribute('data-act');
+      if (!id || !act) return;
+
+      if (!armed || armed.el !== el) {
+        disarm();
+        armed = { el: el, label: el.textContent, id: id, act: act };
+        el.textContent = 'Tap again to confirm';
+        el.classList.add('obx-armed');
+        armedTimer = setTimeout(disarm, 5000);
+        return;
+      }
+      disarm();
+      el.disabled = true;
+      const r = await judge(id, act, 'set from the Outbox panel');
+      el.disabled = false;
+      if (!r.ok) {
+        /* Surface it and do NOT refresh: a silent re-render would repaint the old pill and read as
+           "nothing happened" rather than "this failed". */
+        countEl.textContent = 'Could not record that verdict: ' + r.error;
+        countEl.classList.add('obx-err');
+        return;
+      }
+      countEl.classList.remove('obx-err');
+      refresh();
+    });
+
     const btn = body.querySelector('.obx-refresh');
     if (btn) btn.addEventListener('click', refresh);
     refresh();
-    return { refresh, state };
+    return { refresh, state, judge };
   }
 
-  return { mount, render, rowHtml, load, queryFrom, facets, esc, PREVIEWABLE, AXIS_CLASS, LIFECYCLE_CLASS };
+  return { mount, render, rowHtml, load, judge, queryFrom, facets, esc, PREVIEWABLE, AXIS_CLASS, LIFECYCLE_CLASS };
 });
