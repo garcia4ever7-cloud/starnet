@@ -38,9 +38,29 @@ const HOST = '127.0.0.1';
    +695 B is manual.read plus skill.view's description naming installed recipes; the tool budgets above still hold.
    The system budgets drop to the new measurement + ~6% so the diet cannot silently regrow. */
 const BUDGET = {
-  'default-new-install': { systemChars: 24600, tools: 84, toolBytes: 64600 },
-  'fully-granted-floor': { systemChars: 24800, tools: 84, toolBytes: 64600 }
+  'default-new-install': { systemChars: 24600, tools: 98, toolBytes: 80500 },
+  'fully-granted-floor': { systemChars: 24800, tools: 98, toolBytes: 80500 }
 };
+/* RE-MEASURED 2026-11-10 — this file's own rule is that a budget failure is a REVIEW prompt, and the review
+   had not been done since the 2026-09-23 prompt diet. Both layouts now measure
+   24,070 / 24,291 system chars | 92 tools | 75,895 tool bytes, against stale budgets of 84 / 64,600.
+   SYSTEM CHARS WERE LEFT ALONE — they still pass with headroom, which is the diet holding.
+
+   The +12 tools since the 80-tool baseline are all dated, reviewed, test-covered additions:
+     2026-10-20  image_stock_fetch, vector_export      (STUDIO sourcing + SVG->PNG/PDF, field notes §4)
+     2026-10-25  higgsfield.generate                   (studio image bay)
+     2026-11-01  openai_image_generate                 (test/openai-image.test.js, 47 assertions)
+     2026-11-02  outbox_list, outbox_read              (Central Outbox; test/outbox-tools.test.js)
+     + the rest of the STUDIO bay (21 tools on that object alone — the single largest contributor)
+
+   Of the byte growth, +2,866 is from 2026-11-10: four STUDIO tools (image_print_prep, vector_export,
+   image_stock_fetch, image_quality_check) had declared their arguments under `parameters:` instead of
+   `schema:`, so makeTool substituted an EMPTY schema and they were advertised as taking NO arguments.
+   Real schemas cost real bytes; that is the fix working, not regression. See test/tool-schema-contract.test.js.
+
+   Budgets carry ~6% headroom as before (92 -> 98 tools, 75,895 -> 80,500 bytes). If this fails again, the
+   question to answer is whether the STUDIO bay should be `deferred: true` (granted but unadvertised, as
+   browser.attach already is) rather than whether to raise the number once more. */
 
 (async () => {
   const bodies = [];

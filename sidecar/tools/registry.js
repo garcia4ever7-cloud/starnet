@@ -334,6 +334,31 @@
       return all.filter(t => allow.has(t.name) || (t.capability && allow.has(t.capability)));
     }
 
+    /* A validation failure the model cannot act on costs a turn and teaches it nothing. shared/schema.js
+       says WHAT is wrong ('$.sizes[0]: "9x12" not in enum') but never what would have been right, so the
+       model's next attempt is another guess. STATION_FIELD_NOTES §3 records that happening for real:
+       four wrong argument shapes in a row, then the agent abandoned the tool and shelled out instead.
+       These two helpers append a compact declaration of the accepted arguments to the error.
+       Bounded, and it rides on an ERROR RESULT rather than the advertised tool catalogue, so it cannot
+       affect the tools-on-the-wire budget that test/payload.budget.test.js pins. */
+    function typeHint(p, depth) {
+      if (!p || typeof p !== 'object') return 'any';
+      if ((depth || 0) > 3) return 'any';
+      if (Array.isArray(p.enum) && p.enum.length) return p.enum.slice(0, 8).map(v => JSON.stringify(v)).join('|');
+      if (Array.isArray(p.anyOf) && p.anyOf.length) return p.anyOf.slice(0, 4).map(b => typeHint(b, (depth || 0) + 1)).join('|');
+      if (p.type === 'array') return 'array<' + typeHint(p.items, (depth || 0) + 1) + '>';
+      return typeof p.type === 'string' ? p.type : 'any';
+    }
+    function describeSchema(s) {
+      if (!s || typeof s !== 'object' || !s.properties || typeof s.properties !== 'object') return '';
+      const req = new Set(Array.isArray(s.required) ? s.required : []);
+      const keys = Object.keys(s.properties);
+      if (!keys.length) return '';
+      let out = keys.slice(0, 20).map(k => k + ': ' + typeHint(s.properties[k], 0) + (req.has(k) ? ' (required)' : '')).join(', ');
+      if (out.length > 420) out = out.slice(0, 419) + '…';
+      return out;
+    }
+
     function wireFormat(toolList) {
       const src = toolList || list();
       return src.map(t => {
@@ -378,7 +403,11 @@
       let v;
       try { v = schema.validate(tool.schema || {}, call.args); }
       catch (e) { v = { ok: false, errors: ['schema error: ' + ((e && e.message) || e)] }; }
-      if (!v.ok) return errResult('invalid arguments for ' + call.name + ': ' + v.errors.join('; '));
+      if (!v.ok) {
+        const want = describeSchema(tool.schema);
+        return errResult('invalid arguments for ' + call.name + ': ' + v.errors.join('; ')
+          + (want ? '. This tool accepts — ' + want : ''));
+      }
 
       // consent gate (M1.4): a denied/cancelled prompt performs NO action
       // external-unknown authority is itself an exact, non-cacheable one-call prompt.

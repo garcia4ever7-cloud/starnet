@@ -998,3 +998,5 @@ test/run-cost-cap.test.js
 test/budget-reservation.test.js
 test/dispatch-lease-invariant.test.js
 test/provider-configured-from-sidecar.test.js
+test/tool-schema-contract.test.js
+test/outbox-approval-route.test.js

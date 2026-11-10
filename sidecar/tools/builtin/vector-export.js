@@ -172,12 +172,16 @@
         'resolution, so the output is a genuine vector render rather than an upscaled blur — unlike ' +
         'image_print_prep, which upscales existing raster art. Runs entirely locally: no network, no provider ' +
         'credential, no cost. Transparency is flattened onto white because these are files destined for paper.',
-      parameters: {
+      /* `schema`, NOT `parameters` — see the note in print-prep.js. Fixed 2026-11-10.
+         The two enums were added at the same time: run() already HARD-REJECTS anything outside them
+         ("unknown size(s)" / "unknown format(s)"), so declaring them lets the gate catch a bad value
+         before execution and lets the model see the legal values instead of guessing. */
+      schema: {
         type: 'object',
         properties: {
           svg: { type: 'string', description: 'workspace-relative path to the source .svg file' },
-          sizes: { type: 'array', items: { type: 'string' }, description: 'print sizes to produce, any of "8x10", "11x14", "16x20" (default all three)' },
-          formats: { type: 'array', items: { type: 'string' }, description: '"png", "pdf", or both (default both)' },
+          sizes: { type: 'array', items: { type: 'string', enum: ['8x10', '11x14', '16x20'] }, description: 'print sizes to produce (default all three); an unknown size is an error' },
+          formats: { type: 'array', items: { type: 'string', enum: ['png', 'pdf'] }, description: '"png", "pdf", or both (default both)' },
           destDir: { type: 'string', description: 'workspace-relative output folder (default: alongside the source SVG)' }
         },
         required: ['svg']

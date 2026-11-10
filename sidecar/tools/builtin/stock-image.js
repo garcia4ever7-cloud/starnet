@@ -264,14 +264,19 @@
         'and public-domain works are saved: CC BY-SA, CC BY-NC, CC BY-ND and even plain CC BY are refused, ' +
         'with the reason reported, because this station sells the products these assets go into. This is ' +
         'source material to composite with — not finished art, and never something to list for sale as-is.',
-      parameters: {
+      /* `schema`, NOT `parameters` — see the note in print-prep.js. Fixed 2026-11-10.
+         The `source` default was ALSO wrong: it documented "commons" while run() has always defaulted to
+         "auto". Renaming the key verbatim would have shipped that contradiction to the model as fact.
+         count/width are CLAMPED by run(), not rejected, so they carry no minimum/maximum — declaring
+         bounds would make a strict provider reject a value the tool is happy to clamp. */
+      schema: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'what to look for, e.g. "watercolor paper texture" or "botanical illustration fern"' },
-          count: { type: 'number', description: 'how many images to save, 1-' + MAX_RESULTS + ' (default 1)' },
-          width: { type: 'number', description: 'target pixel width of the saved render (default ' + DEFAULT_WIDTH + '; the source is never upscaled, so a smaller original yields a smaller file and says so)' },
+          count: { type: 'number', description: 'how many images to save; clamped to 1-' + MAX_RESULTS + ' (default 1)' },
+          width: { type: 'number', description: 'target pixel width of the saved render; clamped to 200-6000 (default ' + DEFAULT_WIDTH + '; the source is never upscaled, so a smaller original yields a smaller file and says so)' },
           destDir: { type: 'string', description: 'workspace-relative folder to save into (default "stock")' },
-          source: { type: 'string', description: '"commons" (default, no key needed), "smithsonian" (needs SMITHSONIAN_API_KEY), or "auto" to try Commons then Smithsonian' }
+          source: { type: 'string', enum: ['auto', 'commons', 'smithsonian'], description: '"auto" (DEFAULT) tries Commons then Smithsonian; "commons" needs no key; "smithsonian" needs SMITHSONIAN_API_KEY' }
         },
         required: ['query']
       },

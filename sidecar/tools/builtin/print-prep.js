@@ -233,7 +233,10 @@
         'reporting it. Each output is saved next to the source as "<name>-<size>-300ppi.jpg" — JPEG, not PNG: ' +
         'Etsy rejects any digital-download file over 20 MB and a full-bleed 300-PPI PNG at these dimensions ' +
         'routinely exceeds that; this tool always ships JPEG (quality 90-95, verified under 19.5 MB) instead.',
-      parameters: {
+      /* `schema`, NOT `parameters` — makeTool() reads def.schema and silently drops unknown keys, so the
+         misspelling shipped an EMPTY schema: the model was told this tool takes no arguments, and
+         shared/schema.js ("a missing/empty schema imposes no constraint") stopped validating. Fixed 2026-11-10. */
+      schema: {
         type: 'object',
         properties: {
           image: { type: 'string', description: 'workspace-relative path to the source image, e.g. outbox/my-design.png' },

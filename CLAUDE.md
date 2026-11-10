@@ -317,6 +317,16 @@ appear — not just that the run ended `done`. This is behavioural rule 8 applie
   `$PREFIX/bin/omniroute` must be a **symlink** to
   `$PREFIX/lib/node_modules/omniroute/bin/omniroute.mjs` — as a copy, its relative import
   resolves outside the package.
+- **COROLLARY, and it cost OmniRoute every auto-start until 2026-11-10: a correct symlink is not
+  enough. `omniroute …` as a bare command still dies**, because the kernel resolves the *shebang*
+  before anything else and `/usr/bin/env` does not exist. Verified: `ls /usr/bin/env` → no such
+  file; `omniroute --version` → `No such file or directory`. `~/start-starnet.sh` had
+  `setsid nohup omniroute serve` and its own log recorded the failure verbatim every single boot —
+  `nohup: failed to run command 'omniroute': No such file or directory` — while the surrounding
+  code reported only the vaguer "OmniRoute did not come up on :20128". **Always invoke it through
+  node explicitly:** `node "$PREFIX/lib/node_modules/omniroute/bin/omniroute.mjs" serve`. The
+  launcher now does. Note the 20-second wait loop was never the problem: started correctly,
+  OmniRoute is answering in **~7.6s**.
 - **CLI writes fail with "Invalid management token"** even when reads work. Use the
   management API: `POST /api/auth/login {password}` with `~/.omniroute/admin_password.local`
   returns a session cookie good for `/api/providers`, `/api/combos`, `/api/keys`, `/api/models`.
@@ -1116,3 +1126,154 @@ Tests added, all in `test/fast.list`: `dispatch-lease-invariant` (21), `dispatch
 `anthropic-block-binding` (14), `deliverable-manifest` (126), `outbox-route` (49), `outbox-tools` (36),
 `outbox-ui` (51). `failopen-ratchet` stays at its 8 pre-existing problems; `index.js` empty-catch count
 unchanged at 362.
+
+## 2026-11-10 — a tool's schema key, and why one character disabled two safety layers
+
+Four builtins (`print-prep`, `vector-export`, `stock-image`, `image-qc`) declared their arguments
+under **`parameters:`**. `sidecar/tools/tool.js` reads `def.schema` and **drops unknown keys without
+complaint**, so all four fell back to `{type:'object',properties:{}}`. That single misspelling
+disabled two independent layers at once, which is why it survived for months:
+
+- **Model-facing.** An empty schema means "this tool takes no arguments". On Gemini it is worse:
+  `providers/toolschema.js` `isEmptyObjectSchema()` makes `gemini.js` omit `parameters` from the
+  function declaration **entirely** (Gemini 400s an empty OBJECT schema, so that omission is a
+  deliberate, correct defence).
+- **Host-side.** `shared/schema.js` is explicit — *"a missing/empty schema imposes no constraint"* —
+  so the `validate()` at `registry.js` (correctly placed **before** `run()`) passed everything.
+
+**There was never a provider rejection.** `runs.jsonl` (1,350 lines), `diag.errors.json`,
+`ledger.jsonl`, `sidecar.log` and `launcher.out` contain **zero** `http 400` / `INVALID_ARGUMENT` /
+`function_declarations` hits; the only recorded Gemini errors are **429 quota**. The real cost was
+wasted turns — §3 of the field notes records four wrong argument shapes in a row until an agent gave
+up on the tool and shelled out by hand.
+
+### The trap: renaming the key alone would have been a REGRESSION
+
+`image-qc`'s declared block was itself wrong — strict array-of-objects, while `run()` deliberately
+absorbs **five key aliases and six value shapes** (the 2026-10-20 hardening, "9 turns → 2"). Because
+nothing was ever validated, that mismatch was invisible. A verbatim rename switches validation ON
+against the strict shape and **rejects every tolerated call at the gate**, deleting the hardening
+without touching the code that implements it. Two of the other three blocks were also inaccurate:
+`stock-image` documented `source` default `"commons"` while the code defaults **`'auto'`**, and
+`vector-export` omitted enums its `run()` hard-enforces.
+
+**The lever that resolves it:** `shared/schema.js` **ignores `anyOf`**, while Gemini and Anthropic
+both honour it. So `anyOf` *describes* a permissive contract to the model without *constraining* it
+host-side. That asymmetry is how `image_quality_check` now documents its aliases and shapes while
+staying as tolerant as before.
+
+### Do NOT rebuild the validation stack — all of it already exists
+
+| Need | Already in the repo |
+|---|---|
+| runtime arg validation | `shared/schema.js` (zero-dep: type/enum/properties/required/items/additionalProperties) |
+| validation BEFORE execution | `sidecar/tools/registry.js` — "on failure run() is NOT called" |
+| per-provider payload shaping | `sidecar/providers/toolschema.js` (548 lines): `normalize` (Anthropic), `forGemini` (OpenAPI-subset allowlist), `sanitizeKeys`+`restoreArgumentKeys` (property-key grammar), `forMoonshot` (Kimi dialect) |
+| single registration chokepoint | `registry.register` → the only `makeTool` call site |
+
+No ajv, no new validator, no middleware wrapper was added, and none is needed.
+
+### What changed
+
+`makeTool` now **throws** if a def carries `parameters` (names the tool, explains both failure
+modes) — the bug class is closed permanently; MCP is unaffected because `mcp/translate.js` hardcodes
+`schema:`. Validation errors now append *"This tool accepts — image: string (required), sizes:
+array<"8x10"|"11x14"|"16x20">"* so a model can self-correct instead of guessing; this rides on the
+error result, not the tool catalogue.
+
+**Cost to know about:** real schemas cost wire bytes — **+2,866** on the advertised payload.
+`test/payload.budget.test.js` was *already* red (73,021 vs a 64,600 budget) before this change; this
+makes the overage larger and the budget needs a deliberate review.
+
+**Behaviour tightenings** (all intentional): an unknown `sizes`/`formats`/`source` value is now
+rejected at the gate rather than silently filtered or yielding a misleading "No candidates found".
+
+Regression test: `test/tool-schema-contract.test.js` (98 assertions, in `test/fast.list`) — pins the
+schemas, the guard, rejection-before-`run()`, all 13 tolerated image-qc shapes, the actionable error,
+and translation across all three provider wires. **`image-qc.test.js`'s 3 failures are PRE-EXISTING**
+and were proven so by restoring the backups and re-running: `3 problem(s), 38 ok` both before and
+after. They are Block A asserting on a PNG that `print-prep` has emitted as **JPEG** since
+2026-10-22, while `parsePng` rejects JPEG — unrelated, still open.
+
+### 2026-11-10 addendum — the two red tests were stale docs, and one hid a real blind spot
+
+**`test/harness.integration.test.js`** had been red since 2026-11-02. The diff was exactly
+`outbox_list` / `outbox_read`: granted on `CAP_REGISTRY.computer` with the Central Outbox, and
+`capgate.test.js` was updated while this list was not. But syncing the list alone made it WORSE
+(1 problem → 2), which exposed the real gap: this fixture deliberately registers **every** tool
+family — its own comment says *"a resolved-but-unregistered tool is exactly the 'dark tool' bug it
+exists to catch"* — and the outbox family was never added. So the tools were resolved but
+unregistered, i.e. the drift guard was blind to the very family it should have policed. Fixed by
+registering `makeOutboxTools` with an honest empty manifest, the same shape comms/connectors use.
+Now **OK (188 assertions)**.
+
+**`test/payload.budget.test.js`** is a REVIEW prompt by its own design, and the review had not been
+done since the 2026-09-23 prompt diet. Re-measured: **24,070 / 24,291 system chars | 92 tools |
+75,895 tool bytes** against stale budgets of 84 / 64,600. System chars still pass — the diet is
+holding. The +12 tools are all dated, reviewed, test-covered additions (image_stock_fetch,
+vector_export, higgsfield.generate, openai_image_generate, outbox_list, outbox_read, plus the
+21-tool STUDIO bay). Budgets raised to 98 / 80,500 with the same ~6% headroom and a dated note
+giving the reason. **If it fails again, the question is whether the STUDIO bay should be
+`deferred: true` — granted but unadvertised, as `browser.attach` already is — not whether to raise
+the number a third time.**
+
+### Service restoration, and what the restart actually fixed
+
+The sidecar had been running from a bare login shell since ~2026-11-03 and died with that terminal.
+Restarted via `start-starnet.sh`, detached. **It now holds all nine provider keys plus
+`STARNET_API_TOKEN` and `CRON_MAX_RUN_MS`** (previously it held only `ANTHROPIC_API_KEY`, which is
+why every agent was on an unconfigured `gemini` and every documented `curl` recipe 403'd).
+Parent is the launcher, so a crash is now supervised.
+
+**`STUDIO_ALLOW_UNACCOUNTED_SPEND=1` was commented out of `~/.config/starnet/env` first**
+(backup: `env.bak-20261110`). A correct restart would otherwise have silently re-armed Higgsfield
+REST billing against an account StarNet cannot read, with three cron routines enabled. Two comment
+lines mark how to restore it when studio video is wanted again.
+
+Pre-flight that must precede any restart: `.spend-pending` was empty (it fail-closes every agent
+otherwise), and the OmniRoute client key fingerprint matched `OMNIROUTE_API_KEY` — compare those
+**normalised** (strip whitespace both sides) or you will manufacture a mismatch that is not there.
+
+### 2026-11-10 — the approval axis is now writable (POST /api/outbox/approval, /api/outbox/qc)
+
+`setQc()` and `setApproval()` had existed since the Central Outbox landed, `lifecycleOf()` derived
+state from them, and `frontend/app/outbox.js` already rendered the pills — but **nothing ever called
+them**. Measured live before the change: `approval {"pending": 53}` — every row, 100%, permanently.
+The one axis the host sets mechanically (`verification`) worked; the two needing a caller were dead.
+
+Two routes, deliberately separate because they answer to different authorities — *"QC passing is a
+quality opinion, approval is a business decision."*
+
+**The trap, and it is not obvious from the code's own comments.** `setApproval()` says "the COMMANDER
+alone" but **validates no identity at all** — it checks the status enum and records whatever
+`commanderId` it is handed. Likewise `patch()`/`setApproval()` search the **whole** manifest and
+ignore `sharedWith`. So both rules live in the ROUTE:
+
+- the approver is hardcoded to `OUTBOX_COMMANDER`, never read from the body (`handleProjectBless`'s
+  `surface:'interactive'` precedent). A `by` field is an audit LABEL folded into the detail text.
+- resolution goes through the viewer-scoped `get()`, and an unknown-or-invisible id answers **403,
+  never 404** — a 404/403 difference would let a token-holder enumerate artifacts it cannot read.
+- QC re-proves producer-independence at the route (`isAgentId` + roster + `reviewer !== row.owner`)
+  so the caller gets a clean 409 rather than a generic failure string.
+
+**There is deliberately NO tool for either.** Every `/api` route rides the `x-starnet-token` gate and
+agents hold no token, so a token-holder IS the Commander. An approval *tool* would hand an agent the
+power to approve its own output — the one thing the four-axis model exists to prevent.
+
+Verified live against the running sidecar, not inferred:
+```
+bad id charset   403 {"error":"forbidden"}      unknown id       403 {"error":"forbidden"}  (merged)
+invalid status   400 + accepts[]                producer self-QC 409 "cannot QC its own artifact"
+unknown reviewer 404                            neutral write    200 + the amended row
+```
+The audit line proves the authority rule: a request body saying `"by":"claude"` persisted as
+`approvedBy=agent` with `claude:` demoted into the detail text.
+
+Regression: `test/outbox-approval-route.test.js` (30 assertions, in `test/fast.list`) — it
+source-locks the hardcoded approver and the viewer-scoped lookup, because a future "simplification"
+that passes `body.by` through would forge authority while every other test stayed green.
+
+**Known pre-existing, re-proven here, NOT caused by this work:** `test/agent-capabilities.test.js`
+fails under the gate's hermetic profile with `ENOENT … /starnet-gate-profile-*/…/agent.save.json`.
+It passes standalone. Proven pre-existing by running the same slice against the pre-change
+`index.js` — identical failure.

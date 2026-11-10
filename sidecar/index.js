@@ -296,7 +296,7 @@ const MemoryStore = require('./memory-store.js');                               
 const { makeMemoryStore, resetAgentMemory, restoreDeclined } = MemoryStore;
 const { makeWorkshopStore } = require('./workshop-store.js'); // durable per-agent away-workshop grant + backlog + discard denylist
 const { makeDeliverableStore } = require('./deliverable-store.js'); // durable kept/discarded/failed Workshop lifecycle index
-const { makeDeliverableManifest } = require('./deliverable-manifest.js'); // central Outbox: cross-agent artifact index (metadata only)
+const { makeDeliverableManifest, QC: QC_STATES, APPROVAL: APPROVAL_STATES } = require('./deliverable-manifest.js'); // central Outbox: cross-agent artifact index (metadata only)
 const { makeSteerBuffers } = require('./steer-buffer.js'); // h1: live-steer buffers + the run-end close (an honest 409 once a run can no longer apply a note)
 const { makeIdempotencyLedger } = require('./idempotency-ledger.js'); // SOP lane: durable connector-WRITE idempotency (no double-send on retry/resume)
 const TaskPostconditions = require('./task-postconditions.js');        // SOP lane: the typed acceptance authority (mid-run probe + end-of-run verdict)
@@ -10275,6 +10275,9 @@ const ROUTES = [
   // prefix, not exact: the route matcher compares the FULL url including the query string, so an `exact`
   // entry never matches a request that carries ?id=/?agent= (same reason /api/file and /api/studio-file use prefix).
   { m: ['GET', 'HEAD'], prefix: '/api/artifact', h: serveArtifact },
+  /* EXACT entries first: the GET below is a PREFIX match, so a bare `prefix` would swallow these two. */
+  { m: 'POST', exact: '/api/outbox/approval', h: handleOutboxApproval },
+  { m: 'POST', exact: '/api/outbox/qc', h: handleOutboxQc },
   { m: 'GET', prefix: '/api/outbox', h: serveOutbox },
   // Deliverables panel inline preview for images over DELIVERABLE_IMAGE_MAX (2026-10-22) — see the full note
   // at DELIVERABLE_PREVIEW_CACHE_DIR above handleDeliverablePreview. Never touches the original file.
@@ -22426,6 +22429,96 @@ async function serveOutbox(req, res) {
     retrieve: '/api/artifact?id=' + encodeURIComponent(r.id) + '&agent=' + encodeURIComponent(viewer)
   }));
   return json(200, { ok: true, viewer: viewer, count: out.length, rows: out });
+}
+
+/* THE JUDGMENT WRITERS (2026-11-10). deliverable-manifest.js has carried setQc() and setApproval() since the
+   Central Outbox landed, lifecycleOf() derives state from them, and frontend/app/outbox.js already renders the
+   pills — but NOTHING ever called them. Measured on the live station before this change:
+       approval {"pending": 53}          <- every row, 100%, permanently
+       qc       {"not_reviewed": 51, "needs_review": 2}
+       verification {"passed": 17, "unverified": 35, "failed": 1}
+   The one axis the HOST sets mechanically worked; the two that need a caller were dead. These two routes are
+   that caller.
+
+   WHY TWO ROUTES AND NOT ONE. The module keeps qc and approval deliberately separate — "QC passing is a quality
+   opinion, approval is a business decision" — and they answer to different authorities. Merging them into one
+   endpoint with an `axis` field would blur exactly the distinction the data model exists to preserve.
+
+   WHY THERE IS NO TOOL FOR THESE. Every /api route rides the x-starnet-token gate, so a caller holding the token
+   IS the Commander. An agent has no token (secrets never reach the renderer or a run), so it cannot reach these.
+   Exposing approval as a TOOL would hand an agent the power to approve its own output, which is the single thing
+   the four-axis model was built to prevent. Deliberately absent, not overlooked.
+
+   The module keeps its own invariants and this layer does not duplicate them: statuses are enum-checked there,
+   setQc REFUSES a reviewer equal to the artifact's owner, and patch() appends a new JSONL line so every earlier
+   verdict stays on disk as the audit trail. */
+/* THE ID GATE. Copied deliberately from /api/artifact, including its refusal to distinguish "does not exist"
+   from "not visible to you": a 404-vs-403 difference would let a token-holder enumerate which artifacts exist
+   in workspaces it cannot read. Resolution goes through the VIEWER-SCOPED get(), never through patch()/
+   setApproval() directly — those search the whole manifest and ignore `sharedWith`. */
+const OUTBOX_ID_RE = /^[A-Za-z0-9_.:@-]+$/;
+
+async function readJudgmentRequest(req, res, json) {
+  let body;
+  try { body = JSON.parse(await readBody(req, 4096)) || {}; }
+  catch (e) { json(400, { ok: false, error: 'bad json' }); return null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) { json(400, { ok: false, error: 'body must be a JSON object' }); return null; }
+  const id = String(body.id || '').trim();
+  if (!id || id.length > 300 || !OUTBOX_ID_RE.test(id)) { json(403, { ok: false, error: 'forbidden' }); return null; }
+  const row = deliverableManifest.get(OUTBOX_COMMANDER, id);
+  if (!row) { json(403, { ok: false, error: 'forbidden' }); return null; }   // merged with "unknown" on purpose
+  return { body, id, row, detail: String(body.detail || '').slice(0, 400) };
+}
+
+/* POST /api/outbox/approval  { id, status: 'approved'|'rejected'|'pending', detail?, by? }
+   AUTHORITY COMES FROM THE REQUEST, NEVER THE BODY. setApproval() takes a commanderId but — despite its
+   doc comment saying "the COMMANDER alone" — validates no identity whatsoever; it only checks the status
+   enum. So the Commander-only rule is enforced HERE: the approver is hardcoded to OUTBOX_COMMANDER, exactly
+   as handleProjectBless hardcodes surface:'interactive'. A `by` in the body is an audit LABEL folded into
+   the detail text, never an authority claim. */
+async function handleOutboxApproval(req, res) {
+  const json = (code, obj) => { if (!res.headersSent) res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  const parsed = await readJudgmentRequest(req, res, json);
+  if (!parsed) return;
+  const accepts = Array.from(APPROVAL_STATES);
+  const status = String(parsed.body.status || '').trim();
+  if (!APPROVAL_STATES.has(status)) return json(400, { ok: false, error: 'invalid approval status', accepts: accepts });
+
+  const label = String(parsed.body.by || '').trim().slice(0, 64);
+  const detail = label ? (parsed.detail ? label + ': ' + parsed.detail : label) : parsed.detail;
+  let r;
+  try { r = deliverableManifest.setApproval(parsed.id, status, OUTBOX_COMMANDER, detail); }
+  catch (e) { failNote('outbox.approval', e); return json(500, { ok: false, error: 'approval failed' }); }
+  if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the approval: ' + ((r && r.error) || 'unknown'), accepts: accepts });
+
+  console.log('[outbox] approval ' + status + ' by owner on ' + parsed.id + ' at ' + r.row.amendedAt);
+  return json(200, { ok: true, id: parsed.id, row: Object.assign({}, r.row, { lifecycle: deliverableManifest.lifecycleOf(r.row) }) });
+}
+
+/* POST /api/outbox/qc  { id, status, reviewer, detail? }
+   QC is NOT the Commander's verdict — it names a third party, so this route is a privileged caller asserting
+   someone else's identity. The manifest refuses reviewer === owner, but that refusal is re-proven here so the
+   caller gets a clean 409 and an explanation rather than a generic failure string. */
+async function handleOutboxQc(req, res) {
+  const json = (code, obj) => { if (!res.headersSent) res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  const parsed = await readJudgmentRequest(req, res, json);
+  if (!parsed) return;
+  const accepts = Array.from(QC_STATES);
+  const status = String(parsed.body.status || '').trim();
+  const reviewer = String(parsed.body.reviewer || '').trim();
+  if (!QC_STATES.has(status)) return json(400, { ok: false, error: 'invalid qc status', accepts: accepts });
+  if (!isAgentId(reviewer)) return json(400, { ok: false, error: 'reviewer must be an agent id — QC names the independent reviewer, it is not the Commander\'s verdict' });
+  if (!agentRoster.has(reviewer)) return json(404, { ok: false, error: 'no such agent: ' + reviewer });
+  if (reviewer === parsed.row.owner) {
+    return json(409, { ok: false, error: 'a producer cannot QC its own artifact (' + reviewer + ' owns this one) — name an independent reviewer' });
+  }
+  let r;
+  try { r = deliverableManifest.setQc(parsed.id, status, reviewer, parsed.detail); }
+  catch (e) { failNote('outbox.qc', e); return json(500, { ok: false, error: 'qc failed' }); }
+  if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the qc verdict: ' + ((r && r.error) || 'unknown'), accepts: accepts });
+
+  console.log('[outbox] qc ' + status + ' by ' + reviewer + ' on ' + parsed.id + ' at ' + r.row.amendedAt);
+  return json(200, { ok: true, id: parsed.id, row: Object.assign({}, r.row, { lifecycle: deliverableManifest.lifecycleOf(r.row) }) });
 }
 
 // GET /api/fs/dirstat?path=<abs> — read-only existence/type check of a user-chosen KEEP destination folder.

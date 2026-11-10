@@ -45,8 +45,28 @@
     return src.map(normalizePrecondition).filter(Boolean).slice(0, 8);
   }
 
+  /* A tool's argument schema is `schema`. `parameters` is the OpenAI WIRE spelling, produced downstream by
+     registry.wireFormat() — it is never an input here, and makeTool drops unknown keys without complaint.
+     Four builtins (print-prep, vector-export, stock-image, image-qc) carried `parameters:` for months. The
+     cost was not cosmetic and it was silent in both directions at once:
+       - the model was advertised an EMPTY schema, so it was told the tool takes no arguments (on Gemini,
+         providers/toolschema.js isEmptyObjectSchema() drops `parameters` from the declaration entirely);
+       - shared/schema.js — "a missing/empty schema imposes no constraint" — therefore validated nothing,
+         so malformed arguments sailed through registry.dispatch() into run().
+     Models then guessed shapes and burned turns doing it (STATION_FIELD_NOTES §3: four distinct wrong
+     shapes observed live; one agent abandoned the tool and shelled out instead). Fail loudly at
+     registration rather than let the next tool repeat it. */
+  function assertSchemaKey(def) {
+    if (def.parameters === undefined) return;
+    throw new Error('tool "' + (def.name || '<unnamed>') + '": declare arguments as `schema`, not `parameters`. '
+      + '`parameters` is the wire spelling emitted by registry.wireFormat(); makeTool reads only def.schema, so '
+      + 'this would ship an empty schema — the model would be told the tool takes no arguments and host-side '
+      + 'validation would silently pass everything.');
+  }
+
   function makeTool(def) {
     def = def || {};
+    assertSchemaKey(def);
     return {
       name: def.name,
       description: def.description || '',
@@ -68,5 +88,5 @@
     };
   }
 
-  return { makeTool, normalizePrecondition, normalizePreconditions };
+  return { makeTool, assertSchemaKey, normalizePrecondition, normalizePreconditions };
 });

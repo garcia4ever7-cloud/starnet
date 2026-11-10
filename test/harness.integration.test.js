@@ -38,6 +38,7 @@ const { makeSkillStore } = require('../sidecar/skillstore.js');
 const { makeQuestTools } = require('../sidecar/tools/builtin/quests.js');
 const { makeCommsTools } = require('../sidecar/tools/builtin/comms.js');
 const { makeRoutineTools } = require('../sidecar/tools/builtin/routines.js');
+const { makeOutboxTools } = require('../sidecar/tools/builtin/outbox.js');
 const { makeQuestStore } = require('../sidecar/quest-store.js');
 const { resolveTools } = require('../sidecar/capability/resolve.js');
 const { makeCapCtx } = require('../sidecar/capability/capGate.js');
@@ -129,6 +130,17 @@ const fixture = {
   // routine.notepad rides the computer on every runnable station but remains inert without a host-minted
   // scheduled cronJobId. Register the honest unwired shape so the capability/registration drift guard stays exact.
   makeRoutineTools({}).register(registry);
+  // outbox_list / outbox_read ride the computer (capId 'outbox'), added with the Central Outbox 2026-11-02.
+  // This fixture was never updated, so the drift guard went red and — worse — the family was invisible to the
+  // very test that exists to catch a resolved-but-unregistered tool. Registered here with an honest EMPTY
+  // manifest: the same "no reachable chats" shape used for comms above, i.e. the station that has produced
+  // nothing yet, which is also the case that must not pretend otherwise.
+  makeOutboxTools({
+    manifest: {
+      list: () => [],
+      readFor: () => ({ ok: false, error: 'no deliverable in test' })
+    }
+  }).register(registry);
 
   const station = { agents: { agent: { id: 'agent', room: 'office' } }, rooms: { office: { id: 'office', objects: [
     { instanceId: 'pc1', objectType: 'computer' }, { instanceId: 'd1', objectType: 'dish' },
@@ -143,7 +155,11 @@ const fixture = {
   const capCtx = makeCapCtx(resolved, { emit, consent, timeoutMs: 5000 });
 
   // ---- DRIFT GUARDS (these alone would have caught both default-path showstoppers) ----
-  const EXPECTED = ['browser.attach', 'browser.back', 'browser.click', 'browser.console', 'browser.detach', 'browser.dialog', 'browser.drag', 'browser.emulate', 'browser.eval', 'browser.find', 'browser.forward', 'browser.get_text', 'browser.hover', 'browser.inspect', 'browser.intercept', 'browser.login', 'browser.navigate', 'browser.network', 'browser.pdf', 'browser.press', 'browser.screenshot', 'browser.scroll', 'browser.select', 'browser.snapshot', 'browser.tab_close', 'browser.tab_select', 'browser.tabs', 'browser.type', 'browser.upload', 'browser.viewport', 'browser.vision', 'browser.wait', 'channel.send', 'channel.targets', 'code.run', 'connectors.list', 'deliverable_note', 'fs.append', 'fs.edit', 'fs.list', 'fs.patch', 'fs.read', 'fs.search', 'fs.write', 'manual.read', 'notebook.feedback', 'notebook.read', 'notebook.write', 'quest.update', 'recall_conversation', 'routine.notepad', 'skill.list', 'skill.manage', 'skill.view', 'skill.write', 'station.inspect', 'todo', 'tool.search', 'web_fetch', 'web_request', 'web_search', 'widget.get', 'widget.set'];
+  const EXPECTED = ['browser.attach', 'browser.back', 'browser.click', 'browser.console', 'browser.detach', 'browser.dialog', 'browser.drag', 'browser.emulate', 'browser.eval', 'browser.find', 'browser.forward', 'browser.get_text', 'browser.hover', 'browser.inspect', 'browser.intercept', 'browser.login', 'browser.navigate', 'browser.network', 'browser.pdf', 'browser.press', 'browser.screenshot', 'browser.scroll', 'browser.select', 'browser.snapshot', 'browser.tab_close', 'browser.tab_select', 'browser.tabs', 'browser.type', 'browser.upload', 'browser.viewport', 'browser.vision', 'browser.wait', 'channel.send', 'channel.targets', 'code.run', 'connectors.list', 'deliverable_note', 'fs.append', 'fs.edit', 'fs.list', 'fs.patch', 'fs.read', 'fs.search', 'fs.write', 'manual.read', 'notebook.feedback', 'notebook.read', 'notebook.write',
+    /* outbox_* landed on CAP_REGISTRY.computer with the Central Outbox (2026-11-02). capgate.test.js was
+       updated in that change and this list was missed, so the suite has been red ever since. The tools are
+       correct — read-only, no consent, no network — the EXPECTED list was simply stale. Synced 2026-11-10. */
+    'outbox_list', 'outbox_read', 'quest.update', 'recall_conversation', 'routine.notepad', 'skill.list', 'skill.manage', 'skill.view', 'skill.write', 'station.inspect', 'todo', 'tool.search', 'web_fetch', 'web_request', 'web_search', 'widget.get', 'widget.set'];
   A.eq(resolved.tools.slice().sort(), EXPECTED.slice().sort(), 'office objects resolve to the full toolset (object=capability is real)');
   for (const name of EXPECTED) A.ok(registry.get(name), 'tool registered: ' + name);
 

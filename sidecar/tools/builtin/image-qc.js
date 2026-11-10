@@ -206,25 +206,53 @@
         'suitability at an optional target inches. This re-reads the actual bytes on disk — it does not trust ' +
         'what image_generate or image_print_prep reported about their own output. Use this for the independent ' +
         'quality-check step of the Etsy pipeline validation stage, never as a restatement of Designer\'s own claim.',
-      parameters: {
+      /* `schema`, NOT `parameters` — see the note in print-prep.js. Fixed 2026-11-10.
+         THIS ONE COULD NOT BE RENAMED VERBATIM. The old block declared a strict array-of-objects, but
+         run() deliberately absorbs far more (the 2026-10-20 hardening: five key aliases and six value
+         shapes, found by watching real models fail — STATION_FIELD_NOTES §3, "9 turns -> 2"). Because the
+         misspelling meant NOTHING was ever validated, that mismatch was invisible. Renaming the key alone
+         would have switched shared/schema.js on against the strict shape and rejected the tolerated calls
+         at the gate — deleting the hardening without touching the code that implements it.
+         So the schema now DESCRIBES the real contract without CONSTRAINING it:
+           - `anyOf` is understood by Gemini and Anthropic (good model guidance) and is IGNORED by
+             shared/schema.js (no host-side constraint) — exactly the asymmetry this needs;
+           - no top-level `required`, because any of five alias keys (or a bare `path`) satisfies it;
+           - the aliases are declared so the model can see they are legitimate rather than guessing. */
+      schema: {
         type: 'object',
         properties: {
           images: {
-            type: 'array', minItems: 1, maxItems: 20,
-            items: {
-              type: 'object',
-              properties: {
-                path: { type: 'string', description: 'workspace-relative path to the PNG file' },
-                claimedWidth: { type: 'number', description: 'optional — the pixel width this file is SUPPOSED to be (e.g. from its filename or a prior report); checked against the real decoded width' },
-                claimedHeight: { type: 'number', description: 'optional — the pixel height this file is SUPPOSED to be' },
-                targetInchesWidth: { type: 'number', description: 'optional — intended print width in inches, to report effective DPI and a print-quality grade' },
-                targetInchesHeight: { type: 'number', description: 'optional — intended print height in inches' }
-              },
-              required: ['path']
-            }
-          }
-        },
-        required: ['images']
+            description: 'One or more files to check. Preferred shape: [{"path":"outbox/art.png"}]. A bare path string, a single {path} object, or a JSON-encoded array are also accepted. Max 20; extras are dropped.',
+            anyOf: [
+              { type: 'string' },
+              { type: 'object' },
+              {
+                type: 'array', maxItems: 20,
+                items: {
+                  anyOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      properties: {
+                        path: { type: 'string', description: 'workspace-relative path to the image file' },
+                        claimedWidth: { type: 'number', description: 'optional — the pixel width this file is SUPPOSED to be (e.g. from its filename or a prior report); checked against the real decoded width' },
+                        claimedHeight: { type: 'number', description: 'optional — the pixel height this file is SUPPOSED to be' },
+                        targetInchesWidth: { type: 'number', description: 'optional — intended print width in inches, to report effective DPI and a print-quality grade' },
+                        targetInchesHeight: { type: 'number', description: 'optional — intended print height in inches' }
+                      },
+                      required: ['path']
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          image: { description: 'alias for `images` (singular form accepted)' },
+          files: { description: 'alias for `images`' },
+          file: { description: 'alias for `images`' },
+          paths: { description: 'alias for `images`' },
+          path: { type: 'string', description: 'a single file, when the arguments themselves ARE the entry' }
+        }
       },
       async run(args, ctx) {
         const aid = (ctx && ctx.agentId) || 'agent';
