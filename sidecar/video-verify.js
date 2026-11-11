@@ -106,4 +106,10 @@ function verifyVideoFile(absPath) {
   return result(true, '', found);
 }
 
-module.exports = { verifyVideoFile, MIN_BYTES, MIN_BITRATE, MIN_DURATION_SEC, MIN_FRAMES };
+/* `probe` is exported (ADDITIVE, 2026-11-11) so video.inspect reports facts from the SAME ffprobe
+   invocation this gate judges on, instead of shelling out a second time with its own argv. One
+   implementation means the inspector and the gate can never disagree about a file, and the safe call
+   shape — execFileSync with an ARRAY, never a shell string — is inherited rather than re-chosen.
+   (The unwired sidecar/tools/builtin/video-inspect.js interpolated its path into an execSync string,
+   which is a command injection; nothing should copy that.) */
+module.exports = { verifyVideoFile, probe, MIN_BYTES, MIN_BITRATE, MIN_DURATION_SEC, MIN_FRAMES };

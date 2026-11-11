@@ -64,9 +64,39 @@
       + 'validation would silently pass everything.');
   }
 
+  /* A TOOL WITHOUT A TOP-LEVEL `name` IS WORSE THAN A MISSING TOOL (2026-11-11).
+     registry.register does `tools[t.name] = t`, so a def whose name is undefined is stored under the literal
+     key "undefined" — unreachable by name, and the NEXT such def silently overwrites it. Worse, the shape
+     that causes this also hides the safety attributes: a def written as
+         { properties: { id: 'video.kling', scope: 'write', requiresConsent: true, network: true }, schema }
+     gives makeTool no def.scope and no def.requiresConsent, so they DEFAULT to scope 'read', readOnly true,
+     requiresConsent FALSE. A paid, network, consent-gated writer lands in the registry as a free read.
+
+     That was live: sidecar/tools/builtin/video-kling.js was the one such file index.js actually registered
+     (four more — video.js, video-inspect.js, audio.js, audio-inspect.js — were written the same way but never
+     required, so they were inert). It is why `video.kling` has never been callable by anyone, which is the
+     real reason PRODUCER could never render a video.
+
+     Mirrors assertSchemaKey: fail LOUDLY at construction so the mistake surfaces at boot, not as a silently
+     mis-registered tool months later. Both guards exist because this registry has no other chokepoint —
+     registry.register -> makeTool is the only call site. */
+  function assertToolName(def) {
+    if (typeof def.name === 'string' && def.name) return;
+    const foreignId = def.properties && typeof def.properties === 'object' && def.properties.id;
+    throw new Error('tool ' + (foreignId ? '"' + String(foreignId) + '"' : '<unnamed>')
+      + ': a tool must declare a top-level `name` (string).'
+      + (foreignId
+        ? ' This def puts its identity in `properties.id`, which is not this registry\'s contract: makeTool'
+          + ' reads def.name, def.scope and def.requiresConsent at the TOP level. Registering it would key the'
+          + ' tool as "undefined" AND silently downgrade it to scope:read/requiresConsent:false. Port it to'
+          + ' { name, description, schema, scope, requiresConsent, run } — see tools/builtin/video-probe.js.'
+        : ' Without it registry.register stores the tool under the key "undefined".'));
+  }
+
   function makeTool(def) {
     def = def || {};
     assertSchemaKey(def);
+    assertToolName(def);
     return {
       name: def.name,
       description: def.description || '',
@@ -88,5 +118,5 @@
     };
   }
 
-  return { makeTool, assertSchemaKey, normalizePrecondition, normalizePreconditions };
+  return { makeTool, assertSchemaKey, assertToolName, normalizePrecondition, normalizePreconditions };
 });

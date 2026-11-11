@@ -227,9 +227,13 @@ bitrate. Prose cannot pass that check, and a scene manifest with no footage behi
 a FAILED stage, not a completed one.
 
 OUTPUT REQUIREMENTS:
-1. Call video.kling (and image_generate / image_stock_fetch for stills as needed) to
-   render actual media for the shot list above.
-2. Write the final render to ~/outbox/${blueprint.projectId}/video.mp4
+1. You do NOT render the video yourself, and you have no tool that can. The HOST renders
+   it through the provider chain (see ensureProducerVideo) before your stage is judged.
+   Do not attempt video.kling or video.process — neither is a registered tool on this
+   station, and claiming to have called one is a false report.
+   You MAY use image_generate / image_stock_fetch for stills the shot list needs.
+2. The host writes the render to ~/outbox/${blueprint.projectId}/video.mp4 — report on
+   what is actually there, and say plainly if nothing is.
 3. Then record a scene manifest via "deliverable_note": scene IDs, the real media
    paths you created, durations, aspect ratio.
 
@@ -698,6 +702,54 @@ async function orchestrateNextAgent(projectId, maxWaitMs = 300000, renderOpts = 
    it works" is exactly the wrong shape — it would bill repeatedly for the same failure. */
 const MAX_PASSES = 12;
 
+/* "ALL FOUR STAGES RAN" IS NOT "THE DELIVERABLE IS GOOD" (2026-11-11).
+   advanceWorkflow() sets workflow.status = 'complete' purely on currentStage >= AGENTS_IN_ORDER.length, and
+   a stage counts as done when captureAgentOutput() gets >= 20 characters of text. Nothing read
+   blueprint.outputs.qceditor.approved — grep returned exactly one hit, the line that WRITES it.
+
+   So a real pipeline run recorded `workflow.status = "complete"` while `qceditor.approved === false` and the
+   QC text said, verbatim: "VERDICT: FAILED — The media cannot be verified, so this production cannot be
+   approved." The pipeline then returned ok:true. That is the same shape of lie as the 1,056-byte placeholder:
+   a mechanical milestone presented as an accepted product.
+
+   THE FIX KEEPS THE LIFECYCLE ENUM INTACT. workflow.status stays 'complete' when every stage ran, because
+   that statement is true and other consumers read that enum. What changes is that this function — the one
+   place the pipeline declares SUCCESS to its caller — no longer conflates the two. `ok` now requires the
+   independent QC verdict, and the result carries the reason separately so a caller can tell
+   "stages finished, QC refused" from "stages did not finish".
+
+   MISSING EVIDENCE IS NOT APPROVAL. `approved` is only true when QC_EDITOR explicitly passed; absent,
+   unparsed or ambiguous QC text leaves it undefined, which is treated as NOT approved and reported as
+   'qc-missing' rather than silently passing. There is deliberately no "default allow" branch. */
+async function pipelineOutcome(projectId, workflow, passes) {
+  const status = (workflow && workflow.status) || 'unknown';
+  let qc = null;
+  try {
+    const bp = await orchestration.loadBlueprint(projectId);
+    const slot = bp && bp.outputs && bp.outputs.qceditor;
+    qc = slot ? slot.approved : undefined;
+  } catch (e) { qc = undefined; }
+
+  const stagesDone = status === 'complete';
+  const approved = qc === true;
+  const reason = approved ? null
+    : (qc === false ? 'qc-refused: QC_EDITOR did not approve the deliverable'
+      : 'qc-missing: no QC_EDITOR verdict was recorded, which is not an approval');
+
+  return {
+    projectId,
+    // ok means DELIVERABLE ACCEPTED, not "the loop finished". A caller that only wants stage progress
+    // reads stagesComplete.
+    ok: stagesDone && approved,
+    status,
+    stagesComplete: stagesDone,
+    qcApproved: approved,
+    qcVerdict: qc === true ? 'approved' : (qc === false ? 'refused' : 'absent'),
+    failureReason: approved ? undefined : reason,
+    passes
+  };
+}
+
 async function runPipelineToCompletion(projectId, maxWaitMs, renderOpts) {
   const passes = [];
   let last = null;
@@ -706,10 +758,15 @@ async function runPipelineToCompletion(projectId, maxWaitMs, renderOpts) {
     const before = await orchestration.loadWorkflow(projectId);
     if (!before) return { projectId, ok: false, error: 'workflow not found', passes };
     if (before.status === 'complete' || before.status === 'failed') {
-      return { projectId, ok: before.status === 'complete', status: before.status, passes, failureReason: before.failureReason };
+      // 'complete' no longer implies accepted — pipelineOutcome() consults the independent QC verdict.
+      if (before.status === 'failed') {
+        return { projectId, ok: false, status: 'failed', stagesComplete: false, qcApproved: false,
+                 qcVerdict: 'absent', passes, failureReason: before.failureReason };
+      }
+      return await pipelineOutcome(projectId, before, passes);
     }
     if (!orchestration.nextAgentForStatus(before)) {
-      return { projectId, ok: before.status === 'complete', status: before.status, passes };
+      return await pipelineOutcome(projectId, before, passes);
     }
 
     last = await orchestrateNextAgent(projectId, maxWaitMs, renderOpts);
@@ -733,7 +790,8 @@ async function runPipelineToCompletion(projectId, maxWaitMs, renderOpts) {
       // No forward motion and no error reported — stop rather than pay for the same pass again.
       return { projectId, ok: false, status: after.status, failureReason: 'stage ' + before.currentStage + ' did not advance', passes };
     }
-    if (after.status === 'complete') return { projectId, ok: true, status: 'complete', passes };
+    // Every stage ran. Whether the DELIVERABLE is accepted is a separate question, answered by QC.
+    if (after.status === 'complete') return await pipelineOutcome(projectId, after, passes);
   }
 
   return { projectId, ok: false, status: 'running', failureReason: 'exceeded ' + MAX_PASSES + ' passes', passes };

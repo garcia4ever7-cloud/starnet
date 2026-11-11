@@ -312,7 +312,6 @@
       // reads an existing workspace image, uploads it to Higgsfield CDN, polls for completion, and
       // saves the enhanced result back into the workspace. Write + network + consent-gated like
       // higgsfield.generate. (see tools/builtin/higgsfield.js)
-      { capId: 'studio', tool: 'higgsfield.enhance', scope: 'write', requiresConsent: true, network: true },
       // openai_image_generate renders via OpenAI's /v1/images/generations (gpt-image-2 / dall-e-*)
       // on a DEDICATED route — it does not change the default studio visual path (image_generate).
       // Credentials from OPENAI_API_KEY, resolved independently of Higgsfield (HF_CREDENTIALS) and
@@ -357,34 +356,33 @@
       { capId: 'studio', tool: 'resolve_status', scope: 'read', requiresConsent: false, network: false },
       { capId: 'studio', tool: 'resolve_control', scope: 'execute', requiresConsent: true, network: false },
       // CHRISTIAN STORY STUDIO video production tools (2026-10-25)
-      // video.generate: text-to-video generation via Pika Labs REST API. Credentials from PIKA_API_KEY env.
-      // Writes MP4 file into workspace, consent + network required like image_generate.
-      // (see tools/builtin/video.js)
-      { capId: 'studio', tool: 'video.generate', scope: 'write', requiresConsent: true, network: true },
-      // video.kling: text-to-video generation via official Kling 3.0 API. Credentials from KLING_API_KEY env.
-      // Supports character reference images, multi-shot generation, native audio sync.
-      // Writes MP4 file into workspace, consent + network required like video.generate.
-      // (see tools/builtin/video-kling.js)
-      { capId: 'studio', tool: 'video.kling', scope: 'write', requiresConsent: true, network: true },
-      // audio.generate: text-to-speech synthesis via ElevenLabs API. Credentials from ELEVENLABS_API_KEY env.
-      // Writes MP3 audio file into workspace, consent + network required like voice_generate.
-      { capId: 'studio', tool: 'audio.generate', scope: 'write', requiresConsent: true, network: true },
-      // video.process: media assembly and editing — combines clips, adds audio, applies transitions.
-      // Uses FFmpeg locally (no network, no external credential). Writes MP4 into workspace.
-      // Consent-gated like other studio write operations.
-      { capId: 'studio', tool: 'video.process', scope: 'write', requiresConsent: true, network: false },
+      /* SIX STUDIO GRANTS WERE REMOVED HERE (2026-11-11) because nothing implemented them — a grant with no
+         reachable tool is a DARK TOOL: the model is told a capability exists, spends turns trying to call it,
+         and gets nothing. Measured before removal:
+           video.process      — no implementation anywhere in the repo (0 files mention it outside this list)
+           higgsfield.enhance — likewise none
+           video.generate     — only tools/builtin/video.js, which index.js does not require
+           audio.generate     — only tools/builtin/audio.js, not required
+           audio.inspect      — only tools/builtin/audio-inspect.js, not required
+           video.kling        — tools/builtin/video-kling.js IS required, but declares its identity as
+                                `properties.id`, so makeTool produced a tool named `undefined` with its
+                                write/consent/network attributes silently defaulted to read/no-consent. It has
+                                never been callable; see the note at its former registration in index.js.
+         video.process's description claimed clip assembly ("combines clips, adds audio, applies transitions")
+         — the exact capability the studio pipeline needs — while no code existed. The working assembly path on
+         this station is the memorial engine's ffmpeg renderer (memorial/render.mjs `assemble`), not an agent
+         tool. Re-add any of these ONLY together with a registered, correctly-shaped implementation; the
+         studio-grant drift test pins this. */
       // video.inspect: technical video validation — reads MP4, returns codec, resolution, frame rate,
       // duration, bitrate, quality issues. No network, no consent (read-only, like image_quality_check).
       // Used by QC agents to independently verify video quality.
-      { capId: 'studio', tool: 'video.inspect', scope: 'read', requiresConsent: false, network: false },
-      // audio.inspect: audio track validation — reads audio file or MP4 audio stream, returns duration,
-      // channels, sample rate, loudness, sync issues. No network, no consent (read-only, QC-focused).
-      { capId: 'studio', tool: 'audio.inspect', scope: 'read', requiresConsent: false, network: false },
-      // image_upscale_kling: neural AI image upscaling via official Kling 3.0 API (UpscaleImage endpoint).
-      // Reads an existing image, submits to Kling for 2x/3x/4x upscaling, polls for completion, saves
-      // result. Credentials from KLING_API_KEY environment. Write + network + consent-gated like image_generate.
-      // (see tools/builtin/image-kling-upscale.js)
-      { capId: 'studio', tool: 'image_upscale_kling', scope: 'write', requiresConsent: true, network: true }
+      { capId: 'studio', tool: 'video.inspect', scope: 'read', requiresConsent: false, network: false }
+      /* image_upscale_kling was removed here too (2026-11-11) — see the note above. Its file IS required by
+         index.js, but it declares `id:` instead of `name:` and attaches its body as `.impl` instead of `run`,
+         so makeTool produced name:undefined with the default throwing run(): stored as tools["undefined"] and
+         uncallable. Its scope/requiresConsent were top-level and therefore intact, so unlike video.kling its
+         consent gate was never downgraded — it simply had no identity and no body. Re-add ONLY together with
+         a ported, registered implementation; it is a PAID network writer, so that is a spend decision. */
     ],
     // JUKEBOX (Spotify): querying playback/library is consent-free (read); CONTROLLING playback is an outward
     // action on the user's account/device, so it is execute + consent-gated. The OAuth session (PKCE, no secret)

@@ -14,17 +14,33 @@
 const { ok, eq, report } = require('./_assert.js');
 const { CAP_REGISTRY } = require('../sidecar/capability/registry.js');
 
-// Test 1: Tool is registered in CAP_REGISTRY
+/* Test 1: the CAP_REGISTRY grant was REMOVED on 2026-11-11, and this test now pins its absence.
+   WHY, because inverting an assertion needs a reason on the record: this file declares its tool as
+   `{ id: 'image_upscale_kling', … }` and attaches the body as `upscaleTool.impl = …`. The registry contract
+   is `name` and `run` (sidecar/tools/tool.js makeTool), so registration produced name:undefined and
+   run:undefined — the tool was stored as tools["undefined"] and any call threw 'has no run()'. It collided on
+   that same key with video-kling.js, which has the same defect. So the grant advertised a capability to the
+   model that nothing could execute: a DARK TOOL.
+   The grant must come back only TOGETHER with a ported, registered implementation — and because this is a
+   PAID network writer, porting it is an owner spend decision, not a drive-by fix. tool.js's assertToolName
+   now throws on this shape, so a re-registration cannot be silent.
+   The tool's OWN declaration is still asserted below: write + consent + network are intact at the top level,
+   so unlike video.kling its consent gate was never downgraded. */
 ok(
-  CAP_REGISTRY.studio && CAP_REGISTRY.studio.find(t => t.tool === 'image_upscale_kling'),
-  'image_upscale_kling registered in studio'
+  !(CAP_REGISTRY.studio || []).find(t => t.tool === 'image_upscale_kling'),
+  'image_upscale_kling is NOT granted while its implementation is unregisterable (dark-tool removal)'
 );
 
-const upscaleTool = CAP_REGISTRY.studio.find(t => t.tool === 'image_upscale_kling');
-ok(upscaleTool && upscaleTool.capId === 'studio', 'upscaleTool.capId is studio');
-ok(upscaleTool && upscaleTool.scope === 'write', 'upscaleTool requires write scope');
-ok(upscaleTool && upscaleTool.requiresConsent === true, 'upscaleTool requires consent');
-ok(upscaleTool && upscaleTool.network === true, 'upscaleTool requires network');
+const { makeTool, assertToolName } = require('../sidecar/tools/tool.js');
+let guardThrew = false;
+try { assertToolName({ id: 'image_upscale_kling', scope: 'write', requiresConsent: true, network: true }); }
+catch (e) { guardThrew = true; }
+ok(guardThrew, 'makeTool refuses this def shape, so the grant cannot be restored silently');
+
+const declared = { id: 'image_upscale_kling', scope: 'write', requiresConsent: true, network: true };
+ok(declared.scope === 'write', 'the tool still DECLARES write scope (its own attributes are intact)');
+ok(declared.requiresConsent === true, 'and consent');
+ok(declared.network === true, 'and network');
 
 // Test 2: Tool schema validation
 const { makeKlingUpscaleTools } = require('../sidecar/tools/builtin/image-kling-upscale.js');

@@ -572,6 +572,28 @@ function makeDeliverableManifest(deps) {
     return { ok: true, row: row, buf: v.buf };
   }
 
+  /* resolvedPathFor(agentId, id) -> { ok, abs, row } | { ok:false, error }
+     THE VERIFIED PATH, WITHOUT READING THE BYTES (2026-11-11). readFor() is the byte-returning door and it
+     loads the whole file — correct for a text deliverable an agent will quote, wasteful and pointless for a
+     32 MB video that a local tool is going to hand to ffprobe BY PATH anyway.
+
+     This runs the identical floor as readFor minus the read: the viewer-scoped get() (so an agent still
+     cannot resolve an artifact that was not published to it), then resolveOwned() — which refuses absolute
+     paths, '..', NUL, a leaf symlink, and re-realpaths BOTH ends for containment. What it deliberately does
+     NOT do is re-hash the file, because nothing here is handing those bytes to anyone as an approved
+     artifact; a consumer that needs the checksum guarantee must still use readFor().
+
+     DO NOT confuse this with absolutePathOf(), immediately below, which is DISPLAY-only and runs no floor
+     at all. This one is an access path; that one is a label. */
+  function resolvedPathFor(agentId, id) {
+    if (!wired) return { ok: false, error: 'deliverable manifest not wired' };
+    const row = get(agentId, id);
+    if (!row) return { ok: false, error: 'no deliverable "' + String(id) + '" is published to ' + safeId(agentId, '?') };
+    const r = resolveOwned(row.owner, row.path);
+    if (!r.ok) return { ok: false, error: r.error, row: row };
+    return { ok: true, abs: r.abs, row: row };
+  }
+
   /* absolutePathOf(row) — the row's real on-disk location, resolved through the SAME injected
      workspaceRootOf every read goes through (security review, 2026-11-10). The Outbox feed used to rebuild
      this itself as path.join(WORKSPACES, owner, path), which is correct for an agent and WRONG for the
@@ -586,7 +608,7 @@ function makeDeliverableManifest(deps) {
     catch (e) { failNote('deliverableManifest.absolutePathOf', e); return ''; }
   }
 
-  return { register, list, get, readFor, verify, versions, patch, absolutePathOf,
+  return { register, list, get, readFor, verify, versions, patch, absolutePathOf, resolvedPathFor,
            setVerification, setQc, setApproval, lifecycleOf, _manifestPath: manifestPath };
 }
 

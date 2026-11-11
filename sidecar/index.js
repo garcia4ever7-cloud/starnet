@@ -110,7 +110,9 @@ const transcriptStoreModule = require('./transcriptstore.js');
 const { makeTranscriptStore } = transcriptStoreModule;
 const orchestration = require('./project-orchestration.js');  // studio: blueprint/workflow state management
 const { orchestrateNextAgent, runPipelineToCompletion, setApiToken } = require('./cron-orchestrator.js');  // studio: multi-agent pipeline driver
-const { verifyVideoFile } = require('./video-verify.js');       // studio: proves a video is real before it can be KEPT
+const videoVerify = require('./video-verify.js');               // studio: proves a video is real before it can be KEPT
+const { verifyVideoFile } = videoVerify;                        // named binding kept — every existing call site is unchanged
+const VideoProbeTools = require('./tools/builtin/video-probe.js');  // video.inspect: ffprobe facts for an agent that must QC a video (ID-addressed, local, free)
 const { makeRunJournal, DISPATCH_BOUNDARY_MODEL } = require('./run-journal.js');
 const { makeAffinityIndex } = require('./agent-affinity.js');   // idle-life social graph: which agents the run log proves work together
 const RunRecovery = require('./run-recovery.js');
@@ -17548,6 +17550,14 @@ async function runOnceCore(o) {
   Todo.makeTodoTool({ store: notebookStore }).register(registry);   // in-session task plan — shares the notebook's per-agent kv store ('todo:'+agentId)
   DeliverableTool.makeDeliverableTool({ notes: deliverableNotes }).register(registry);   // deliverable_note — the agent's OWN name for what it made; drained by runOnce at run end
   OutboxTools.makeOutboxTools({ manifest: deliverableManifest }).register(registry);   // the CONSUMER door: PUBLISHER/studio read DESIGNER's registered deliverables without any cross-workspace path grant
+  /* video.inspect (2026-11-11). CAP_REGISTRY has granted this to the `studio` bay all along while NOTHING
+     registered it — QC_EDITOR's own blueprint records "video.inspect is not available … VERDICT: FAILED —
+     The media cannot be verified, so this production cannot be approved." It refused correctly, but it could
+     never do its job. Registered here beside the Outbox door because it resolves through the SAME manifest:
+     an artifact ID, never a path, so a studio video under $HOME/outbox stays reachable without widening any
+     agent's filesystem jail. See the module header for why sidecar/tools/builtin/video-inspect.js was NOT
+     wired instead (foreign tool API, unjailed absolute paths, and an execSync shell string). */
+  VideoProbeTools.makeVideoProbeTools({ manifest: deliverableManifest, videoVerify: videoVerify }).register(registry);
   makeToolSearchTool({ registry }).register(registry);   // tool.search — finds a GRANTED but unadvertised tool (CAP_REGISTRY `deferred: true`) and reveals it for the rest of the run; rides the computer object so no surface is stranded
   makeCodeTools({}).register(registry);   // code.run — child Node/vm owns no authority; every nested read returns through this run's parent dispatcher
   makeQuestTools({ store: questStore, clock: { now: () => Date.now() }, activeGoal: () => commanderGoals.get() }).register(registry);   // QUEST V2 §B + journey binding: personalized mints inherit the current goal id/domain evidence
@@ -17557,7 +17567,21 @@ async function runOnceCore(o) {
   // STUDIO, Kling video: video.kling submits a text-to-video job to the official Kling 3.0 API,
   // polls for completion, and downloads the result into the workspace. Credentials from environment
   // (KLING_API_KEY). Supports character reference images, multi-shot generation, native audio sync.
-  makeVideoKlingTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  /* video.kling IS NOT REGISTERED, and removing this call changed nothing (2026-11-11).
+     video-kling.js declares its tool as `{ properties: { id: 'video.kling', scope: 'write',
+     requiresConsent: true, network: true }, schema, async invoke() }` — the wrong contract for this registry.
+     makeTool reads def.name/def.scope/def.requiresConsent at the TOP level, so registering it produced a tool
+     named `undefined` (stored as tools["undefined"], unreachable by name) whose declared write+consent+network
+     attributes had SILENTLY DEFAULTED to scope:'read', readOnly:true, requiresConsent:false — and whose run()
+     did not exist, because the implementation is called `invoke`.
+     So this tool has never been callable by anyone. That is the real reason PRODUCER could never render a
+     video, independent of the consent gate the orchestrator cites. tool.js's assertToolName now THROWS on
+     this shape, so leaving the call here would crash the sidecar at boot — correctly.
+     NOT ported to the real contract on purpose: video.kling is a PAID, network, consent-gated writer against
+     an account this station cannot audit. Making it callable is a spend decision for the owner, not a
+     drive-by fix, and it cannot be live-verified here (the Kling wallet has historically returned code 1102).
+     The file is left on disk untouched as the port's starting point; see tools/builtin/video-probe.js for a
+     correctly-shaped studio tool. */
   // STUDIO, print-prep skill: image_print_prep turns an already-generated workspace image into genuine
   // 300-PPI print files (local @napi-rs/canvas, no network, no provider credential — works even with no
   // media route configured at all, unlike image_generate/image_analyze above).
@@ -17598,7 +17622,16 @@ async function runOnceCore(o) {
   // STUDIO, Kling image upscaling: image_upscale_kling submits an image upscaling job to the official
   // Kling 3.0 API (2x/3x/4x neural upscaling), polls for completion, and saves the result. Credentials
   // from KLING_API_KEY environment variable. Integrates with image generation pipeline.
-  makeKlingUpscaleTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+  /* image_upscale_kling IS NOT REGISTERED, and removing this call changed nothing (2026-11-11).
+     Second instance of the same defect as video.kling. image-kling-upscale.js declares its tool as
+     `{ id: 'image_upscale_kling', … }` with the body attached as `upscaleTool.impl = …`, so makeTool saw
+     name:undefined and run:undefined — the tool was stored as tools["undefined"] and any call would have
+     thrown 'tool "undefined" has no run()'. Its scope/requiresConsent ARE top-level here, so unlike
+     video.kling its consent gate was intact; it simply had no identity and no body.
+     Both nameless registrations collided on the same "undefined" key, so the second silently replaced the
+     first. tool.js's assertToolName now throws on this shape at construction.
+     NOT ported, same reason as video.kling: a PAID network writer against a wallet this station cannot
+     audit. Porting it is a spend decision for the owner. The file is left intact as the starting point. */
   // STUDIO, third skill: voice_generate — the agent MAKES a clip (voiceover, narration, audio message) into its
   // workspace. It drives the SAME media-service ladder /api/tts does (keyed neural chain, then the
   // free keyless Edge floor), so it needs no voice-specific credential and a zero-key station can still record.
