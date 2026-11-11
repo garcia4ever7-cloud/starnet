@@ -723,17 +723,24 @@ const MAX_PASSES = 12;
    'qc-missing' rather than silently passing. There is deliberately no "default allow" branch. */
 async function pipelineOutcome(projectId, workflow, passes) {
   const status = (workflow && workflow.status) || 'unknown';
-  let qc = null;
+  /* A DEFAULT false IS NOT A REFUSAL. createBlueprint() seeds every project with
+     `qceditor: { approved: false, feedback: '' }`, so reading `approved` alone would report EVERY
+     un-QC'd project as "refused" — which overstates what happened and would send someone looking for a
+     verdict that was never given. The FEEDBACK text is what distinguishes them: QC_EDITOR only ever writes
+     it by actually running (captureAgentOutput requires >= 20 characters). Empty feedback therefore means
+     QC never ran. Both outcomes are NOT approved; only the reported reason differs. */
+  let qc = undefined;      // undefined = never ran, false = ran and refused, true = ran and approved
   try {
     const bp = await orchestration.loadBlueprint(projectId);
     const slot = bp && bp.outputs && bp.outputs.qceditor;
-    qc = slot ? slot.approved : undefined;
+    const spoke = !!(slot && String(slot.feedback || '').trim());
+    qc = slot && slot.approved === true ? true : (spoke ? false : undefined);
   } catch (e) { qc = undefined; }
 
   const stagesDone = status === 'complete';
   const approved = qc === true;
   const reason = approved ? null
-    : (qc === false ? 'qc-refused: QC_EDITOR did not approve the deliverable'
+    : (qc === false ? 'qc-refused: QC_EDITOR reviewed the deliverable and did not approve it'
       : 'qc-missing: no QC_EDITOR verdict was recorded, which is not an approval');
 
   return {

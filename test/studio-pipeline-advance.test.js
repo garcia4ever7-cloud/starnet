@@ -43,8 +43,60 @@ async function seed(id) {
     wf.status = 'complete';
     await orchestration.saveWorkflow(id, wf);
     const out = await CO.runPipelineToCompletion(id, 1000);
-    A.eq(out.ok, true, 'an already-complete pipeline reports ok');
-    A.eq(out.passes.length, 0, 'and runs ZERO passes — no stage is paid for twice');
+    /* THE INTENT OF THIS CASE IS "DO NOT RE-RUN", and that is still asserted below.
+       `ok` changed meaning on 2026-11-11: it used to be `status === 'complete'`, i.e. "all four stages ran",
+       which is why a real run reported ok:true while QC_EDITOR's verdict read "VERDICT: FAILED - The media
+       cannot be verified, so this production cannot be approved." `ok` now means DELIVERABLE ACCEPTED and
+       requires the independent QC verdict as well. This fixture has no qceditor output at all, so the honest
+       answer is ok:false with qcVerdict 'absent' — missing evidence is never an approval. */
+    A.eq(out.passes.length, 0, 'an already-complete pipeline runs ZERO passes — no stage is paid for twice');
+    A.eq(out.status, 'complete', 'and still reports the stage lifecycle as complete');
+    A.eq(out.stagesComplete, true, 'stage progress is reported separately, and is true');
+    A.eq(out.ok, false, 'but ok is FALSE — no QC verdict exists, so nothing is accepted');
+    A.eq(out.qcApproved, false, 'qcApproved is false');
+    /* createBlueprint seeds qceditor.approved=false with EMPTY feedback. That is "QC never ran", not
+       "QC refused" — the feedback text is the discriminator, so this reports 'absent'. */
+    A.eq(out.qcVerdict, 'absent', 'a seeded approved:false with no feedback is ABSENT, not a refusal');
+    A.ok(/qc-missing/.test(String(out.failureReason)), 'with a reason a human can act on: ' + out.failureReason);
+  }
+
+  /* ---- the SAME workflow, once QC has actually approved, DOES report ok ---- */
+  {
+    const id = 'p-complete-approved';
+    await seed(id);
+    const wf = await orchestration.loadWorkflow(id);
+    wf.status = 'complete';
+    await orchestration.saveWorkflow(id, wf);
+    const bp = await orchestration.loadBlueprint(id);
+    bp.outputs = bp.outputs || {};
+    bp.outputs.qceditor = { feedback: 'Checked the render against the shot list. APPROVED.', approved: true };
+    await orchestration.saveBlueprint(id, bp);
+
+    const out = await CO.runPipelineToCompletion(id, 1000);
+    A.eq(out.passes.length, 0, 'still runs zero passes');
+    A.eq(out.stagesComplete, true, 'stages complete');
+    A.eq(out.qcApproved, true, 'QC approved');
+    A.eq(out.qcVerdict, 'approved', 'reported as approved');
+    A.eq(out.ok, true, 'and ONLY now is ok true — stages AND an earned QC verdict');
+    A.eq(out.failureReason, undefined, 'with no failure reason');
+  }
+
+  /* ---- a REFUSED QC verdict is distinguished from a missing one ---- */
+  {
+    const id = 'p-complete-refused';
+    await seed(id);
+    const wf = await orchestration.loadWorkflow(id);
+    wf.status = 'complete';
+    await orchestration.saveWorkflow(id, wf);
+    const bp = await orchestration.loadBlueprint(id);
+    bp.outputs = bp.outputs || {};
+    bp.outputs.qceditor = { feedback: 'VERDICT: FAILED - the media cannot be verified.', approved: false };
+    await orchestration.saveBlueprint(id, bp);
+
+    const out = await CO.runPipelineToCompletion(id, 1000);
+    A.eq(out.ok, false, 'a refused QC verdict is not ok');
+    A.eq(out.qcVerdict, 'refused', 'and is reported as refused, not as absent');
+    A.ok(/qc-refused/.test(String(out.failureReason)), 'with the refusal named: ' + out.failureReason);
   }
 
   /* ---- a failed workflow is not resumed ---- */
