@@ -11678,7 +11678,14 @@ async function handleProductionArm(req, res) {
   if (!v.ok) return json(400, { error: v.error });
   const saved = saveProductionArm(v.armed, body.by);
   if (!saved.ok) return json(500, { error: 'could not persist the authorization change: ' + saved.error });
-  console.log('[production-gate] ' + (v.armed ? 'ARMED' : 'DISARMED') + ' by owner at ' + saved.rec.at);
+  /* THE THIRD PLACE THAT SAID "by owner", and it was MISSED by the first pass of this fix (2026-11-11).
+     readArmState and saveProductionArm were corrected while this line kept hardcoding it, which the live log
+     proved immediately: the record said by:'owner-instruction-via-claude-session' and stdout still printed
+     "ARMED by owner". stdout is the only trace that survives a lost arm-state file, so a log line that
+     launders attribution is the worst of the three places to leave wrong. Prints the RECORDED label, which is
+     already sanitised and defaulted to 'unattributed' by saveProductionArm. */
+  console.log('[production-gate] ' + (v.armed ? 'ARMED' : 'DISARMED')
+    + ' at ' + saved.rec.at + ' (recorded by: ' + saved.rec.by + ' — unverified)');
   return handleProductionStatus(req, res);   // echo the fresh state from one round-trip
 }
 function handleApiSession(req, res) {

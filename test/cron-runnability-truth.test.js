@@ -249,6 +249,15 @@ const gate = require('../sidecar/production-gate.js');
   A.eq(/String\(who \|\| 'owner'\)/.test(sv), false, 'saveProductionArm no longer defaults the actor to "owner"');
   A.ok(/claimed \|\| 'unattributed'/.test(sv), 'an unclaimed change is recorded as unattributed');
   A.ok(/appendProductionArmHistory\(rec\)/.test(sv), 'and every change appends to a durable history');
+
+  /* THE THIRD SITE. The first pass of this fix corrected readArmState and saveProductionArm and MISSED the
+     stdout line in handleProductionArm, which kept printing "by owner" while the record said otherwise — the
+     live log caught it within minutes of arming. stdout is the only trace that survives a lost arm-state
+     file, so it is the worst of the three to leave laundering attribution. Pinned so it cannot regress. */
+  const ha = isrc.slice(isrc.indexOf('async function handleProductionArm'), isrc.indexOf('async function handleProductionArm') + 1600);
+  A.eq(/' by owner at '/.test(ha), false, 'the arm/disarm LOG LINE no longer hardcodes "by owner"');
+  A.ok(/recorded by: ' \+ saved\.rec\.by/.test(ha), 'it prints the recorded label instead');
+  A.ok(/unverified/.test(ha), 'and marks it unverified, like the note and the API do');
   // Scoped to the FUNCTION BODY, not the file: the helper's definition sits above saveProductionArm, so a
   // whole-file indexOf compares the wrong occurrence (this assertion failed that way on first write).
   A.ok(sv.indexOf('writeFileDurable({ fs, path }, PRODUCTION_ARM_FILE') < sv.indexOf('appendProductionArmHistory(rec)'),
