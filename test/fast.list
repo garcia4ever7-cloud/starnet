@@ -1003,3 +1003,5 @@ test/outbox-approval-route.test.js
 test/outbox-unverified-approval.test.js
 test/production-gate.test.js
 test/cron-runnability-truth.test.js
+test/memorial-business.test.js
+test/memorial-fit.test.js

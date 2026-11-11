@@ -1,0 +1,72 @@
+{
+  "orderId": "life-worth-remembering",
+  "engine": "memorial",
+  "tier": "celebration-of-life",
+  "aspect": "16:9",
+  "theme": "warm",
+  "hold": 6.0,
+  "xfade": 1.2,
+  "outputRoot": "./life-worth-remembering/render",
+
+  "_note": "DEMONSTRATION FILM. The subject is fictional and every photograph is drawn from scratch by make-demo-assets.mjs. No real person, no real family, no third-party imagery. The audio bed is synthesised in that same script: a public-domain hymn TEXT does not make a RECORDING public domain, so no hymn recording is used. Scripture is KJV, verified word for word against a KJV source — note that KJV renders LORD in small capitals where the Hebrew is YHWH, which is an existing QC checkpoint for this shop.",
+
+  "subject": {
+    "name": "Margaret Rose Whitfield",
+    "born": "1931-04-12",
+    "died": "2026-10-03"
+  },
+
+  "music": {
+    "file": "life-worth-remembering/bed.m4a",
+    "licence": "self-synthesised — no third-party rights",
+    "gainDb": -8
+  },
+
+  "photos": [
+    { "file": "life-worth-remembering/in/01.jpg", "caption": "Margaret, aged four" },
+    { "file": "life-worth-remembering/in/02.jpg", "caption": "The family garden" },
+    { "file": "life-worth-remembering/in/03.jpg", "caption": "Her mother, Elsie" },
+    { "file": "life-worth-remembering/in/04.jpg", "caption": "School, Bell Lane" },
+    { "file": "life-worth-remembering/in/05.jpg", "caption": "Sunday best" },
+    { "file": "life-worth-remembering/in/06.jpg", "caption": "The long field" },
+    { "file": "life-worth-remembering/in/07.jpg", "caption": "A wedding morning" },
+    { "file": "life-worth-remembering/in/08.jpg", "caption": "Thomas" },
+    { "file": "life-worth-remembering/in/09.jpg", "caption": "The house on Bell Lane" },
+    { "file": "life-worth-remembering/in/10.jpg", "caption": "First winter" },
+    { "file": "life-worth-remembering/in/11.jpg", "caption": "The kitchen table" },
+    { "file": "life-worth-remembering/in/12.jpg", "caption": "Summers by the sea" },
+    { "file": "life-worth-remembering/in/13.jpg", "caption": "Three children" },
+    { "file": "life-worth-remembering/in/14.jpg", "caption": "The allotment" },
+    { "file": "life-worth-remembering/in/15.jpg", "caption": "Harvest" },
+    { "file": "life-worth-remembering/in/16.jpg", "caption": "Choir practice" },
+    { "file": "life-worth-remembering/in/17.jpg", "caption": "The caravan" },
+    { "file": "life-worth-remembering/in/18.jpg", "caption": "Every Easter" },
+    { "file": "life-worth-remembering/in/19.jpg", "caption": "Grandchildren" },
+    { "file": "life-worth-remembering/in/20.jpg", "caption": "Still gardening" },
+    { "file": "life-worth-remembering/in/21.jpg", "caption": "The old walk" },
+    { "file": "life-worth-remembering/in/22.jpg", "caption": "Eighty candles" },
+    { "file": "life-worth-remembering/in/23.jpg", "caption": "Tea, always" },
+    { "file": "life-worth-remembering/in/24.jpg", "caption": "The sea again" },
+    { "file": "life-worth-remembering/in/25.jpg", "caption": "Four generations" },
+    { "file": "life-worth-remembering/in/26.jpg", "caption": "Her chair by the window" },
+    { "file": "life-worth-remembering/in/27.jpg", "caption": "The last garden" },
+    { "file": "life-worth-remembering/in/28.jpg", "caption": "Ninety years" },
+    { "file": "life-worth-remembering/in/29.jpg", "caption": "Hands" },
+    { "file": "life-worth-remembering/in/30.jpg", "caption": "The last spring" }
+  ],
+
+  "cards": [
+    { "at": "open", "type": "title", "hold": 6.0 },
+
+    { "after": 10, "type": "verse", "hold": 6.5, "translation": "KJV", "ref": "Psalm 23:4",
+      "text": "Yea, though I walk through the valley of the shadow of death, I will fear no evil: for thou art with me; thy rod and thy staff they comfort me." },
+
+    { "after": 20, "type": "verse", "hold": 6.5, "translation": "KJV", "ref": "John 14:2",
+      "text": "In my Father's house are many mansions: if it were not so, I would have told you. I go to prepare a place for you." },
+
+    { "at": "close", "type": "verse", "hold": 7.0, "translation": "KJV", "ref": "Revelation 21:4",
+      "text": "And God shall wipe away all tears from their eyes; and there shall be no more death, neither sorrow, nor crying, neither shall there be any more pain: for the former things are passed away." },
+
+    { "at": "close", "type": "closing", "hold": 6.0, "line": "In loving memory" }
+  ]
+}

@@ -230,3 +230,11 @@ website/**/*.bak
 # ...and any dated copy of it. `.env.local.bak-20261030` holds a real HF_KEY value and was NOT
 # matched by either `.env.local` or `*.bak`, so a single `git add -A` would have published the key.
 .env.local.*
+
+# memorial/ RENDER OUTPUT — source is tracked, generated media is not (2026-11-11).
+# The engine's examples render to 116 MB of mp4/jpg/m4a, including byte-identical
+# intermediates in render/work/. This station already carries a 1.445 GB shadow-repo
+# problem that drove CPU to 67C; generated media must never enter the real repo.
+# Regenerate with: node memorial/examples/make-demo-assets.mjs && node memorial/cli.mjs
+memorial/**/render/
+memorial/examples/*/
