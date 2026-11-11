@@ -359,9 +359,25 @@ A.eq(Policy.canMutate({ status: 'executing' }, { scope: 'execute' }).ok, true, '
   A.ok(/bufferedTaskEnd/.test(indexSrc) && /taskQuestionAsked\s*\?\s*'clarifying'/.test(indexSrc) && !/taskQuestionAsked\s*\?\s*'cancelled'/.test(indexSrc), 'clarification ends as the honest additive clarifying terminal before global completed-work listeners run');
   // Lane D — the additive contract change: 'clarifying' joined the run-end enum; every prior reason survives.
   const eventsSrc = fs.readFileSync(path.join(__dirname, '../shared/events.js'), 'utf8');
-  const reasonEnum = /'agent\.run\.end'[\s\S]{0,1500}?reason:\s*\{\s*enum:\s*\[([^\]]+)\]/.exec(eventsSrc);
+  /* SCOPED TO THE EVENT'S OWN BLOCK, not to a character budget (2026-11-11). This used to allow at most 1500
+     chars between 'agent.run.end' and its `reason: { enum: … }`, which made the assertion break on COMMENT
+     LENGTH: documenting the additive 'refused' value pushed the enum to 2587 chars away, the regex returned
+     null, and the next line threw on `reasonEnum[1]`. A contract test must fail when the CONTRACT changes, not
+     when someone explains it — the enum was correct and additive the whole time.
+     Slicing to the next event key is also STRICTER than the old window: a 1500-char budget could in principle
+     run past a short event definition and match a neighbour's `reason` enum, which this cannot. */
+  const endAt = eventsSrc.indexOf("'agent.run.end'");
+  A.ok(endAt > 0, "the agent.run.end contract is declared in shared/events.js");
+  const nextKeyRe = /\n\s*'[a-z][a-zA-Z.]*':\s*(obj\(|\{)/g;
+  nextKeyRe.lastIndex = endAt + 1;
+  const nextKey = nextKeyRe.exec(eventsSrc);
+  const endBlock = eventsSrc.slice(endAt, nextKey ? nextKey.index : eventsSrc.length);
+  const reasonEnum = /reason:\s*\{\s*enum:\s*\[([^\]]+)\]/.exec(endBlock);
   A.ok(reasonEnum, 'run-end reason enum is declared in the shared contract');
-  for (const r of ['done', 'max_iters', 'budget', 'cancelled', 'error', 'refusal', 'empty', 'clarifying']) {
+  /* ADDITIVE-ONLY: every one of these must survive forever. 'refused' joined 2026-11-11 (the production gate
+     has always emitted it and shared/emitter.js was DROPPING the event as unvalidatable, so a gate-refused run
+     emitted run.start with no matching run.end). */
+  for (const r of ['done', 'max_iters', 'budget', 'cancelled', 'error', 'refusal', 'empty', 'clarifying', 'refused']) {
     A.ok(reasonEnum[1].indexOf("'" + r + "'") >= 0, 'run-end reason enum carries ' + r + ' (additive-only contract)');
   }
   A.ok(/reason === 'clarifying'\) return ''/.test(hubSrc), 'channel endNote treats a clarifying end as the reply itself, never a stopped note');
