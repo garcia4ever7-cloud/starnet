@@ -1747,3 +1747,81 @@ admission"), so "production disarmed" does not stop unattended shell activity �
 script, so this is latent, and the gate's purpose is model spend. Connector secrets (Apify/Airtable/Exa) sit in
 `workspaces/connectors/state.json` in **plaintext** at mode 0600, which contradicts the secrets law and deserves
 its own look.
+
+## 2026-11-11 (later) — PRODUCTION IS NOW ARMED. And the gate was never the only blocker.
+
+**Owner instruction, executed: production is permanently armed** (persisted `armed:true`, survives restart).
+`.production-arm.json` = `{"armed":true,"at":"2026-11-11T02:34:11.163Z","by":"owner-instruction-via-claude-session"}`
+and the new `.production-arm.log.jsonl` holds the audit trail. **Disarm with**
+`POST /api/production/arm {"armed":false}` — the gate code is intact and was deliberately NOT removed; only
+its switch was flipped, so the control remains available.
+
+### Gate OFF verified to preserve baseline
+
+`decide({armed:true, …})` returns `allow:true, because:'armed'` on **all 14** metered x surface combinations,
+and the three disarmed allow-paths are unchanged (`unmetered`, `interactive`, and the refusal itself). Live
+after arming: `production.blockedJobs: 0`, all three routines `gateBlocked=false / because=armed`, with
+`nextRunAt`, `enabled` flags (3 armed of 8) and disabled-routine behaviour untouched.
+
+### I WAS WRONG: arming DID restore motion
+
+Earlier in this session I wrote that arming alone "would NOT restore motion — it would produce 429s." **That
+was wrong, and a live run disproved it.** The Gemini free tier is **20 requests per DAY and it resets**, so on
+a fresh UTC day the lane works. Fired `7b22107c` (Etsy Scout, single agent) at 2026-11-11T02:36Z:
+
+```
+cron.fire  runId=d82930bb-46db-4213-b1a7-6b4fd6bff1a9
+[production-gate] REFUSED lines since the fire: 0        <- the gate did not block it
+run record: surface=autonomous reason=done turns=4 tokens=105642 usd=0.026984775
+            model=gemini-flash-lite-latest  failureStage/(none) failureCode/(none)
+toolTrace:  fs_read ok | fs_write ok "wrote scout-cap-reached-report-2026-10-21.md (344 B)"
+            | deliverable_note ok          toolsOk=3  artifacts=1
+cron row:   lastStatus ok (was declined) | lastReason done | lastUsd 0.0270 | lastError (none)
+```
+
+`reason:done` alone proves nothing on this station, so note the **toolTrace with three successful calls** and
+a **real 344-byte file on disk** — that is the evidence standard, not the terminal.
+
+**This is the first end-to-end proof here of: armed gate → unattended cron fire → real tool work → file
+written → AUTO-REGISTERED → honest four-axis state.** The deliverable became Outbox row **54** as
+`lifecycle: STAGED, verification: unverified, approval: pending` — a brand-new artifact correctly claiming
+nothing, which validates the 2026-11-10 honesty work in production rather than in a test.
+
+**The daily cap is the live constraint now.** That run used ~4-6 of the 20/day Gemini requests. The Etsy chain
+(`ebc4f07d`, 11:00 UTC, three dispatched agents) is far hungrier and will likely exhaust the quota — and with
+an **empty fallback chain** there is nowhere to rotate. Spend after the fire: `spentToday $0.028`, lifetime
+**$123.39**.
+
+### THE DANGEROUS COMBINATION NOW LIVE — `perRun: 0` with production armed
+
+`budget.json` still has **`perRun: 0`, i.e. NO per-run spend ceiling**, so `runCapUsd = Infinity` and the
+worst-observed-turn reservation cannot fire. Unattended runs are now enabled with no per-run bound, on a
+station whose history contains **19 runs over $1 (worst $3.5466)** and whose lifetime spend already exceeds the
+stated $100. Either set `perRun` (the shipped default is `1.00`) or set `maxCostUsd` per routine — the cron job
+record already supports it. **Owner decision; not changed here.**
+
+### Regression verification — the honest numbers
+
+All **1002** gate steps run INDIVIDUALLY (the gate itself still halts at 219/1004 on the pre-existing
+`workshop-undo.e2e`): **13 failures**. Each was then re-run against the fully restored pre-work modules:
+
+- **12 are PRE-EXISTING** — `workshop-undo.e2e`, `workshop-implement.e2e`, `qa-product-perfect-claims`,
+  `image-qc`, `crt-context-loss.e2e`, `world-sharpen`, `worldlight-receiver`, `routing.b5`,
+  `lint-determinism`, `failopen-ratchet`, `skin-study-preview`, `projection-load-geometry`. Matches this
+  file's documented count of 12 exactly.
+- **1 was MINE**, and I nearly shipped it claiming zero: `taskintent` asserted the run-end enum with a regex
+  allowing **1500 chars** between `'agent.run.end'` and `reason:{enum:…}`; my explanatory comment pushed it to
+  **2587**, the regex returned null and the next line threw. **The contract was additive and correct the whole
+  time.** Fixed by anchoring to the event's own block — stricter than a char budget, and verified to still fail
+  when `cancelled` is deleted from the enum. `a3cc291aa`.
+
+**`failopen-ratchet` correction:** this file said `index.js` empty-catch count was **362**. It is **370**, and
+it was 370 in the pre-phase-1 backup, the pre-phase-2 backup, and now — measured by running the ratchet against
+all three. **I added zero**; the 362 figure was stale and the ratchet failure is pre-existing.
+
+### Commits (local to `feat/harness-backend`, NOT pushed)
+
+`da18e7614` the three truthful-telemetry fixes + the manifest/outbox hardening ·
+`2f5f3486c` the arm/disarm log line that still laundered attribution (missed by the first pass, caught by the
+live log within minutes) · `a3cc291aa` the taskintent regression. The 9 pre-existing untracked items
+(`memorial/`, `PROGRESS.md`, `pnpm-*`, …) were deliberately left unstaged.
