@@ -1238,11 +1238,32 @@ function productionArmState() {
   catch (e) { raw = (e && e.code === 'ENOENT') ? null : { __unreadable: String((e && e.code) || (e && e.message) || e) }; }
   return productionGate.readArmState(raw, process.env.STARNET_PRODUCTION_ARMED);
 }
+/* An APPEND-ONLY history of authorization changes, beside the single current-state record (2026-11-11).
+   Without it, "who turned production off and when" was recoverable only from stdout — which this station
+   duplicates every line into and rotates, so one event reads as two and old events vanish. Reconstructing the
+   2026-11-03 disarm took a log grep plus arithmetic against a memory note. An authorization control is
+   precisely the thing that deserves a durable trail, and it is two lines of code.
+   Best-effort by design: a failure to APPEND must never block the arm/disarm itself, because refusing to
+   record is not a reason to refuse to stop production. The current-state write stays the durable one. */
+const PRODUCTION_ARM_LOG = path.join(WORKSPACES, '.production-arm.log.jsonl');
+function appendProductionArmHistory(rec) {
+  try {
+    fs.mkdirSync(WORKSPACES, { recursive: true });
+    fs.writeFileSync(PRODUCTION_ARM_LOG, JSON.stringify(rec) + '\n', { flag: 'a', mode: 0o600 });
+  } catch (e) { failNote('production.armHistory', e); }
+}
 function saveProductionArm(armed, who) {
-  const rec = { armed: !!armed, at: new Date().toISOString(), by: String(who || 'owner') };
+  /* `by` DEFAULTED TO 'owner', which manufactured an attribution nobody supplied — and that default is what
+     the live record carries. Every /api route rides one shared token, so the host cannot tell the owner's own
+     click from any other token-holder's POST; the honest default is to say nothing was claimed. Kept as a
+     free-text LABEL (sanitised, bounded) exactly like the Outbox approval route's `by`: an audit hint, never
+     an authority claim. */
+  const claimed = String(who == null ? '' : who).replace(/[^\w .@:-]/g, '').trim().slice(0, 64);
+  const rec = { armed: !!armed, at: new Date().toISOString(), by: claimed || 'unattributed' };
   try {
     fs.mkdirSync(WORKSPACES, { recursive: true });
     writeFileDurable({ fs, path }, PRODUCTION_ARM_FILE, JSON.stringify(rec));
+    appendProductionArmHistory(rec);
     return { ok: true, rec };
   } catch (e) {
     // Never report success for an authorization change that did not persist — a run after the next restart
@@ -13108,12 +13129,76 @@ function cronStateSnapshot(now) {
   // halted says the timer is frozen anyway, so the panel can say "paused by E-STOP" instead of a false "armed".
   // `inFlight` (additive, bug-sweep 2026-08-28): real per-job lease state (mirrors the loops snapshot's
   // inFlight) so the panel can gray RUN NOW on a routine that is genuinely running instead of double-firing.
+  /* WILL THE NEXT FIRE ACTUALLY RUN? (2026-11-11 — truthful telemetry, forward-looking.)
+     `enabled` + `nextRunAt` describe the SCHEDULE. They say nothing about whether the run is permitted, and
+     the owner-authorization gate (production-gate.js) refuses an unattended metered run before any provider
+     call. Those two facts lived in different places, so every surface that renders a next-run time was
+     counting down to work the harness already knew would be refused.
+
+     THAT IS NOT HYPOTHETICAL — it is how this station came to sit idle. Measured 2026-11-11: production was
+     disarmed on 2026-11-03T21:36Z, three routines stayed armed and every fire since was declined, ZERO
+     autonomous runs completed in those 8 days, and the dashboard still read "next routine: 5h" the whole
+     time. A refused fire is not even written to runs.jsonl (it is refused before runStore.record), so the
+     run log cannot answer "has my station been working?" either. The only trace was `lastError` on the cron
+     row, which no surface rendered.
+
+     COMPUTED BY CALLING THE GATE, never by re-deriving its rule — a second copy of an authorization decision
+     is how two safety controls end up disagreeing about the same run. `cronProviderFor` is the same resolver
+     the driver passes as `providerForJob`, and a scheduled fire is ALWAYS surface 'autonomous' (the driver
+     sets it; a missing surface defaults to autonomous inside the gate anyway).
+
+     NO noAgent EXCEPTION, deliberately: the gate itself does not make one, so neither does this. Reporting a
+     script routine as runnable when the gate would refuse it would restore exactly the lie being fixed. */
+  const arm = productionArmState();
+  /* A HALF-TRUE READINESS SIGNAL IS ITS OWN TRAP, so this reports every blocker the host can know for free,
+     not just the gate: the authorization verdict, a missing model, and a missing credential. All three are
+     already computed by the functions the DRIVER itself uses at fire time (cronProviderFor / cronModelFor /
+     cronHasCredential — see its `configIssue` branch), they were simply never surfaced ahead of the fire.
+     What is deliberately NOT claimed here is provider CREDIT: knowing a wallet is empty needs a billed API
+     call, so an exhausted-quota routine still reports runnable. The last fire's own `lastStatus`/`lastError`
+     is the honest signal for that, and it is already on the row. */
+  const gateFor = (job) => {
+    try {
+      const provider = cronProviderFor(job);
+      const unmetered = !!((getProviderProfile(provider) || {}).unmetered);
+      const v = productionGate.decide({ armed: arm.armed, metered: !unmetered, surface: 'autonomous' });
+      if (!v.allow) return { blocked: true, code: v.code || '', because: v.because, provider: provider };
+      // Config blockers are only asked about once authorization would allow the run — reporting
+      // "no credential" on a routine the gate would refuse anyway buries the deciding reason.
+      if (!job.noAgent) {
+        if (!cronModelFor(job)) return { blocked: true, code: 'NO_MODEL', because: 'no model configured', provider: provider };
+        if (!cronHasCredential(provider, cronKeyFor(provider))) {
+          return { blocked: true, code: 'NO_CREDENTIAL', because: 'provider "' + provider + '" has no usable credential', provider: provider };
+        }
+      }
+      return { blocked: false, code: '', because: v.because, provider: provider };
+    } catch (e) {
+      // A failure to JUDGE must not be reported as "runnable" — that is the fail-open direction. Say unknown.
+      failNote('cron.gateVerdict', e);
+      return { blocked: null, code: '', because: 'unknown', provider: '' };
+    }
+  };
+  let blockedCount = 0;
   const jobs = (Array.isArray(cronJobs) ? cronJobs : []).map(j => {
     if (!j || !j.id) return j;
     const lease = cronDriver.leases.get(j.id);
-    return (lease && !lease.settlement) ? Object.assign({}, j, { inFlight: true }) : j;
+    const extra = {};
+    if (lease && !lease.settlement) extra.inFlight = true;
+    if (j.enabled !== false) {
+      const g = gateFor(j);
+      extra.gateBlocked = g.blocked;
+      extra.gateCode = g.code;
+      extra.gateBecause = g.because;
+      if (g.blocked === true) blockedCount++;
+    }
+    return Object.keys(extra).length ? Object.assign({}, j, extra) : j;
   });
   return { jobs: jobs, enabled: cronArmed, halted: cronHalted, tickMs: CRON_TICK_MS, health: health,
+    /* The authorization half of "is my station working", beside the schedule half. `blockedJobs` counts ARMED
+       routines whose next fire would be refused as things stand — 0 when production is armed. `by` is the
+       recorded attribution LABEL and is never evidence of who acted (see saveProductionArm). */
+    production: { armed: arm.armed, source: arm.source, note: arm.note, by: arm.by || '', at: arm.at || '',
+                  refusalCode: productionGate.CODE, blockedJobs: blockedCount },
     degraded: cronDegraded ? { quarantinePath: cronDegraded.quarantinePath, since: cronDegraded.since } : null,
     maxConsecutiveFailures: CRON_MAX_CONSECUTIVE_FAILURES,
     // the delivery backlog ceiling the driver defers new runs at (cron-store) — the panel quotes it, never a copy
@@ -22425,7 +22510,10 @@ async function serveOutbox(req, res) {
   // absolutePath is for DISPLAY ("exact original file location") and is explicitly NOT an access mechanism:
   // /api/artifact ignores any path a caller sends and resolves from the row itself.
   const out = rows.map(r => Object.assign({}, r, {
-    absolutePath: path.join(WORKSPACES, String(r.owner || ''), String(r.path || '')),
+    // Resolved by the manifest's own injected workspaceRootOf, NOT rebuilt here — the local rebuild was wrong
+    // for the 'studio' pseudo-producer (root $HOME/outbox), so four live rows advertised a path that does not
+    // exist on disk. See deliverable-manifest.absolutePathOf().
+    absolutePath: deliverableManifest.absolutePathOf(r),
     retrieve: '/api/artifact?id=' + encodeURIComponent(r.id) + '&agent=' + encodeURIComponent(viewer)
   }));
   return json(200, { ok: true, viewer: viewer, count: out.length, rows: out });
@@ -22484,14 +22572,65 @@ async function handleOutboxApproval(req, res) {
   const status = String(parsed.body.status || '').trim();
   if (!APPROVAL_STATES.has(status)) return json(400, { ok: false, error: 'invalid approval status', accepts: accepts });
 
+  /* APPROVING BYTES THE HOST NEVER PROVED MUST BE DELIBERATE (2026-11-10). Measured live before this gate:
+     every one of the 53 visible rows read approval:pending, and 35 of them had verification:'unverified'
+     because the verification axis is auto-wired for studio VIDEO only — no host pass exists yet for images or
+     files. So the overwhelmingly common case was a two-tap approval of an artifact nothing had decoded, which
+     is the 1,056-byte-placeholder failure wearing a green pill.
+
+     This is a SPEED BUMP, NOT A VETO. The Commander keeps the final word — the station's rule is that spend
+     and publish decisions are the owner's — but the override has to be asked for by name and it lands in the
+     audit trail, so "approved" can never be something that happened by accident. `rejected` and `pending` are
+     deliberately NOT gated: refusing or un-deciding an unverified artifact needs no ceremony, and gating them
+     would make the safe action harder than the risky one. */
+  const needsAck = status === 'approved' && String(parsed.row.verification || '') !== 'passed';
+  if (needsAck && parsed.body.acknowledgeUnverified !== true) {
+    return json(409, {
+      ok: false,
+      error: 'this artifact has never passed host verification (verification: ' + String(parsed.row.verification || 'unverified')
+        + ') — approving it asserts quality the harness cannot prove. Re-send with acknowledgeUnverified:true to '
+        + 'approve it anyway; that override is recorded in the approval detail.',
+      verification: String(parsed.row.verification || 'unverified'),
+      needsAcknowledgement: true
+    });
+  }
+
+  /* THE HOST'S STAMPS ARE RESERVED SPACE, NOT AN APPEND (security review, 2026-11-10 — this was a real defect
+     in the first version of this gate, caught by audit and verified by replay). `parsed.detail` is ALREADY
+     clamped to 400 by readJudgmentRequest, and `patch()` clamps the stored field to 400 as well. So appending
+     the stamp and THEN truncating meant a caller who simply filled `detail` with 400 characters pushed the
+     override notice off the end — the manifest recorded `approval: approved` with the caller's own text and no
+     trace that host verification had been overridden, while the comment here claimed the opposite. The
+     manifest IS the audit trail ("the audit trail is the whole point of this index", patch()), and the panel
+     renders approvalDetail verbatim as "Commander:", so the laundered string was what the owner would read.
+     The stamps are therefore composed FIRST and the caller's portion is truncated into what is left over. */
+  const stamps = [];
+  if (needsAck) stamps.push('APPROVED WITHOUT HOST VERIFICATION (verification: ' + String(parsed.row.verification || 'unverified') + ')');
+  /* SELF-OWNED APPROVAL IS RECORDED, NOT REFUSED. OUTBOX_COMMANDER is 'agent' — NIGHT4CHRIST's own agentId —
+     so the Commander is also a producing agent, and `approvedBy === owner` cannot distinguish "the human owner
+     approved the Commander's work" from "the Commander approved its own". Refusing it would be wrong: the owner
+     legitimately acts AS 'agent' and must be able to approve that agent's deliverables. QC can refuse a
+     self-review because a reviewer is NAMED and substitutable; the Commander is not. So the asymmetry is
+     deliberate — approval records the overlap instead of blocking it. */
+  if (status === 'approved' && String(parsed.row.owner || '') === OUTBOX_COMMANDER) {
+    stamps.push('SELF-OWNED (approver is also the producing agent ' + OUTBOX_COMMANDER + ')');
+  }
   const label = String(parsed.body.by || '').trim().slice(0, 64);
-  const detail = label ? (parsed.detail ? label + ': ' + parsed.detail : label) : parsed.detail;
+  const caller = label ? (parsed.detail ? label + ': ' + parsed.detail : label) : parsed.detail;
+  const stamp = stamps.length ? stamps.join(' · ') : '';
+  let detail;
+  if (!stamp) detail = caller.slice(0, 400);
+  else {
+    const room = 400 - stamp.length - 3;                       // 3 = the ' — ' joiner
+    detail = (room > 0 && caller ? caller.slice(0, room) + ' — ' : '') + stamp;
+  }
   let r;
   try { r = deliverableManifest.setApproval(parsed.id, status, OUTBOX_COMMANDER, detail); }
   catch (e) { failNote('outbox.approval', e); return json(500, { ok: false, error: 'approval failed' }); }
   if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the approval: ' + ((r && r.error) || 'unknown'), accepts: accepts });
 
-  console.log('[outbox] approval ' + status + ' by owner on ' + parsed.id + ' at ' + r.row.amendedAt);
+  console.log('[outbox] approval ' + status + ' by owner on ' + parsed.id + ' at ' + r.row.amendedAt
+    + (needsAck ? ' [UNVERIFIED-OVERRIDE]' : ''));
   return json(200, { ok: true, id: parsed.id, row: Object.assign({}, r.row, { lifecycle: deliverableManifest.lifecycleOf(r.row) }) });
 }
 

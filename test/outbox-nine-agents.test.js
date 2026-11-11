@@ -169,8 +169,17 @@ function shareFor(agentId) {
     const afterQc = manifest.get(COMMANDER, designId);
     A.eq(afterQc.approval, 'pending', 'QC passing does NOT approve it');
     A.eq(lifecycleOf(afterQc), 'QC_REVIEWED', 'the lifecycle says QC_REVIEWED, not APPROVED');
+    /* APPROVAL ALONE DOES NOT REACH 'APPROVED' (2026-11-10). This artwork is QC-passed but the host has never
+       verified its bytes, so the Commander's approval lands as APPROVED_UNVERIFIED — a human opinion may be
+       overridden, a missing mechanical proof may not be papered over. Only once verification passes does the
+       ladder reach plain APPROVED. Asserted in both directions so neither half can regress alone. */
     manifest.setApproval(designId, 'approved', COMMANDER, 'ship it');
-    A.eq(lifecycleOf(manifest.get(COMMANDER, designId)), 'APPROVED', 'only the Commander can take it to APPROVED');
+    A.eq(manifest.get(COMMANDER, designId).verification, 'unverified', 'the host never verified this artwork');
+    A.eq(lifecycleOf(manifest.get(COMMANDER, designId)), 'APPROVED_UNVERIFIED',
+      'approving unverified bytes reads APPROVED_UNVERIFIED, never a plain APPROVED');
+    manifest.setVerification(designId, 'passed', '2400x3000 @300dpi, sha256 re-verified');
+    A.eq(lifecycleOf(manifest.get(COMMANDER, designId)), 'APPROVED',
+      'only the Commander can take it to APPROVED — and only over bytes the host proved');
     // And every one of the nine is barred from self-QC, not just DESIGNER.
     for (const id of NINE) {
       const own = manifest.list(COMMANDER, { projectId: 'readiness', owner: id })[0];

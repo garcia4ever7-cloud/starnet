@@ -48,7 +48,9 @@
     approval: { approved: 'good', pending: 'warn', rejected: 'bad' }
   };
   const LIFECYCLE_CLASS = {
-    APPROVED: 'good', QC_REVIEWED: 'good', VERIFIED: 'off', STAGED: 'off', CREATED: 'off',
+    // APPROVED_UNVERIFIED is 'warn', NOT 'good': the Commander cleared it but the host never proved the bytes.
+    // Colouring it green would re-merge the two facts the manifest splits them to keep apart.
+    APPROVED: 'good', APPROVED_UNVERIFIED: 'warn', QC_REVIEWED: 'good', VERIFIED: 'off', STAGED: 'off', CREATED: 'off',
     NEEDS_REVIEW: 'warn', REJECTED: 'bad', FAILED: 'bad', MISSING: 'bad', SUPERSEDED: 'off'
   };
 
@@ -117,12 +119,30 @@
        and a Commander clicking it on a reviewer's behalf would hollow out the independence the axis exists
        to enforce (the manifest refuses a producer QC-ing itself for the same reason). QC is set by
        POST /api/outbox/qc, which names the reviewer. */
+    /* THE UNVERIFIED OVERRIDE IS NAMED ON THE BUTTON, not hidden behind a retry (2026-11-10). The host refuses
+       a plain approve on an artifact whose verification axis is not 'passed' (409 + needsAcknowledgement), so
+       the panel must either carry the acknowledgement or show the Commander a dead button. It carries it — but
+       the label says what is being overridden, because an "Approve" that silently also means "and I accept
+       that nothing checked this file" is the kind of merged claim this whole panel exists to prevent. */
+    const unverified = String(r.verification || '') !== 'passed';
     const decided = r.approval === 'approved' || r.approval === 'rejected';
+    /* A SUPERSEDED ROW GETS NO VERDICT CONTROLS (security review, 2026-11-10). get() is viewer-scoped through
+       list(), which excludes superseded rows unless includeSuperseded is set — and there is no way to pass that
+       flag through get(). So the host answers 403 for a superseded id on BOTH judgment routes and 404 on
+       /api/artifact. The panel offers a "show superseded" checkbox, so these rows really do appear, and before
+       this they appeared with live Approve/Reject buttons that could only ever fail — the dead button this
+       panel's own comment forbids. The right verdict target is the successor version, not the retired row. */
+    const retired = !!r.supersededBy;
     html += '<div class="obx-actions">'
       + '<a class="obx-get" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">Open the original file</a>'
-      + '<button type="button" class="obx-act obx-approve" data-act="approved" data-id="' + esc(r.id) + '">Approve</button>'
-      + '<button type="button" class="obx-act obx-reject" data-act="rejected" data-id="' + esc(r.id) + '">Reject</button>'
-      + (decided ? '<button type="button" class="obx-act obx-undo" data-act="pending" data-id="' + esc(r.id) + '">Reset to pending</button>' : '')
+      + (retired
+        ? '<p class="obx-warnline">Superseded by a newer version — judge that one instead. The host will not record a verdict on a retired row.</p>'
+        : (unverified ? '<p class="obx-warnline">Never verified by the harness — approving this records an explicit override.</p>' : '')
+          + '<button type="button" class="obx-act obx-approve" data-act="approved"'
+          + (unverified ? ' data-unverified="1"' : '') + ' data-id="' + esc(r.id) + '">'
+          + (unverified ? 'Approve (unverified)' : 'Approve') + '</button>'
+          + '<button type="button" class="obx-act obx-reject" data-act="rejected" data-id="' + esc(r.id) + '">Reject</button>'
+          + (decided ? '<button type="button" class="obx-act obx-undo" data-act="pending" data-id="' + esc(r.id) + '">Reset to pending</button>' : ''))
       + '</div>';
     return html + '</article>';
   }
@@ -171,14 +191,18 @@
 
      No token header is set here on purpose: harness.js hardens window.fetch to attach X-StarNet-Token to
      same-origin /api/ URLs, and hand-rolling it risks leaking the token to a third-party URL. */
-  async function judge(id, status, detail, fetchImpl) {
+  async function judge(id, status, detail, fetchImpl, acknowledgeUnverified) {
     const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
     if (!doFetch) return { ok: false, error: 'no fetch available' };
     try {
+      const payload = { id: String(id || ''), status: String(status || ''), detail: String(detail || '') };
+      // Only ever sent for an APPROVE, and only when the caller genuinely armed the override. Sending it
+      // unconditionally would make the host's 409 unreachable and quietly restore the old behaviour.
+      if (acknowledgeUnverified === true && String(status) === 'approved') payload.acknowledgeUnverified = true;
       const res = await doFetch(apiBase() + '/api/outbox/approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ id: String(id || ''), status: String(status || ''), detail: String(detail || '') })
+        body: JSON.stringify(payload)
       });
       let body = {};
       try { body = await res.json(); } catch (_) { body = {}; }
@@ -287,17 +311,22 @@
       const act = el.getAttribute('data-act');
       if (!id || !act) return;
 
+      // The override rides the BUTTON's own marker, re-read at commit time from the element that was armed,
+      // so a refresh between the two taps cannot carry a stale acknowledgement onto a different row.
+      const ack = el.getAttribute('data-unverified') === '1' && act === 'approved';
       if (!armed || armed.el !== el) {
         disarm();
         armed = { el: el, label: el.textContent, id: id, act: act };
-        el.textContent = 'Tap again to confirm';
+        el.textContent = ack ? 'Tap again: approve UNVERIFIED' : 'Tap again to confirm';
         el.classList.add('obx-armed');
         armedTimer = setTimeout(disarm, 5000);
         return;
       }
       disarm();
       el.disabled = true;
-      const r = await judge(id, act, 'set from the Outbox panel');
+      const r = await judge(id, act, ack
+        ? 'approved from the Outbox panel with the unverified override'
+        : 'set from the Outbox panel', null, ack);
       el.disabled = false;
       if (!r.ok) {
         /* Surface it and do NOT refresh: a silent re-render would repaint the old pill and read as

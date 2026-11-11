@@ -56,7 +56,25 @@
       // Task Brief question — a clean model turn that is neither completed work nor a cancellation. Every
       // consumer that keys success on reason === 'done' treats it as neutral, exactly like 'cancelled' did
       // while it overloaded that terminal.
-      reason: { enum: ['done', 'max_iters', 'budget', 'cancelled', 'error', 'refusal', 'empty', 'clarifying'] },
+      // ADDITIVE 2026-11-10: 'refused' — the OWNER-AUTHORIZATION gate (sidecar/production-gate.js) declined an
+      // unattended metered run before any model call. Distinct from 'refusal', which is the MODEL declining a
+      // task; this one is the host declining to start at all, at usd 0.
+      //
+      // WHY THIS WAS A BUG AND NOT A COSMETIC GAP. sidecar/index.js (search '[production-gate] REFUSED') has
+      // always emitted reason:'refused', and this emitter DROPS what it cannot validate ("malformed payloads
+      // never reach the bus", shared/emitter.js). So a gate-refused run emitted agent.run.start and then NO
+      // matching agent.run.end — every start/end pairing consumer saw a run that began and never finished,
+      // which is the interface asserting work in progress that is not in progress. Found live: 17 dropped
+      // events in sidecar.log (~halved for the known duplicate-line issue) across three cron fires on
+      // 2026-11-10, all 'invalid-event agent.run.end $.reason: "refused" not in enum'.
+      //
+      // FIXED ON THE SCHEMA SIDE, NOT THE EMITTER, deliberately: 'refused' is load-bearing elsewhere —
+      // cron-store.js (search "=== 'refused'") keys on it to mark the occurrence DECLINED, which is what keeps
+      // a safety refusal from touching the failure streak and auto-disabling the owner's routine. Renaming the
+      // emitted value to 'refusal' would have silently re-armed that auto-disable path.
+      // Enum VALUE added, never renamed/removed — old payloads and consumers stay valid, and any consumer
+      // keying success on reason === 'done' treats it as neutral exactly like 'cancelled' and 'clarifying'.
+      reason: { enum: ['done', 'max_iters', 'budget', 'cancelled', 'error', 'refusal', 'empty', 'clarifying', 'refused'] },
       turns: int, usd: num,
       // ADDITIVE (optional, Lane 5): WHY the provider stopped when it was a truncation/policy cut. Present ONLY
       // for the non-clean stops so the frontend can render a "cut short" recap instead of a delivered crate; a

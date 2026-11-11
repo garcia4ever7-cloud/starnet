@@ -86,6 +86,12 @@ const COMPLETION = new Set(['created', 'staged', 'complete', 'failed']);
 const VERIFICATION = new Set(['unverified', 'passed', 'failed', 'missing']);
 const QC = new Set(['not_reviewed', 'needs_review', 'passed', 'rejected']);
 const APPROVAL = new Set(['pending', 'approved', 'rejected']);
+/* The CLOSED set of values lifecycleOf() may return. Exported purely as a drift guard: the four axes above are
+   stored and already pinned by tests, but the lifecycle is DERIVED, so a new branch could previously appear in
+   the UI and in `?lifecycle=` with nothing asserting it existed. A test pins this set against the function's
+   real behaviour, so adding a rung forces a deliberate update rather than slipping in unnoticed. */
+const LIFECYCLE = new Set(['CREATED', 'STAGED', 'VERIFIED', 'NEEDS_REVIEW', 'QC_REVIEWED',
+                           'APPROVED_UNVERIFIED', 'APPROVED', 'REJECTED', 'FAILED', 'MISSING', 'SUPERSEDED']);
 const oneOf = (set, v, dflt) => (set.has(String(v)) ? String(v) : dflt);
 
 /* The coarse lifecycle the brief names, DERIVED from the axes so the two can never disagree. A single stored
@@ -96,7 +102,23 @@ function lifecycleOf(row) {
   if (row.verification === 'missing') return 'MISSING';
   if (row.completion === 'failed' || row.verification === 'failed') return 'FAILED';
   if (row.approval === 'rejected' || row.qc === 'rejected') return 'REJECTED';
-  if (row.approval === 'approved') return 'APPROVED';
+  /* APPROVED means "the Commander cleared it AND the host proved the bytes". Anything less is
+     APPROVED_UNVERIFIED (2026-11-10). Measured on the live station before this split: approving a row whose
+     verification axis still read `unverified` produced
+         lifecycle: APPROVED | verification: unverified | qc: not_reviewed | approval: approved
+     — the top of the ladder, reached by skipping the one rung the harness sets mechanically. That breaks the
+     station's first law ("the interface must never assert state the harness cannot prove") in the exact shape
+     of the 1,056-byte placeholder: a file nothing decoded, labelled finished.
+
+     The split is deliberately on VERIFICATION and not on QC. A Commander overriding a reviewer's opinion is a
+     legitimate business decision and the qc pill shows it; a Commander cannot override physics. Note also that
+     `GET /api/outbox?lifecycle=APPROVED` is how anyone asks "what is cleared to sell" — before this split that
+     filter returned machine-checked and never-checked artifacts indistinguishably.
+
+     NOT A REFUSAL: the approval axis still records `approved` either way, so the Commander keeps the final
+     word. Only the derived summary stops overclaiming. The route additionally requires that override to be
+     explicit (handleOutboxApproval, `acknowledgeUnverified`). */
+  if (row.approval === 'approved') return row.verification === 'passed' ? 'APPROVED' : 'APPROVED_UNVERIFIED';
   if (row.qc === 'passed') return 'QC_REVIEWED';
   if (row.qc === 'needs_review') return 'NEEDS_REVIEW';
   if (row.verification === 'passed') return 'VERIFIED';
@@ -244,12 +266,32 @@ function makeDeliverableManifest(deps) {
      read: a link swapped in after resolveOwned returned cannot be followed. Falls back to a plain read
      where the flag is unavailable (non-POSIX hosts, a reduced fs facade in a unit test) — the realpath
      floor above still applies, so the fallback is narrower than what shipped before, never wider. */
+  /* THE CEILING AND THE REGULAR-FILE CHECK BELONG ON THE FILE DESCRIPTOR, NOT BESIDE IT (security review,
+     2026-11-10). register() stats before reading and refuses a non-regular file and anything over maxBytes;
+     verify() — which is on EVERY retrieval path (readFor -> /api/artifact, outbox_read) — did neither, so the
+     comment at the retrieval route claiming it "re-runs the FULL floor" was not true of the two checks that
+     bound resources:
+       · a row registered small whose file has since GROWN was read whole into one Buffer before the checksum
+         could reject it. This station legitimately produces 28 MB masters and holds 1.58 GB of print PNGs, and
+         the sidecar is ONE process on a phone — an oversized synchronous read is an OOM that takes the whole
+         station down, not a failed request.
+       · O_NOFOLLOW does not stop open() on a FIFO, and opening a FIFO with no writer BLOCKS FOREVER. A named
+         pipe swapped in at a registered path was a permanent whole-station hang on a synchronous call.
+     fstat on the OPEN fd is also strictly better than a stat beside it: it describes the exact object being
+     read, so it closes the residual TOCTOU window that O_NOFOLLOW only narrowed (O_NOFOLLOW covers the final
+     component; an intermediate directory could still be swapped between realpath and open). */
   function readNoFollow(abs) {
     const C = (fs.constants || {});
     if (typeof fs.openSync === 'function' && typeof C.O_NOFOLLOW === 'number') {
       let fd = null;
       try {
         fd = fs.openSync(abs, C.O_RDONLY | C.O_NOFOLLOW);
+        if (typeof fs.fstatSync === 'function') {
+          const st = fs.fstatSync(fd);
+          // Refuse BEFORE the read, so neither failure mode can allocate or block.
+          if (!st.isFile()) { const e = new Error('not a regular file'); e.code = 'ENOTREGULAR'; throw e; }
+          if (Number(st.size) > maxBytes) { const e = new Error('file exceeds manifest size ceiling'); e.code = 'EFBIG'; throw e; }
+        }
         return fs.readFileSync(fd);
       } finally {
         if (fd !== null) { try { fs.closeSync(fd); } catch (e) { failNote('deliverableManifest.close', e); } }
@@ -316,8 +358,31 @@ function makeDeliverableManifest(deps) {
       /* IDEMPOTENT. "Repeated registration of the same artifact must not create uncontrolled duplicates."
          Identity is (artifactId + sha256): re-registering BYTE-IDENTICAL content is a no-op that returns the
          row already on file, so a retried dispatch or a re-run cannot fan the Outbox out into copies. */
-      const prior = readRows().filter(r => r && r.artifactId === artifactId);
+      /* ROWS MINTED EARLIER IN THIS SAME BATCH COUNT TOO (security review, 2026-11-10). The append happens
+         ONCE, after this loop, so readRows() cannot see them — two files in one register() call that mapped to
+         the same artifactId both computed version 1 and were written with the IDENTICAL id. currentRows() keys
+         by id and keeps the last, so the first artifact became permanently invisible to /api/outbox,
+         outbox_list, get(), /api/artifact and both judgment routes. That is the exact failure this module's own
+         header forbids: "a consumer that receives a short list has no way to tell 'nothing was produced' from
+         'the index quietly dropped it'." */
+      const prior = readRows().filter(r => r && r.artifactId === artifactId)
+        .concat(entries.filter(e => e && e.artifactId === artifactId));
       const newest = prior.length ? prior[prior.length - 1] : null;
+
+      /* A DIFFERENT SOURCE PATH UNDER THE SAME ID IS A COLLISION, NOT A NEW VERSION. artifactId flattens the
+         relative path's separators to '_', so 'a/b.png' and 'a_b.png' collide. Reported as invalid — never
+         silently shadowed, and never recorded as a version of an unrelated file (which would additionally mark
+         the real row supersededBy and drop it from the default feed).
+         WHY NOT CHANGE THE ID FORMAT: the ids already on disk are what /api/artifact, every ticket and every
+         stored verdict address. Re-encoding would make a re-registration of an existing file compute a NEW
+         artifactId, defeating the sha256 dedupe and fanning the Outbox into duplicates — the very thing the
+         idempotence rule above exists to prevent. The collision is latent (0 of 54 live rows) and deterministic,
+         so refusing it loudly is both sufficient and reversible; re-encoding is a migration. */
+      if (newest && String(newest.path || '') !== String(rel)) {
+        invalid.push({ path: String(rel), error: 'artifact id collision: "' + artifactId + '" is already held by "'
+          + String(newest.path) + '" — rename one of them (path separators are flattened to "_" in the id)' });
+        continue;
+      }
       if (newest && newest.sha256 === digest) { entries.push(Object.assign({}, newest, { deduped: true })); continue; }
 
       // CHANGED CONTENT AT THE SAME PATH = A NEW VERSION. The old row is kept and pointed forward; history
@@ -507,9 +572,23 @@ function makeDeliverableManifest(deps) {
     return { ok: true, row: row, buf: v.buf };
   }
 
-  return { register, list, get, readFor, verify, versions, patch,
+  /* absolutePathOf(row) — the row's real on-disk location, resolved through the SAME injected
+     workspaceRootOf every read goes through (security review, 2026-11-10). The Outbox feed used to rebuild
+     this itself as path.join(WORKSPACES, owner, path), which is correct for an agent and WRONG for the
+     'studio' pseudo-producer, whose root is $HOME/outbox — so all four studio rows advertised
+     `workspaces/studio/<proj>/video.mp4`, a directory that does not exist, under a UI label reading "Shown so
+     you can find it on disk". That is the interface asserting a fact the harness never resolved. One resolver
+     means a future root exception cannot leave the display behind.
+     DISPLAY ONLY, and deliberately not an access path: retrieval is id-addressed through readFor(). */
+  function absolutePathOf(row) {
+    if (!wired || !row || !row.owner) return '';
+    try { return P.join(String(workspaceRootOf(row.owner) || ''), String(row.path || '')); }
+    catch (e) { failNote('deliverableManifest.absolutePathOf', e); return ''; }
+  }
+
+  return { register, list, get, readFor, verify, versions, patch, absolutePathOf,
            setVerification, setQc, setApproval, lifecycleOf, _manifestPath: manifestPath };
 }
 
 module.exports = { makeDeliverableManifest, imageMeta, mimeOf, detectType, lifecycleOf,
-                   MANIFEST_FILE, COMPLETION, VERIFICATION, QC, APPROVAL };
+                   MANIFEST_FILE, COMPLETION, VERIFICATION, QC, APPROVAL, LIFECYCLE };

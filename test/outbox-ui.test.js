@@ -218,5 +218,49 @@ const baseRow = (over) => Object.assign({
     A.eq(e4.ok, true, 'an unparsable 200 body still counts as success (the write happened)');
   }
 
+  /* ---------- 11. THE UNVERIFIED OVERRIDE IS NAMED, NOT HIDDEN (2026-11-10) ----------
+     The host now refuses a plain approve of a row whose verification axis is not 'passed' (409 +
+     needsAcknowledgement). The panel has to carry that acknowledgement or the Commander gets a dead button —
+     but it must SAY what is being overridden, because an "Approve" that silently also means "and I accept
+     that nothing checked this file" is exactly the merged claim this panel exists to prevent. */
+  {
+    const unver = Outbox.rowHtml(baseRow({ verification: 'unverified', lifecycle: 'STAGED' }));
+    A.ok(/data-unverified="1"/.test(unver), 'an unverified row marks its approve button for the override');
+    A.ok(/Approve \(unverified\)/.test(unver), 'and the button label names it rather than reading plain "Approve"');
+    A.ok(/Never verified by the harness/.test(unver), 'with a line explaining what approving it records');
+
+    const ver = Outbox.rowHtml(baseRow({ verification: 'passed' }));
+    A.eq(/data-unverified/.test(ver), false, 'a host-verified row carries no override marker');
+    A.ok(/>Approve</.test(ver), 'and keeps the plain label');
+    A.eq(/Never verified by the harness/.test(ver), false, 'and no override warning');
+
+    // The failed/missing cases are ALSO not 'passed', so they must arm the override too — a Commander
+    // approving a provably broken file is the loudest case of all.
+    A.ok(/data-unverified="1"/.test(Outbox.rowHtml(baseRow({ verification: 'failed', lifecycle: 'FAILED' }))),
+      'a FAILED verification arms the override as well');
+
+    /* judge() sends the flag ONLY for an approve, and only when armed. Sending it unconditionally would make
+       the host's 409 unreachable and quietly restore the behaviour the gate removed. */
+    const seen = [];
+    const cap = async (url, init) => { seen.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, row: {} }) }; };
+    await Outbox.judge('x', 'approved', 'd', cap, true);
+    A.eq(seen[0].acknowledgeUnverified, true, 'an armed approve carries acknowledgeUnverified');
+    await Outbox.judge('x', 'approved', 'd', cap, false);
+    A.eq('acknowledgeUnverified' in seen[1], false, 'an unarmed approve omits the field entirely');
+    await Outbox.judge('x', 'approved', 'd', cap);
+    A.eq('acknowledgeUnverified' in seen[2], false, 'and so does the legacy 4-argument call');
+    await Outbox.judge('x', 'rejected', 'd', cap, true);
+    A.eq('acknowledgeUnverified' in seen[3], false,
+      'a REJECT never carries it — the override exists to permit approval, not to decorate every verdict');
+
+    /* The lifecycle the host derives for that state must render as a WARNING, not as green. Colouring
+       APPROVED_UNVERIFIED 'good' would re-merge the two facts the manifest splits to keep apart. */
+    A.eq(Outbox.LIFECYCLE_CLASS.APPROVED_UNVERIFIED, 'warn', 'APPROVED_UNVERIFIED renders as a warning');
+    A.eq(Outbox.LIFECYCLE_CLASS.APPROVED, 'good', 'while a fully-cleared APPROVED stays green');
+    const au = Outbox.rowHtml(baseRow({ verification: 'unverified', approval: 'approved', lifecycle: 'APPROVED_UNVERIFIED' }));
+    A.ok(/APPROVED UNVERIFIED/.test(au), 'the pill shows the honest state');
+    A.ok(/obx-life-warn/.test(au), 'and the row is flagged, not presented as finished work');
+  }
+
   A.report('outbox ui');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -173,14 +173,45 @@ const Widgets = (() => {
     return Math.round(d / 86400000) + 'd';
   }
 
+  /* A COUNTDOWN IS A PROMISE, SO IT MUST ONLY BE SHOWN FOR A FIRE THAT CAN ACTUALLY HAPPEN (2026-11-11).
+     This read "in 5h" off `enabled` + `nextRunAt` alone — the SCHEDULE — and ignored `gateBlocked`, which the
+     host computes from the owner-authorization gate and the routine's own model/credential config.
+
+     It is how this station sat idle without anyone noticing. Production was disarmed 2026-11-03; three
+     routines stayed armed and every fire for the next eight days was declined before any provider call; zero
+     autonomous runs completed; and this tile said "next routine: 5h" the entire time. A refused fire is not
+     even written to runs.jsonl, so nothing else contradicted it either. The station's first law is that the
+     interface must never assert state the harness cannot prove, and a countdown to a run the harness has
+     already decided to refuse is exactly that.
+
+     A blocked routine now reports the BLOCKER instead of a time. `gateBlocked === null` means the host could
+     not judge, which is reported as unknown rather than silently treated as runnable. */
   function nextRoutine(c, now) {
     if (!c) return { val: null, sub: 'waiting for scheduler' };
     if (c.halted || !c.enabled) return { val: null, sub: cronStateLabel(c) };
     const jobs = (c.jobs || []).filter(j => j.enabled && Number.isFinite(Date.parse(j.nextRunAt)))
       .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt));
     if (!jobs.length) return { val: null, sub: 'nothing scheduled' };
-    const mins = Math.ceil((Date.parse(jobs[0].nextRunAt) - now) / 60000);
-    return { val: mins <= 0 ? 'due' : mins < 60 ? mins + 'm' : mins < 1440 ? Math.ceil(mins / 60) + 'h' : Math.ceil(mins / 1440) + 'd', sub: jobs[0].name || jobs[0].id };
+    // Prefer a routine that can genuinely run; only if NONE can does the tile report the blockage.
+    const runnable = jobs.filter(j => j.gateBlocked !== true);
+    if (!runnable.length) {
+      const prod = c.production || {};
+      const blocked = jobs.length;
+      const why = !prod.armed
+        ? 'production disarmed'
+        : (jobs[0].gateBecause || 'blocked');
+      return { val: 'off', sub: blocked + ' routine' + (blocked === 1 ? '' : 's') + ' blocked · ' + why };
+    }
+    /* `=== null` NOT `== null`. An ABSENT field (undefined) is a snapshot from before this signal existed and
+       must behave exactly as it always did — flagging "readiness unknown" on every routine of an older or
+       partial payload would be a false alarm, which is the same class of lie in the other direction. An
+       explicit `null` is the host saying it TRIED to judge and could not, and that is worth showing. */
+    const unknown = runnable.some(j => j.gateBlocked === null);
+    const mins = Math.ceil((Date.parse(runnable[0].nextRunAt) - now) / 60000);
+    return {
+      val: mins <= 0 ? 'due' : mins < 60 ? mins + 'm' : mins < 1440 ? Math.ceil(mins / 60) + 'h' : Math.ceil(mins / 1440) + 'd',
+      sub: (runnable[0].name || runnable[0].id) + (unknown ? ' · readiness unknown' : '')
+    };
   }
 
   function commsReadout(approvals) {

@@ -106,11 +106,30 @@
     const envArmed = /^(1|true|yes|on)$/i.test(String(envValue == null ? '' : envValue).trim());
 
     if (raw && typeof raw === 'object' && typeof raw.armed === 'boolean') {
+      /* ATTRIBUTION IS A LABEL, NOT A PROOF (2026-11-11). This note used to read "production ARMED/DISARMED by
+         the owner" unconditionally, ignoring the stored `by` entirely. The station cannot tell the owner
+         clicking the UI from any other token-holder — /api/production/arm rides the same x-starnet-token gate
+         every /api route does, and an assistant session holds that token when it curls the loopback API.
+
+         It said "by the owner" and it was wrong, with a real cost. The live record is
+         `{"armed":false,"at":"2026-11-03T21:36:39.342Z","by":"owner"}`, and the log shows an ARM at
+         2026-11-03T07:03:20Z followed by that DISARM 14h33m later — exactly the arm-window an assistant
+         session is recorded as having opened and closed. So the owner was being told their own business was
+         disarmed by their own decision, while three routines declined every fire for eight days.
+
+         Now: an UNATTRIBUTED record says so plainly, and a claimed `by` is quoted as a claim. Nothing here
+         grants or withholds authority — `armed` is unchanged either way; only the sentence stops overclaiming. */
+      /* UNIFORMLY a claim, with no privileged value. An earlier draft of this fix exempted by:'owner' from the
+         caveat — which would have left the live record (`"by":"owner"`) reading exactly as before and fixed
+         nothing. The station cannot prove ANY of these values, so none of them is stated as fact. */
+      const who = String(raw.by == null ? '' : raw.by).trim().slice(0, 64);
+      const attributed = who ? ' (recorded by: ' + who + ' — the station cannot verify who acted)' : ' (unattributed)';
       return {
         armed: raw.armed, source: 'persisted',
-        note: raw.armed
-          ? 'production ARMED by the owner' + (raw.at ? ' at ' + String(raw.at) : '')
-          : 'production DISARMED by the owner' + (raw.at ? ' at ' + String(raw.at) : '')
+        at: raw.at ? String(raw.at) : '',
+        by: who,
+        note: (raw.armed ? 'production ARMED' : 'production DISARMED')
+          + (raw.at ? ' at ' + String(raw.at) : '') + attributed
       };
     }
     if (raw != null && !(raw && typeof raw === 'object' && typeof raw.armed === 'boolean')) {

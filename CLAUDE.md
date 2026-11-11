@@ -664,11 +664,30 @@ of `{name, payload}` — not `{type, ...}`.
 
 ### Pricing note
 
-`liveprices.js` (models.dev, fetched at boot) is what actually prices runs and it is correct. But
-`workspaces/liveprices.cache.json` currently holds `byFamily: {}`, so a boot while models.dev is
-unreachable falls through to `prices.js` — where `claude-haiku-5-5` used to price **10x high**. Four
-correct rows were added there as the offline safety net. **`claude-haiku-5-5` is tiered: above 100k
-context it bills 5x ($0.50/$2.50), and neither pricing module models tiers.**
+`liveprices.js` (models.dev, fetched at boot) is what actually prices runs and it is correct.
+
+**TWO CLAIMS THAT USED TO SIT HERE WERE FALSE — corrected 2026-11-11, both re-measured:**
+
+- ~~`liveprices.cache.json` currently holds `byFamily: {}`~~ **It is populated.** Live read:
+  `fetchedAt: 1794296221131` (2026-11-10T07:37Z), **9 families / 218 models** (anthropic 18, gemini 34,
+  openai 48, xai 8, groq 10, mistral 34, deepseek 4, together 33, fireworks 27), `lp.state().loaded: true`.
+  So the offline fall-through this paragraph warned about is not the current risk.
+- ~~"Four correct rows were added there as the offline safety net"~~ **That never happened.**
+  `diff sidecar/providers/prices.js.bak-rotation sidecar/providers/prices.js` is **empty** and
+  `grep -c claude-haiku-5-5 sidecar/providers/prices.js` is **0**. There is no `claude-haiku-5-5` row; it
+  resolves through the `/haiku/i` family fallback. **This file documented a safety net that does not exist** —
+  the same failure class as the "PRODUCTION READY" entries preserved in the `.bak` files.
+
+Measured on the real modules, both paths: the built-in snapshot prices `claude-haiku-5-5` at $1.00/$5.00 while
+models.dev says **$0.10/$0.50** — so the snapshot is **10x over** (and `claude-sonnet-5-5` 1.5x over;
+`claude-opus-5` and `claude-haiku-4-5` exact). The fallback therefore fails **safe** (over-reports), and
+`priceOf` returns `null` rather than guessing for an unknown slug, `openrouter/auto` or `cloude-free`.
+
+**Tiering is confirmed unmodelled** (`cost.js` applies one flat rate; `prices.js`'s own header says so).
+Taking the 5x-above-100k claim as given, a 150k-token call records $0.016 against a tiered truth of $0.08 — an
+**80% under-report** on the live path, but **100% over** on the offline snapshot, and nothing in the ledger
+records which path priced the row. **The 5x/100k figure itself is UNVERIFIED here** — it is not in the cache
+(the extractor keeps only input/output) and no live price page was fetched. Treat it as claim-conditional.
 
 ### Undo
 
@@ -1111,11 +1130,39 @@ etsy.com/legal/policy/listing-image-requirements/253962679005
 
 ### Still open after this session
 
-- The Outbox panel is **not mounted into a visible tab** and has **no CSS** — the module loads and the API
-  works, but the Commander cannot click to it yet.
-- The registration hook has **never run inside a real pipeline run** (proven only by retroactive registration).
-- Video verification is not auto-wired to the `verification` axis (ffprobe 8.1.3 IS present; `sharp` is not,
-  as documented — use `@napi-rs/canvas`).
+- ~~The Outbox panel is **not mounted into a visible tab** and has **no CSS**~~ **BOTH FALSE — CORRECTED
+  2026-11-10.** It is mounted at `stationui.js` BUILDERS key **`centraloutbox`** (deliberately not `outbox`,
+  which `frontend/app/windows/outbox.js` already owns), reachable from the button at `frontend/index.html:704`,
+  and `frontend/css/app.css` carries 20+ `.obx-*` rules from `:5859`. The Commander can click to it.
+- ~~The registration hook has **never run inside a real pipeline run**~~ **HALF FALSE — CORRECTED
+  2026-11-10.** There are TWO hooks and only one was ever backfill-only:
+  - **The agent-run hook HAS fired on real runs** — `sidecar/index.js`, in `runOnceCore`'s `finally` right
+    after `runStore.record` (grep `outbox.register`). 20 of 28 distinct manifest runIds match real records in
+    `runs.jsonl` with owner == that run's agentId and the row `path` == its recorded `artifacts[].path`. Four
+    were unattended **cron** fires, two of them proven in `sidecar.log` end to end (`cron.fire` → `tool_call`
+    → `run.end done` → the `artifact:`-prefixed `deliverable` emit). Clean cutover: nothing before
+    2026-11-02T18:01Z is indexed, everything from 23:00Z on is.
+  - **The STUDIO bridge is still backfill-only** (`sidecar/index.js`, the one `setVerification` call site). All
+    four studio videos were registered in a single 2026-11-03T04:17Z batch ~100 ms apart. One real
+    `POST /api/studio/assignment` would close it.
+- **The real registration gap is upstream, in the artifact COLLECTOR, not in the hook.** `sidecar/artifacts.js`
+  recognises `result.producedFiles[]`, `fs.write/append/edit/patch` and `image_generate` — and has **no branch
+  for `shell.exec`**, which emits no `producedFiles`. On this station DESIGNER's main production route is a
+  Python/`@napi-rs/canvas` script run through the shell, so the **highest-value deliverables are exactly the
+  ones the collector cannot see**: run `3abfb93f` recorded only `build_matthew_11_28.py` while the twelve real
+  Matthew 11:28 masters had to be backfilled as `3abfb93f-registered-retroactively`. The fix that fits the
+  existing seam is to have `shell.exec` return `producedFiles` for writes it can prove (declared outputs, or a
+  jail-bounded before/after scan) — `registry.js` already preserves that field through result reshaping and the
+  path is live-proven by every `print-prep`/`vector_export` row. A name-matched `shell.exec` branch cannot
+  work: the host does not know what a shell command wrote.
+- **Verification is auto-wired for studio VIDEO ONLY** — one `setVerification` call site in the whole sidecar.
+  Images and files have **no host verification pass at all**, which is why 35 of 53 live rows read `unverified`
+  and every `passed` image row was set by hand. `register()` deliberately refuses to assert verification
+  itself (`verification: 'unverified', // host-computed later`) and that refusal is CORRECT — registration
+  proves existence/readability/checksum, which is *completion*, not quality; promoting it would re-admit the
+  placeholder. The missing piece is a real per-kind checker. ffprobe 8.1.3 IS present; `sharp` is not, as
+  documented — use `@napi-rs/canvas`. **This is the single highest-value next piece of work** (see the
+  2026-11-10 closeout section).
 - Per-agent judgment criteria ("biblical accuracy", "narrative strength") are prompt/skill content, not code.
   The manifest carries verdicts; it cannot compute them. **There is no service named "Judgment Engine"** — the
   real equivalents are `completion-evidence.js`, `video-verify.js`, `image_quality_check`.
@@ -1277,3 +1324,426 @@ that passes `body.by` through would forge authority while every other test staye
 fails under the gate's hermetic profile with `ENOENT … /starnet-gate-profile-*/…/agent.save.json`.
 It passes standalone. Proven pre-existing by running the same slice against the pre-change
 `index.js` — identical failure.
+
+### 2026-11-10 — the UI half, and what pushing from this device actually involves
+
+`c9b56ca46` adds the Commander's approve/reject controls to `frontend/app/outbox.js`, completing the
+axis that `b0dcc0b2c` made writable. Three choices worth keeping: **no QC control** (a Commander
+clicking a reviewer's verdict would hollow out the independence the manifest enforces when it
+refuses a producer QC-ing itself); **two-step tap-to-confirm** (adjacent verdict buttons on a
+phone); and **a failed verdict does NOT refresh** — it writes the server's reason into the
+`aria-live` count line, because a silent re-render repaints the old pill and reads as "nothing
+happened" rather than "this failed". `judge()` sets no token header: `harness.js` hardens
+`window.fetch` for same-origin `/api/` URLs and hand-rolling it risks leaking the token elsewhere.
+`test/outbox-ui.test.js` 51 -> 72 assertions; `button` was added to its **closed** XSS allowlist
+deliberately rather than by widening the pattern.
+
+#### The remote is NOT a stale copy of this tree — do not try to "catch it up"
+
+`origin/feat/harness-backend` and the local branch genuinely diverged on **2026-09-28** and both
+sides advanced:
+
+| | files | builtin tools | `CLAUDE.md` | `frontend/app/outbox.js` |
+|---|---|---|---|---|
+| remote | 48,421 | 49 | **absent** | **absent** |
+| local | 49,284 | **56** | present | present |
+
+The remote gained ~5,382 commits of ports/CI work; we gained the Central Outbox, seven studio tools
+and this file. **Cherry-picking our work onto the remote tip is impossible** — six of the thirteen
+files in `b0dcc0b2c` do not exist there, including all four studio tools whose schemas it fixes.
+A merge/rebase is a real session with real breakage risk and is still an OPEN owner decision.
+
+Work is therefore published to a side branch: **`feat/approval-axis-20261110`** (pushed 2026-11-10,
+tip `c9b56ca46`, verified blob-for-blob against local on all 18 files). That sidesteps the
+divergence; it does not resolve it.
+
+#### Pushing from this device — the two traps
+
+1. **The PAT needs `workflow` scope**, even though none of our commits touch `.github/workflows/`.
+   The branch carries our September copies of **five** workflow files
+   (`connector-keychain-acceptance`, `desktop-build`, `fast-gate`, `g1-packaged-lifecycle`,
+   `release-train`) that upstream has since changed, and GitHub counts that as modifying a workflow.
+   Error: `refusing to allow a Personal Access Token to create or update workflow ... without
+   'workflow' scope`. No branch name avoids it.
+2. **`credential.helper = store` is set at the REPO level** (`.git/config`, not global), so
+   `~/.git-credentials` holds the token in plaintext. After a token rotation that file MUST be
+   deleted first — otherwise git silently reuses the old token and fails with a scope error that
+   looks like a permissions problem rather than a stale-credential one.
+
+Claude Code's own shell has **no interactive terminal**, so git cannot prompt it
+(`could not read Username ... terminal prompts disabled`). An authenticated push has to be run by
+the owner from a real Termux session. That limitation is a feature here: it keeps the token out of
+the transcript.
+
+## 2026-11-10 (closeout) — the approval axis was WRITABLE but not yet HONEST. Six fixes, five from audit.
+
+The two pushed commits (`b0dcc0b2c`, `c9b56ca46`) are real and correct as far as they go: the routes exist,
+the authority rule holds, the UI works. What a live audit found is that **shipping the writer did not make
+the axis trustworthy** — and that two of this file's own "still open" items were stale (corrected above).
+
+### THE HEADLINE: `lifecycle: APPROVED` was reachable over bytes nothing had checked
+
+Probed against the running sidecar, not inferred:
+
+```
+POST /api/outbox/approval {"id":"scout:general:outbox_readiness-check.md@v1","status":"approved"}
+-> ok:true | lifecycle: APPROVED | verification: unverified | qc: not_reviewed | approval: approved
+```
+
+The top of the ladder, reached by skipping the one rung the harness sets MECHANICALLY — and at that moment
+**35 of the 53 visible rows were `unverified`**, because verification is auto-wired for studio video only. So
+the *common* case was a two-tap approval of an artifact nothing had decoded, rendered with a green APPROVED
+pill. That is the 1,056-byte-placeholder incident in a new costume, and it broke the first law in this file.
+
+**Fixed in three places, as a SPEED BUMP and never a veto** — the Commander keeps the final word, because
+spend/publish decisions are the owner's:
+
+| layer | change |
+|---|---|
+| `deliverable-manifest.js` `lifecycleOf()` | `approved` + verification≠`passed` now derives **`APPROVED_UNVERIFIED`**, not `APPROVED`. New `LIFECYCLE` export pins the closed set of 11 derived values as a drift guard (the four axes were pinned; the derived summary was not). |
+| `index.js` `handleOutboxApproval` | a plain approve of a non-`passed` row answers **409 + `needsAcknowledgement:true`**; `acknowledgeUnverified:true` permits it and the HOST stamps the override into the audit detail. `rejected`/`pending` are deliberately NOT gated — making the safe action harder than the risky one would be a worse bug. |
+| `frontend/app/outbox.js` | the button reads **“Approve (unverified)”**, arms as “Tap again: approve UNVERIFIED”, and carries the ack. `APPROVED_UNVERIFIED` renders **`warn`, not `good`**. |
+
+**Why the split is on VERIFICATION and not on QC:** a Commander overriding a reviewer's opinion is a
+legitimate business decision and the qc pill already shows it; a Commander cannot override physics. Also
+`GET /api/outbox?lifecycle=APPROVED` is how anyone asks "what is cleared to sell", and before the split that
+filter returned machine-checked and never-checked artifacts indistinguishably.
+
+### The audit found a defect in the fix itself — read this one twice
+
+**My first version of the override stamp did not work, and my own comment claimed it did.** The stamp was
+appended and the result *then* truncated to 400, but `readJudgmentRequest` already clamps `body.detail` to
+400 — so any caller who filled that field pushed the override notice off the end. Verified by replay:
+`recorded length 400, contains the host stamp -> false`. The manifest would have recorded `approval: approved`
+with the caller's own text and **no trace that host verification was overridden**, and the panel renders
+`approvalDetail` verbatim as "Commander:". The stamps are now composed FIRST and the caller's portion
+truncated into what is left (`const room = 400 - stamp.length - 3`). Live proof after the fix:
+
+```
+len=400  tail: "xxxxx… — APPROVED WITHOUT HOST VERIFICATION (verification: unverified)"   STAMP PRESENT: true
+```
+
+The lesson is the one rule 8 exists for: **a comment asserting a property is not the property.** I wrote the
+claim and the code in the same breath and only a replay caught the gap.
+
+### Four more fixes, each provoked by a measured defect
+
+- **`readNoFollow` now `fstat`s the OPEN fd** (`deliverable-manifest.js`). `register()` checked `isFile()` and
+  the size ceiling; `verify()` — on EVERY retrieval path — checked neither, so the retrieval route's claim to
+  "re-run the FULL floor" was false for the two checks that bound resources. A row registered small whose file
+  had **grown** was read whole into one Buffer before the checksum could reject it (this station holds 1.58 GB
+  of print PNGs and the sidecar is ONE process on a phone — that is an OOM, not a failed request), and
+  `O_NOFOLLOW` does **not** stop `open()` on a FIFO, where a missing writer **blocks forever** on a
+  synchronous call. fstat-on-the-fd also closes the residual TOCTOU window `O_NOFOLLOW` only narrowed (it
+  covers the final component; an intermediate directory could still be swapped between realpath and open).
+- **An `artifactId` collision is now REPORTED, never silently shadowed.** The id flattens path separators to
+  `_`, so `sub/art.png` and `sub_art.png` collide — and the dedupe check read only the DISK while the batch
+  append happens after the loop, so two colliding files in one `register()` both computed `version 1` and were
+  written with the **identical id**. `currentRows()` keeps the last, so the first artifact became permanently
+  invisible to the feed, the tools and both judgment routes — the exact "short list you cannot distinguish from
+  nothing was produced" this module's header forbids. Latent (0 of 54 live rows), deterministic. **The id
+  FORMAT was deliberately not changed:** re-encoding would make a re-registration compute a new artifactId,
+  defeating the sha256 dedupe and fanning the Outbox into duplicates. Refusing loudly is sufficient and
+  reversible; re-encoding is a migration.
+- **The displayed path was a lie for every studio row.** `serveOutbox` rebuilt `path.join(WORKSPACES, owner,
+  path)`, which is wrong for the `studio` pseudo-producer whose root is `$HOME/outbox` — so all four studio
+  rows advertised `workspaces/studio/<proj>/video.mp4`, a directory that **does not exist**, under a UI label
+  reading "Shown so you can find it on disk". Now resolved by the manifest's own injected resolver via
+  NEW `absolutePathOf(row)`, so a future root exception cannot leave the display behind. All four now verify
+  `exists on disk: true`.
+- **A superseded row no longer shows verdict buttons.** `get()` goes through `list()`, which excludes
+  superseded rows and has no way to pass `includeSuperseded` — so the host answers **403** on both judgment
+  routes for a superseded id while the panel's own "show superseded" checkbox made those rows appear *with
+  live Approve/Reject buttons*. The dead button the panel's own comment forbids.
+
+### SELF-OWNED approval is RECORDED, not refused — and that asymmetry is deliberate
+
+`OUTBOX_COMMANDER` is `'agent'` — **NIGHT4CHRIST's own agentId** — so the Commander is also a producing agent
+and `approvedBy === owner` cannot distinguish "the owner approved the Commander's work" from "the Commander
+approved its own". QC can refuse a self-review because a reviewer is NAMED and substitutable; the Commander is
+not, and the owner legitimately acts AS `agent`. So approval stamps `SELF-OWNED (approver is also the
+producing agent agent)` instead of blocking. **Do not "fix" this into a refusal** — it would lock the owner
+out of approving NIGHT4CHRIST's own deliverables.
+
+Note the boundary this rests on: agents hold no `x-starnet-token`, so a token-holder IS the Commander.
+`child-env.js` does strip `STARNET_*`/`*TOKEN*` from child env, but `STARNET_API_TOKEN` lives in
+`~/.config/starnet/env` at mode 0600 owned by **the same uid every agent runs as**, and `shell.exec`'s
+filesystem floor is self-described as "best-effort" with the jailing side mission still unstarted. The
+stamp is cheap insurance; the real hardening is that side mission.
+
+### A SEPARATE contract bug, found while checking the restart was safe
+
+`shared/events.js` `agent.run.end` had `'refusal'` in its reason enum but **not `'refused'`** — and
+`sidecar/index.js` has always emitted `reason:'refused'` when the production gate declines an unattended run.
+`shared/emitter.js` is validate-then-emit: *"Malformed payloads never reach the bus."* So a gate-refused run
+emitted `agent.run.start` and **never a matching `agent.run.end`** — every start/end pairing consumer saw a
+run that began and never finished. Found live: **17 `invalid-event agent.run.end $.reason: "refused" not in
+enum`** lines in `sidecar.log` (halve for the known duplicate-line issue) across three cron fires that day.
+
+**Fixed on the SCHEMA side, not the emitter, and that choice matters:** `'refused'` is load-bearing —
+`cron-store.js` (grep `=== 'refused'`) keys on it to mark the occurrence **DECLINED**, which is what keeps a
+safety refusal from touching the failure streak and auto-disabling the owner's routine. Renaming the emitted
+value would have silently re-armed that auto-disable path. Additive enum value; `bogus` still rejected.
+`test/production-gate.test.js` already source-locked the emitted string — it just never checked that the
+event *validates*. That is the gap class to watch for: **pinning a literal is not pinning the contract.**
+
+### The merge gate was blocked at step 77 by a PRE-EXISTING literal NUL byte
+
+`npm run test:fast` did not reach its documented step-305 halt — it died at **77/1002** on
+`test/source-text-integrity.test.js`, which flags tracked JS containing a literal NUL (it makes `rg` treat the
+file as binary and **silently skip merge/security scans**). The offender was `test/deliverable-manifest.test.js`
+— a path-traversal fixture written with a real NUL instead of the `\x00` escape the failing test itself
+prescribes. Proven pre-existing: the NUL is in **git HEAD** and the file was unmodified. Replaced with the
+escape (identical runtime string), and both tests pass: `deliverable manifest bridge: OK (126)` /
+`source-text-integrity.test: OK (2466 tracked files)`. Same bug class as the `station-models.mjs` corruption.
+
+### Live operational state found this session — READ BEFORE DEBUGGING "nothing is running"
+
+**The production gate has been DISARMED since 2026-11-03T21:36:39Z, and every armed routine is being refused.**
+This is the gate WORKING, not a fault — `because=disarmed+metered+unattended`, `usd=0`, the schedule untouched.
+Three routines are armed and all three fail at the gate: `7b22107c` Etsy Scout daily, `d22650c8` Weekly Income
+Scan, `ebc4f07d` the Etsy pipeline chain. **Consequence for the Outbox: the approval axis has no SUPPLY of new
+deliverables while production is disarmed** — which is also why re-measuring 53 rows is meaningful rather than
+stale. Arming spends money and is the owner's call: `POST /api/production/arm`. Also note the cron models in
+the log are `gemini-3-flash-preview` / `gemini-flash-lite-latest`, **not** the `anthropic` primaries §18
+specifies — routing has drifted again; check `node scripts/station-models.mjs list` before trusting this file.
+
+### What is genuinely verified vs merely tested
+
+**Verified live against pid 16055 after a clean supervised restart** (pre-flight: `.spend-pending` empty,
+`STUDIO_ALLOW_UNACCOUNTED_SPEND` still commented out, OmniRoute fingerprints matched normalised, no run in
+flight): the 409 refusal + `needsAcknowledgement`, the acknowledged approve reaching `APPROVED_UNVERIFIED`,
+`rejected` ungated at 200, the stamp surviving a 400-char flooded `detail`, `approvedBy=agent` with a forged
+`"by":"claude-audit"` demoted to a label, all four studio paths resolving to files that exist, and the
+`[UNVERIFIED-OVERRIDE]` log marker appearing on exactly the one overridden approval. The probe row was
+**returned to `pending`** — no fabricated business approval was left on the station, and all six amendment
+lines remain on disk as the audit trail.
+
+**Tested but NOT live-verified:** the FIFO-hang refusal (the grown-file ceiling IS live-proven via `readFor`;
+no FIFO was created on the live station deliberately) and the id-collision guard (latent — no live row
+collides).
+
+**Restart gotcha that cost a cycle:** `pgrep -f 'start-starnet\.sh'` matches **Claude Code's own shell
+wrapper**, whose command line contains that string. Killing the first match killed my own shell (exit 144) and
+left the station untouched. Derive the launcher from the node process's **ppid** and confirm with
+`ps -o args=` before killing anything.
+
+Tests: NEW `test/outbox-unverified-approval.test.js` (75 assertions, in `test/fast.list`) — pins the ladder in
+both directions, the closed derived set by brute force over all axis combinations (so it survives a rewrite of
+the ladder rather than source-locking it), the reserved-width stamp, the fd checks, the collision report AND
+that dedupe still works, and the studio path resolution. `outbox-ui` 51 → 87. `outbox-approval-route` 30 → 31.
+`outbox-nine-agents` 70 → 72. Before/after proven on the real modules: `lifecycleOf` returned `APPROVED` for
+an unverified row pre-change and `APPROVED_UNVERIFIED` after, unchanged for a verified one.
+
+### Test evidence for the closeout — state it this way, not as "the gate is green"
+
+`npm run test:fast` **cannot** go green on this device, and the reason moved twice this session:
+
+| run | halted at | cause |
+|---|---|---|
+| before | **77**/1002 | `source-text-integrity` — the literal NUL in `test/deliverable-manifest.test.js`. **FIXED.** |
+| after | **219**/1002 | `workshop-undo.e2e` — **proven pre-existing** by restoring the three pre-change modules and re-running: it fails *earlier and worse* against them. |
+
+Because the gate halts, coverage was established two other ways:
+
+1. **15 targeted suites, all green:** `outbox-unverified-approval` (75) · `outbox-ui` (87) · `outbox-approval-route`
+   (31) · `outbox-nine-agents` (72) · `deliverable-manifest` (126) · `outbox-route` (49) · `outbox-tools` (41) ·
+   `outbox-studio-bridge` (60) · `outbox-window` (43) · `production-gate` (116) · `contract` (105) · `schema`
+   (42) · `harness.integration` (188) · `capgate` (54) · `source-text-integrity` (2466 files).
+2. **Every suite that consumes `agent.run.end`** — the widest blast radius, since the enum change touches
+   `shared/events.js`: **117 suites, 100 pass, 17 fail.** All 17 were then re-run against the restored
+   pre-change `index.js` + `deliverable-manifest.js` + `events.js`: **17/17 failed identically → 0 regressions
+   introduced.** The three modules were restored and md5-verified afterwards.
+
+**WHY SO MANY e2e SUITES FAIL HERE, and it is NOT broken code.** At least 3 of the 17 say so outright —
+`threads.e2e`: *"Production is DISARMED, so this unattended paid run was refused before any provider call."*
+The gate reads its arm state from a FILE per run, so the owner's standing disarm reaches tests that boot their
+own sidecar. **A large part of this device's "pre-existing failures" is therefore an artifact of the owner's
+safety setting, and the count is environment-dependent** — any session quoting a fixed number of pre-existing
+failures should say whether production was armed. Corollary to the existing rule that the Etsy chain cannot be
+verified while disarmed: **neither can the e2e layer.**
+
+**Method worth reusing:** to decide "did I break this?", copy the pre-change backups over the live modules,
+re-run exactly the failing set, then restore and `md5sum -c` the restore. It is ~2 minutes and it replaces an
+argument with evidence. Keep the checksum manifest BEFORE the swap so the restore is provable, not assumed.
+
+## 2026-11-11 — WHY NOTHING HAS RUN SINCE 2026-11-03. Read this before any other diagnosis.
+
+**The station has not done one unattended piece of work in eight days, and every surface said it was fine.**
+Four independent failures were true at once; none was surfaced. This section is the current operating truth and
+it supersedes the roster/provider/rotation tables above wherever they disagree.
+
+### 1. Production has been DISARMED since 2026-11-03T21:36:39Z — and an assistant session did it
+
+```
+[production-gate] ARMED    by owner at 2026-11-03T07:03:20.895Z
+[production-gate] DISARMED by owner at 2026-11-03T21:36:39.342Z     <- 14h33m later
+```
+
+That is **exactly the arm window** recorded in memory as an assistant session arming production and leaving it
+open. Both ends were a token-holder, not the human — `handleProductionArm` hardcoded `'by owner'` in the log and
+`saveProductionArm` DEFAULTED `by` to `'owner'`, so the station reported the owner's own business as disarmed by
+their own decision. **Fixed** (see below), but the live record still reads `"by":"owner"` because that is what
+was written at the time.
+
+Consequence, measured from `runs.jsonl`: since that disarm there have been **7 runs, ALL interactive, ZERO
+autonomous**, and the newest run record of any kind is **2026-11-07**. Three routines stayed ARMED and every
+fire was declined: `7b22107c` Etsy Scout daily, `d22650c8` Weekly Income Scan, `ebc4f07d` the Etsy chain.
+
+**A decline is deliberately invisible to every escalation path**, which is why eight days passed:
+`consecutiveFailures` stays **0** (a safety refusal must never auto-disable the owner's schedule — correct, but
+it also means the auto-disable net can never escalate one), a refused run is **never written to `runs.jsonl`**
+(it is refused before `runStore.record`), and **no notification path exists** in the cron layer at all. The only
+trace was `lastError` on the cron row, which no surface rendered.
+
+### 2. Every agent is on `gemini` — the FREE tier, capped at 20 requests/day
+
+The roster (`agent.roster.json`, updatedAt 2026-11-10T08:53Z) has **all 10 agents on provider `gemini`**, and
+the live failure is `http 429 … generate_content_free_tier_requests, limit: 20 … per day limit exceeded on Free
+Tier`. The §18 table above saying `anthropic` primaries is **stale**. Two more corrections from the live roster:
+**PUBLISHER is `approvalMode: full`, not `ask`**, and so is **QC_EDITOR** — every doc paragraph explaining "PUBLISHER
+cannot save its own work" is obsolete. Only DIRECTOR, PRODUCER and COPYWRITER are `ask`.
+
+### 3. The fallback chain is EMPTY, so a 20/day cap takes the whole station down
+
+```
+GET /api/fallback/chain  ->  {"chain":[],"saved":true,"envDefault":[],"maxEntries":8}
+```
+
+§18 documents 8 tool-verified entries. They are gone, and `saved:true` means an **empty chain was persisted**,
+which beats the env default. So there is nowhere to rotate: a free-tier 429 that the classifier correctly routes
+to "rotate" has no next hop and the run dies. **This is the third recorded instance of model routing drifting out
+from under the written design** — check `station-models.mjs list` and `GET /api/fallback/chain` at the start of
+any session that touches spend.
+
+### 4. Three of four paid lanes are exhausted (probed free, nothing billed)
+
+| provider | live state |
+|---|---|
+| `gemini` | HTTP 429 — free-tier **20 requests/day** exceeded |
+| `openrouter` | 402 insufficient credits — **$35.149 used of $35** |
+| `openai` | "You have no credits remaining" |
+| `anthropic` | key **authenticates** (400 on an invalid model, not 401) — balance unknown, and **nothing routes to it** |
+
+Probe technique: one deliberately-invalid field. Auth is checked before billing, so a 400/404 proves the key
+works and bills nothing. Do not use a real call to test a key.
+
+**So arming production alone would NOT restore motion** — it would produce 429s. Arming + a funded lane + a
+fallback chain are three separate actions.
+
+### Spend: $113.75 / $123.36 against a $100 ceiling, $0 revenue
+
+| source | rows | total |
+|---|---|---|
+| `runs.jsonl` | 1350 | **$113.746949** |
+| `ledger.jsonl` (metered) | 2027 | **$123.363185** |
+
+They do not disagree — the gap reconciles **exactly to 6dp**: `113.746949 + 5.385941` (aux rows sharing a parent
+runId) `+ 4.230295` (117 runIds with no runstore row) `= 123.363185`. NIGHT4CHRIST alone is **$95.27 (84%)**, and
+October was $106.47 of it. Against the stated **$60 business + $40 dev = $100** this is **$14–23 over**, with
+**zero Etsy orders ever** (`workspaces/.business/orders.jsonl` holds one *memorial* render, not an Etsy sale).
+
+### TWO BUDGET SETTINGS ARE DOING THE OPPOSITE OF WHAT THE DOCS SAY
+
+`workspaces/budget.json` = `{"caps":{"perRun":0,"perAgent":0,"perDay":25,"global":0}}`. Both halves matter:
+
+- **`perRun: 0` means NO per-run ceiling**, so `runCapUsd = Infinity` and `loop.js`'s worst-observed-turn
+  reservation — the fix written specifically for the QC_EDITOR/DESIGNER overruns — **can never fire here.**
+  Measured: **19 runs exceeded $1, totalling $28.59**, worst single run **$3.5466**. The shipped
+  `CAPS.maxCostUsd: 1.00` default would have stopped every one of them.
+- **Saving `perDay: 25` silently converted the $25/day SOFT rail into a STRICT one.** `budgetScopeIsExplicit`
+  returns true whenever `perDay` is an own-property of the saved overrides, so `strictScope('day')` is true,
+  `softOnly` is false, and `budget.check` returns `spend_history_unavailable` for **every metered run** the
+  instant an orphan receipt exists. **That is the mechanism behind all four `UNSETTLED_SPEND` brickings.** The
+  saved value is *identical to the shipped default*, so nothing in the UI distinguishes "I accepted 25" from
+  "I chose 25" — yet they have opposite failure semantics. Clearing `perDay` from the overrides restores the
+  soft rail with **no change to the effective cap**. Both are owner decisions (budget changes).
+
+Counter-evidence worth keeping: the $25 rail has **never actually fired** — worst rolling-24h window in all
+history is **$24.21** (3.1% under). And "per day" is a **rolling 24h window**, not a calendar day
+(`ledger.js usdForDay`), so it never resets at midnight; headroom returns gradually as rows age out.
+
+### The pipeline's designed terminal state is a DRAFT. There is no Etsy API.
+
+This is the one to decide before spending anything further. The chain routine's own prompt (job `ebc4f07d`) says
+verbatim: *"ask for a listing **DRAFT only** … Tell PUBLISHER explicitly: **draft only, publish nothing**"* and
+*"Publish nothing. Buy nothing."* And there is no integration to publish with even if it were allowed: the only
+Etsy reference in shipping code is a key-catalog row (`sidecar/servicekeys-catalog.js`) whose own text reads
+*"Public/manual API work only — persistent shop automation is not connected"*, `unattendedSupported: false`,
+*"StarNet does not yet manage Etsy OAuth consent or refresh its one-hour access tokens."* The three live
+connectors are **exa, apify (Etsy *scrapers*, read-only), airtable**.
+
+**So Rule 1 ("agents run the Etsy shop on their own") is unreachable as currently designed, by construction and
+not by bug.** Autonomous *draft production* is reachable; the publish step is a human on etsy.com. Changing that
+means building Etsy OAuth with 1-hour token refresh and rewriting the routine's instruction — a real project.
+
+### SCOUT structurally cannot do its job on its own routine
+
+`GRANTABLE_UNATTENDED` is `{workbench, connectors, orchestrator}`. Live grants: the Etsy chain `ebc4f07d` has
+`["orchestrator"]`; Scout daily `7b22107c` and HARVEST `d22650c8` have **`[]`**. The only routine with
+`connectors` is **disabled**. SCOUT's assigned skill is
+`run-etsy-niche-sweeps-via-apify-into-airtable` — i.e. its entire job is MCP connector work it has no grant for.
+Workers inherit the lead's `connectorAuthority`, but the lead has none either, so there is no inheritance path.
+
+### The strongest product asset is NOT the one the docs name
+
+`isaiah-40-31` (`workspaces/webdesigner/etsy-kits/isaiah-40-31/`) is far closer to sellable than
+"Verses for Hard Days": **5 correct distinct ratios** (2x3 3600x5400, 3x4 3600x4800, 4x5 4800x6000, 11x14
+3300x4200, isoA3 3508x4961), 5 listing photos at 2000x2000, and a `listing-text.txt` that is spec-compliant on
+title length, 13 tags, AI disclosure, KJV credit, frame-not-included, how-to-print and licence. It disagrees
+with itself in four places a human must reconcile (the `upload-checklist.md` lists 3 PNGs of which two are the
+SAME 4:5 ratio the rules forbid; two different titles — one 135 chars of keyword stuffing; two prices $5.99 vs
+$5.00; `print-files/` holds 7 files where Etsy allows 5; and the description promises PNG + a ZIP while the
+delivery set is JPG with no ZIP). Missing per the skill: ALT TEXT and the listing-form reminders.
+
+**Two drafts would cause trouble if published as-is:** `publisher/listing-drafts/niv-scripture-wall-art-set-of-3-listing-draft.md`
+uses **NIV 16 times including in the title** (the `etsy-rules` skill forbids NIV outright — no commercial
+permission), and `agent/verses-for-hard-days/etsy-listing-draft.md` is headed `STATUS: approved-to-publish`
+while containing **no AI disclosure** and contradicting its own header at line 105.
+
+### WHAT WAS FIXED THIS SESSION (code, all additive)
+
+- **`cronStateSnapshot` now reports whether the next fire can actually happen.** New `production` block
+  (`armed`, `source`, `note`, `by`, `at`, `refusalCode`, `blockedJobs`) and per-job `gateBlocked` / `gateCode` /
+  `gateBecause`. Computed by **calling `productionGate.decide()`** — never by re-deriving its rule — with
+  `cronProviderFor`, the same resolver the driver passes as `providerForJob`. It reports the authorization
+  verdict AND a missing model/credential (reusing `cronModelFor`/`cronHasCredential`), because a half-true
+  readiness signal is its own trap; authorization OUTRANKS config so the deciding reason is never buried.
+  Provider **credit is deliberately not claimed** — a balance needs a billed call. A failure to judge reports
+  `null` (unknown), never "runnable". Disabled routines are not asked.
+- **`widgets.js nextRoutine()` no longer counts down to a fire that cannot happen.** It showed "next routine:
+  5h" for all eight days. With nothing runnable it now reads `off · 3 routines blocked · production disarmed`;
+  with a mix it counts down to the one that CAN run. `=== null` not `== null` — an **absent** field is an older
+  payload and must behave exactly as before; a false "readiness unknown" on every routine would be the same
+  lie in the other direction. (My first draft got this wrong; the test caught it.)
+- **Attribution stopped being a fabrication.** `readArmState` now exposes `at`/`by` and says
+  *"(recorded by: owner — the station cannot verify who acted)"* instead of *"by the owner"*; `saveProductionArm`
+  defaults to **`unattributed`** rather than manufacturing `owner`; and every change now appends to a durable
+  **`.production-arm.log.jsonl`** (best-effort — a failed history append must never block a disarm). No value is
+  privileged: an earlier draft exempted `by:'owner'` from the caveat, which would have left the live record
+  reading exactly as before and fixed nothing.
+- **`test/production-gate.test.js` was not in `test/fast.list`** — 116 assertions on the owner's authorization
+  control never ran in the merge gate. Added, with NEW `test/cron-runnability-truth.test.js` (60 assertions).
+
+Verified live against a cleanly restarted supervised sidecar (pid 5108; pre-flight: `.spend-pending` empty,
+unaccounted-spend still commented out, OmniRoute fingerprints matched, no run in flight):
+`production.blockedJobs: 3`, all three armed routines `gateBlocked:true / PRODUCTION_DISARMED`, disabled
+routines carrying no verdict. Regression sweep: 43 suites that touch cron/widgets/production-gate → **34 pass,
+9 fail, all `.e2e`, all 9 proven PRE-EXISTING** by restoring the three pre-change modules, re-running and
+md5-verifying the restore. **0 regressions.**
+
+**I did NOT POST to `/api/production/arm` to exercise the new audit trail**, because writing a new record would
+overwrite the `at: 2026-11-03` timestamp — the one piece of evidence proving how long this has been off.
+
+### Still open, and who must decide
+
+Owner-only (spend/authorization): arm production · fund a lane · restore a fallback chain · `perRun` · clearing
+`perDay` · whether to build Etsy OAuth or accept a manual publish step. Engineering, unblocked: persist
+`unpriced`/`costSource` on the ledger entry (`ledger.js makeEntry` drops what `cost.js` already computes, so a
+proven-$0 row and an unpriceable row are byte-identical — 19 live rows / 1.7M tokens are unmarked unpriceable);
+give SCOUT's routine the `connectors` grant; reconcile the isaiah-40-31 kit. Latent, documented, not fixed: a
+routine **script** runs at `runOnceCore` *before* the production gate ("Script-only runs return before provider
+admission"), so "production disarmed" does not stop unattended shell activity — no routine currently has a
+script, so this is latent, and the gate's purpose is model spend. Connector secrets (Apify/Airtable/Exa) sit in
+`workspaces/connectors/state.json` in **plaintext** at mode 0600, which contradicts the secrets law and deserves
+its own look.

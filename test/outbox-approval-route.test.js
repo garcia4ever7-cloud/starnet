@@ -104,7 +104,13 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'index.js'), '
     A.eq(man.setApproval(id, 'nonsense', 'agent').ok, false, 'an invalid approval status is refused, never coerced');
     A.eq(man.setApproval(id, 'approved', 'agent', 'ship').ok, true, 'the Commander can approve');
     A.eq(man.get('agent', id).approval, 'approved', 'and it persists');
-    A.eq(man.lifecycleOf(man.get('agent', id)), 'APPROVED', 'lifecycle follows the approval axis');
+    /* The approval axis records what the Commander said; the DERIVED lifecycle refuses to overclaim. This
+       fixture was never host-verified, so it reads APPROVED_UNVERIFIED (2026-11-10). Deliberately asserted
+       here rather than after a setVerification call, so the line-count assertion below stays at 3 and keeps
+       proving the "refusals write nothing" property on exactly the same trail it always did. */
+    A.eq(man.get('agent', id).approval, 'approved', 'the approval axis still records the Commander verdict');
+    A.eq(man.lifecycleOf(man.get('agent', id)), 'APPROVED_UNVERIFIED',
+      'but the lifecycle will not say APPROVED over bytes the host never proved');
 
     /* Append-only: every ACCEPTED verdict appends a line and every earlier one stays on disk as the audit
        trail — while a REFUSED verdict writes nothing at all. Exactly 3 here: the registration, the qceditor

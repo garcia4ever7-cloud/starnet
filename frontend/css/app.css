@@ -5868,6 +5868,16 @@ body:has(#screen-game.active)::before {
 
 .obx-row { border: 1px solid currentColor; border-radius: 4px; padding: 8px 10px; min-width: 0;
            display: flex; flex-direction: column; gap: 6px; }
+/* ROW-LEVEL LIFECYCLE TINT (2026-11-10). rowHtml has always emitted `obx-life-<good|warn|bad|off>` and NONE
+   of the four were ever styled, so the derived lifecycle was legible only in its pill — on a phone, at the
+   top of a long scroll. A left accent is used rather than a background so it cannot reduce text contrast in
+   either theme, and `currentColor` keeps the rest of the border theme-following exactly as before.
+   This matters most for APPROVED_UNVERIFIED (class `warn`): the Commander approved it but the harness never
+   proved the bytes, and that must be visible at a glance without reading the pills. */
+.obx-row.obx-life-good { border-left: 3px solid #2f9e52; }
+.obx-row.obx-life-warn { border-left: 3px solid #c98a1a; }
+.obx-row.obx-life-bad  { border-left: 3px solid #c0392b; }
+.obx-row.obx-life-off  { border-left: 3px solid currentColor; opacity: 0.92; }
 .obx-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .obx-agent { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.82em; }
 .obx-project { font-size: 0.78em; opacity: 0.75; overflow-wrap: anywhere; }

@@ -1000,3 +1000,6 @@ test/dispatch-lease-invariant.test.js
 test/provider-configured-from-sidecar.test.js
 test/tool-schema-contract.test.js
 test/outbox-approval-route.test.js
+test/outbox-unverified-approval.test.js
+test/production-gate.test.js
+test/cron-runnability-truth.test.js

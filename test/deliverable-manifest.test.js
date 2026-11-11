@@ -148,7 +148,10 @@ function station(agents) {
   {
     const r = s.m.register({
       ownerAgentId: 'webdesigner', projectId: 'evil', shareWith: ['publisher'],
-      files: ['../publisher/stolen.png', '../../etc/passwd', '/etc/passwd', 'a b.png', 'ok/../../escape.png']
+      // 'a\x00b.png' carries a real NUL at runtime, written as the ESCAPE rather than as a literal NUL byte.
+      // A literal NUL in tracked source makes rg treat the file as binary and silently skip merge/security
+      // scans (test/source-text-integrity.test.js, which this file failed at gate step 77 until 2026-11-10).
+      files: ['../publisher/stolen.png', '../../etc/passwd', '/etc/passwd', 'a\x00b.png', 'ok/../../escape.png']
     });
     A.eq(r.entries.length, 0, 'not one traversal or absolute path is indexed');
     A.eq(r.invalid.length, 5, 'every one is reported');
