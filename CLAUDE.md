@@ -2017,3 +2017,142 @@ returning **≥20 characters**, the belt chain advances on non-whitespace, the h
 switched off — `sidecar/routing/verdict.js` implements `VERDICT: approved|revise` with a revise loop, and the
 live floor has `gateDocks: {}`. Drawing a reviewer dock is a floor edit, not code. Where a HUMAN gate belongs
 is the irreversible act — publishing — and `approval` + `production-gate.js` already own that.
+
+## 2026-11-16 (later) — vault MIGRATED, Apify re-keyed, a worker cap, and a new register route
+
+Five pieces of work, each verified live. Two of them corrected a claim I had just made myself.
+
+### The connector vault is SEALED. The remaining task really was only the restart.
+
+`GET /api/connectors` → `credentialStorage {"encrypted":true,"error":null}`. Both `state.json` and
+`state.json.bak` are `starnet.connector-vault.v1` envelopes whose on-disk keys are **only**
+`format,iv,tag,data`, and each independently decrypts — via a vault rebuilt from the env file alone — to the
+pre-migration canonical state, fingerprint **`89bd1375`**. No credential substring and no field name appears
+in either ciphertext.
+
+**Why it had not already happened:** the previously-running sidecar (pid 11810) **did not hold
+`STARNET_CONNECTOR_ENCRYPTION_KEY` at all**, so boot migration (`index.js:4862`, gated on
+`connectorVault.protected`) could never fire. `start-starnet.sh:44` sources the env file unconditionally, so
+a restart was sufficient — confirm with `tr '\0' '\n' < /proc/<pid>/environ | grep -c CONNECTOR_ENCRYPTION`
+before concluding anything else is wrong.
+
+**The key now lives in exactly ONE file.** `env.bak-vaultkey-20261116` is the PRE-change backup and does
+**not** contain it. Plaintext rollback copies made during the migration were deleted once redundant recovery
+was proven from both sealed copies — **do not re-create plaintext credential backups**, that is the exposure
+the vault exists to close. Verify any off-device copy by fingerprint `09eb3a68`.
+
+### The Apify token was dead UPSTREAM — and the migration was not the cause
+
+After the restart apify came back `state=error`, 0 tools (was 7). The token survived the round-trip
+**byte-exact** (fp `2d552f3b` before and after) and was the correct class (`apify_api_*`, 46 chars, static —
+not an expiring OAuth bearer), yet **two endpoints probed from outside StarNet both rejected it**:
+`api.apify.com/v2/users/me` → 401 `user-or-token-not-found`, `mcp.apify.com` initialize → 401
+`invalid_token`. It HAD connected `up` at the previous boot, so it was revoked vendor-side in between.
+
+Re-keyed by the owner through the dashboard. Live now: `apify_api_*`, fp **`c45c9b7c`**, `users/me` → **200
+`username=knight4christ id=f0hqdnwxq7maVauxi plan=FREE`**, `mcp.apify.com` → 200, **7 tools** back including
+both Etsy scrapers. Note the **FREE plan** — it bounds how much real actor work SCOUT's sweeps can do.
+
+**`termux-clipboard-get` CANNOT WORK ON THIS DEVICE.** It needs the **Termux:API app**; `pm list packages`
+shows only `com.termux`. It hangs and exits **124** with 0 bytes. Same missing-companion-app class as
+Termux:Boot. Do not offer to read the clipboard — route a secret through the connectors UI's masked
+`type="password"` field (`frontend/app/windows/connectors.js:105`), never through the transcript.
+
+### `state.json.bak` was POISONED, and the vault's own write() is the repair
+
+A full field diff found **exactly one** difference — `apify.token`: live 46 chars, `.bak` **4,360 chars and
+not `apify_api_*`** (fp `d4501b27`). An intermediate dashboard save had taken a large paste into the token
+field. Everything else — version, oauth, exa and airtable's 14 fields each — was identical.
+
+It matters because `connector-vault.js` `load()` **falls back to `.bak`** when the main file is absent or
+corrupt, which would have silently installed a junk token.
+
+**Repaired with ONE call: `POST /api/connectors {"id":"apify"}`.** `persistConnectorState` (`index.js:4898`)
+routes to `connectorVault.write(...)` as a **normal, non-removal** write, and `write()` sets
+`.bak = encode(previous)` — so the correct live state is rotated into the backup *by the vault itself*,
+inside `saveJsonVerified`'s transactional re-read. Never hand-edit these files.
+
+Before running it I confirmed field-by-field that a body carrying only `id` changes **nothing**: `token` via
+`sameService`, `timeoutMs` via `prev.timeoutMs` (`:12592`), `label` via `prev.label` (`:12607`), `headers`
+copied, `enabled` true, `cfg.oauth` absent. The catalog `keyHeader` branch (`:12588`) cannot relocate the
+token here — the dashboard save proves it, since it left the token in the `token` field.
+
+**"Byte-for-byte identical backup" is the WRONG invariant and must be refused.** AES-GCM uses a fresh random
+IV per seal, so the two files' bytes differ **by design** (`iv differs: true | data differs: true`).
+Identical ciphertext would mean IV reuse, which weakens GCM. The correct invariant — identical **decrypted**
+state — holds: both now read `e8967c96`, and exa/apify/airtable are IDENTICAL across the two files.
+
+### BUDGET_PER_WORKER=5.00 — and what it actually authorises
+
+Set in `~/.config/starnet/env` on owner instruction (backup `env.bak-perworker-20261116`); `num("5.00")` → 5,
+so `ORCH_PER_WORKER` (`index.js:732`) is no longer 0. Dispatched workers are no longer `Infinity`.
+
+**It is a PER-WORKER ceiling, not a pool.** `spent` (`orchestration.js:816/1085/1270`) is a single worker's
+own `result.usd`, used only to bound that worker's repair call. A lead dispatching three workers therefore
+authorises ~$15 — and because `maxCostUsd` **replaces** the station ceiling (`index.js:17268`), the armed
+routines' own `maxCostUsd: 0.25` does **NOT** bound their workers. Large improvement on `Infinity`; still 20x
+each routine's own cap. Revisit if spend matters more than throughput.
+
+### The memorial engine renders correctly, and the render is BIT-REPRODUCIBLE
+
+Full fresh render (35 segments, 30 photos + 5 cards): **640s wall, 3.74x realtime, $0** — model-free and
+network-free. All six checks PASS: `32803708 bytes, 171.20s, 1532883 bps, 5136 frames`, 1920x1080, drift
+**0.00s**, aac 2ch, mean **-15.7 dB**, 35/35 segments.
+
+**md5 `eac0b97fb9da1494156239612ac6953f` — byte-identical to the 2026-11-09 render.** Same inputs, same
+bytes. Worth knowing before anyone "fixes" a nondeterminism that is not there.
+
+Independently verified rather than trusting the engine's own PASS lines: ffprobe (h264 1920x1080 30fps / aac
+2ch), **luma 42.5 → 145-160 → 45.6 with 0 black runs** (a solid-black film clears every byte gate here — see
+`readiness.js`), and I **looked at three extracted frames**: title card correct, a cropped landscape, and a
+**padded** square with blurred backdrop proving "portraits are never cropped" in the OUTPUT, not just the log.
+Fit split: 11 pad / 19 crop, crops reporting "cuts 15.6% of height, biased to keep headroom".
+
+**`--force` is documented at `cli.mjs:7` but NEVER IMPLEMENTED** — `flag('force')` is never called, so
+`assemble()`'s `force` parameter is unreachable. Renders are resumable, so re-running in place reuses
+segments and verifies almost nothing; to genuinely re-render, point `outputRoot` at a fresh directory.
+Set `MEMORIAL_BUSINESS_ROOT` for test runs — the demo subject is fictional and must never enter the real
+`.business` order record.
+
+### NEW `POST /api/deliverables/register` — and the trap that made my first version a dead link
+
+There was **no way to register a deliverable without code**: the routes are `GET /api/deliverables` plus
+three cleanup endpoints. Rows are created only in-process (artifact collector, or the studio bridge at
+`index.js:20390`). The journal is **not** a workaround — `load()` does replay `deliverables.library.jsonl`,
+but `seq` is allocated in memory by the running sidecar, so hand-appending races it.
+
+The new route rides the existing `x-starnet-token` gate, performs **no filesystem write**, measures bytes
+**host-side** from disk, and gives a video `status:'kept'` **only if `verifyVideoFile()` proves real
+footage** — otherwise `failed` WITH the reason and no playable member, exactly like the studio bridge.
+
+**THE TRAP — `handleDeliverablesList:14877` passes `workshop = true` for EVERY store-backed row.** So
+`deliverableFile()` resolves a stored path as **`workshop/<runId>/<path>`** and builds the openUrl from that,
+**and skips the existence check entirely**. My first version validated the bare path, registered cleanly,
+reported `ok:true preview:video exists:true` — and produced an openUrl that would 404. The studio bridge
+never hits this because its `agentId==='studio' && p.includes('/outbox/')` branch returns earlier.
+
+**Rule: validate what the READER resolves, not what the caller typed.** The route now requires a path-safe
+`runId` and checks `WORKSPACES/<agent>/workshop/<runId>/<path>`. Two consequences to carry forward:
+- a registered file must physically live under `workspaces/<agent>/workshop/<runId>/...`;
+- **`exists` is NOT re-proven for store-backed rows** — delete the file later and the panel still offers a
+  player that 404s. Fixing that means touching `:14877`, which affects every existing row.
+
+Guards proven live, not assumed: no token → 403; bad agentId → 400; absolute path → 400; missing id/file →
+400/404; escape to an existing sibling (`../budget.json`) → **403**; **symlink** out of the jail → **403**.
+A traversal to `/etc/hosts` returns **404, not 403**, because Termux has no `/etc` — test jail escapes with
+paths that actually exist or you will not exercise the branch you think you are.
+
+End-to-end: `HTTP 200`, `Content-Type: video/mp4`, `inline`, `nosniff`; first 1 MB fetched over the real
+route probes as `h264 1920x1080` + `aac`. Row reads `kind:video status:kept preview:video size 32803708`.
+
+Regressions: `deliverable-store` (11) · `deliverable-files` (34) · `deliverables-open` (15) ·
+`deliverable-note` (24) · `deliverable-manifest` (126) · `contract` (105) all OK; `failopen-ratchet` at its
+documented baseline **8 problems** — unchanged.
+
+### Restart hygiene that worked three times this session
+
+Pre-flight each time: `.spend-pending` empty · **zero unfinished runs** (`/api/runs/active`, filter
+`!r.reason`) · `STUDIO_ALLOW_UNACCOUNTED_SPEND` still commented out · OmniRoute fingerprints matched
+**normalised**. Derive the launcher from the node process's **ppid** and confirm with `ps -o args=` —
+`pgrep -f 'start-starnet\.sh'` matches Claude Code's own shell and killing it kills your session, not the
+station. Kill launcher first, then node, then relaunch detached with `setsid nohup`.
