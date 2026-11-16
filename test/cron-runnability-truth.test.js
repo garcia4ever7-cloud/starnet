@@ -73,13 +73,13 @@ const gate = require('../sidecar/production-gate.js');
   const reg = require('../sidecar/providers/registry.js');
   const runnability = (job, armed, hasCred, model) => {
     const provider = job.provider || 'gemini';
+    // noAgent FIRST, mirroring the real code — the run path returns before the gate for a script routine.
+    if (job.noAgent === true) return { blocked: false, code: '', because: 'script-only: returns before provider admission' };
     const unmetered = !!((reg.getProviderProfile(provider) || {}).unmetered);
     const v = gate.decide({ armed: armed, metered: !unmetered, surface: 'autonomous' });
     if (!v.allow) return { blocked: true, code: v.code, because: v.because };
-    if (!job.noAgent) {
-      if (!model) return { blocked: true, code: 'NO_MODEL', because: 'no model configured' };
-      if (!hasCred) return { blocked: true, code: 'NO_CREDENTIAL', because: 'provider "' + provider + '" has no usable credential' };
-    }
+    if (!model) return { blocked: true, code: 'NO_MODEL', because: 'no model configured' };
+    if (!hasCred) return { blocked: true, code: 'NO_CREDENTIAL', because: 'provider "' + provider + '" has no usable credential' };
     return { blocked: false, code: '', because: v.because };
   };
 
@@ -99,12 +99,22 @@ const gate = require('../sidecar/production-gate.js');
   A.eq(runnability(job, true, true, 'm').blocked, false,
     'an exhausted-quota routine reports runnable — credit is unknowable for free and is NOT guessed at');
 
-  // A script-only routine is not asked for a model/credential it never uses, but the GATE still applies
-  // (runOnceCore makes no noAgent exception either, so neither does this).
+  /* A SCRIPT-ONLY ROUTINE IS EXEMPT FROM THE GATE — corrected 2026-11-16, this assertion was INVERTED.
+     It previously claimed "a script-only routine is NOT exempt from the authorization gate", on the stated
+     grounds that runOnceCore makes no noAgent exception. It does: the cronScript branch runs first and a
+     noAgent routine hits `return` at the `if (o.noAgent || checked.wakeAgent === false)` early-exit about
+     sixty lines BEFORE the production gate is consulted. So it genuinely runs at $0 while disarmed, and
+     reporting it blocked was the inverse of the lie this signal exists to remove.
+     This matters because the recommended always-on readiness heartbeat is exactly such a routine. */
   A.eq(runnability({ provider: 'gemini', noAgent: true }, true, false, '').blocked, false,
     'a script-only routine needs no model/credential');
-  A.eq(runnability({ provider: 'gemini', noAgent: true }, false, false, '').code, 'PRODUCTION_DISARMED',
-    'but a script-only routine is NOT exempt from the authorization gate');
+  A.eq(runnability({ provider: 'gemini', noAgent: true }, false, false, '').blocked, false,
+    'and is EXEMPT from the authorization gate even while production is disarmed');
+  A.ok(/script-only/.test(runnability({ provider: 'gemini', noAgent: true }, false, false, '').because),
+    'with the exemption reason named rather than silently passing');
+  // The exemption must not leak to a normal agent routine.
+  A.eq(runnability({ provider: 'gemini', noAgent: false }, false, true, 'm').code, 'PRODUCTION_DISARMED',
+    'a model-backed routine is still gated while disarmed');
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'index.js'), 'utf8');
   const at = src.indexOf('function cronStateSnapshot');
@@ -121,6 +131,10 @@ const gate = require('../sidecar/production-gate.js');
     'a failure to judge reports unknown, never runnable');
   A.ok(body.indexOf("code: 'NO_MODEL'") > body.indexOf('if (!v.allow) return'),
     'config checks come AFTER the authorization verdict in the source, matching the precedence asserted above');
+  A.ok(body.indexOf('job.noAgent === true') < body.indexOf('productionGate.decide'),
+    'and the noAgent exemption precedes the gate call, as the run path does');
+  A.ok(/returns before provider admission/.test(body),
+    'naming WHY a script routine is exempt, so the next reader does not re-invert it');
 }
 
 /* ---------- E. THE WIDGET STOPS PROMISING WORK THAT CANNOT HAPPEN ---------- */

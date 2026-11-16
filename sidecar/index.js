@@ -13156,8 +13156,17 @@ function cronStateSnapshot(now) {
      the driver passes as `providerForJob`, and a scheduled fire is ALWAYS surface 'autonomous' (the driver
      sets it; a missing surface defaults to autonomous inside the gate anyway).
 
-     NO noAgent EXCEPTION, deliberately: the gate itself does not make one, so neither does this. Reporting a
-     script routine as runnable when the gate would refuse it would restore exactly the lie being fixed. */
+     SCRIPT-ONLY ROUTINES ARE EXEMPT, because the RUN PATH exempts them (corrected 2026-11-16). An earlier
+     version of this comment claimed "the gate itself does not make one, so neither does this" — that was
+     wrong, and it made this snapshot over-report. In runOnceCore the cronScript branch runs first and a
+     `noAgent` routine hits `return` at the `if (o.noAgent || checked.wakeAgent === false)` early-exit
+     (reason 'done', turns 0, usd 0) roughly SIXTY LINES BEFORE the OWNER-AUTHORIZED PRODUCTION GATE is
+     consulted. So the gate never sees it: a script routine genuinely runs, at $0, even while production is
+     disarmed — and it emits no provider call to gate.
+     Reporting it `gateBlocked: true` was therefore the inverse of the lie this signal exists to fix: the UI
+     would claim work is blocked when it is not. That matters concretely, because the recommended
+     always-on readiness heartbeat IS a noAgent script routine; a false "blocked" on the one thing meant to
+     tell the truth about the station would be self-defeating. */
   const arm = productionArmState();
   /* A HALF-TRUE READINESS SIGNAL IS ITS OWN TRAP, so this reports every blocker the host can know for free,
      not just the gate: the authorization verdict, a missing model, and a missing credential. All three are
@@ -13169,12 +13178,17 @@ function cronStateSnapshot(now) {
   const gateFor = (job) => {
     try {
       const provider = cronProviderFor(job);
+      /* FIRST, because the RUN PATH checks it first. A script-only routine needs no model, no credential and
+         no provider admission — runOnceCore returns at the noAgent early-exit before the gate is consulted,
+         so it genuinely runs at $0 even while production is disarmed. This must precede the gate verdict
+         below, or a disarmed station would report the readiness heartbeat itself as blocked. */
+      if (job.noAgent === true) return { blocked: false, code: '', because: 'script-only: returns before provider admission', provider: provider };
       const unmetered = !!((getProviderProfile(provider) || {}).unmetered);
       const v = productionGate.decide({ armed: arm.armed, metered: !unmetered, surface: 'autonomous' });
       if (!v.allow) return { blocked: true, code: v.code || '', because: v.because, provider: provider };
       // Config blockers are only asked about once authorization would allow the run — reporting
       // "no credential" on a routine the gate would refuse anyway buries the deciding reason.
-      if (!job.noAgent) {
+      {
         if (!cronModelFor(job)) return { blocked: true, code: 'NO_MODEL', because: 'no model configured', provider: provider };
         if (!cronHasCredential(provider, cronKeyFor(provider))) {
           return { blocked: true, code: 'NO_CREDENTIAL', because: 'provider "' + provider + '" has no usable credential', provider: provider };
