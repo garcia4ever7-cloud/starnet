@@ -10217,6 +10217,7 @@ const ROUTES = [
   { m: 'POST', exact: '/api/workshop/shift', h: handleWorkshopShiftNow },
   { m: 'POST', exact: '/api/workshop/implement', h: handleWorkshopImplement },   // BUILD what a plan deliverable describes (streams NDJSON)
   { m: 'GET', qsplit: '/api/deliverables', h: handleDeliverablesList },
+  { m: 'POST', exact: '/api/deliverables/register', h: handleDeliverableRegister },
   { m: 'POST', exact: '/api/deliverables/cleanup-preview', h: handleDeliverablesCleanupPreview },
   { m: 'POST', exact: '/api/deliverables/cleanup', h: handleDeliverablesCleanup },
   { m: 'POST', exact: '/api/deliverables/cleanup-undo', h: handleDeliverablesCleanupUndo },
@@ -15060,6 +15061,74 @@ async function handleDeliverablesCleanup(req, res) {
   const out = await deliverableStore.applyCleanup({ statuses: body.statuses, fingerprint: body.fingerprint }, token, Date.now());
   if (!out.ok) return json(409, { ok: false, error: 'The library changed after preview. Preview cleanup again.', reason: out.reason });
   json(200, Object.assign({ metadataOnly: true }, out));
+}
+/* POST /api/deliverables/register — register an ALREADY-WRITTEN file as a library deliverable.
+   Built for the memorial engine, which is a real production line with no agent run behind it: its
+   films are rendered by ffmpeg from a CLI, so the artifact collector (which watches tool results)
+   never sees them and the library stayed empty. Deliberately generic so any host-side producer can
+   use it. Four refusals, each one a rule this station already learned the hard way:
+     - the path is RE-RESOLVED inside the named agent's jail with realpath, because deliverableFile()
+       resolves it the same way later; a row whose path it cannot resolve renders as a dead link.
+       realpath (not a lexical check) is what stops a symlink pointing out of the jail.
+     - a VIDEO earns status 'kept' only if video-verify.js proves real footage. Otherwise it is
+       recorded 'failed' WITH the reason rather than dropped — registering nothing teaches the owner
+       nothing, and a placeholder recorded as finished work is precisely the failure this station
+       has shipped before. Same rule, same helper as the studio bridge.
+     - bytes are measured by the HOST from the file on disk; a caller-supplied size is ignored.
+     - no filesystem write happens here. This route indexes what already exists; it never creates,
+       moves or copies a file, so it cannot be used to smuggle bytes into a workspace. */
+async function handleDeliverableRegister(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let body; try { body = JSON.parse(await readBody(req, 8192)) || {}; } catch (_) { return json(400, { ok: false, error: 'bad request' }); }
+
+  const id = String(body.id || '').trim();
+  if (!id) return json(400, { ok: false, error: 'id is required' });
+  const agentId = String(body.agentId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { ok: false, error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
+  // runId is REQUIRED here and must be path-safe, because it is part of the resolved location below.
+  const runId = String(body.runId || '').trim();
+  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(runId)) return json(400, { ok: false, error: 'runId is required, 1-80 chars of [A-Za-z0-9_.-]' });
+  const rel = String(body.path || '').trim();
+  if (!rel || path.isAbsolute(rel)) return json(400, { ok: false, error: 'path must be relative to the agent workspace' });
+
+  /* VALIDATE WHAT THE READER WILL RESOLVE, not what the caller typed. handleDeliverablesList passes
+     workshop=true for EVERY store-backed row, so deliverableFile() resolves a stored path as
+     `workshop/<runId>/<path>` under the agent workspace and builds the openUrl from that. Checking the
+     bare path here instead would have produced a row that passes registration and then 404s on click —
+     which is exactly what the first version of this route did. The studio bridge never hits this
+     because its own branch returns earlier. */
+  const served = path.posix.join('workshop', runId, rel.split(path.sep).join('/'));
+  let real, bytes;
+  try {
+    const base = fs.realpathSync(path.join(WORKSPACES, agentId)) + path.sep;
+    real = fs.realpathSync(path.join(WORKSPACES, agentId, served));
+    if (!real.startsWith(base)) return json(403, { ok: false, error: 'path escapes the agent workspace' });
+    const st = fs.statSync(real);
+    if (!st.isFile()) return json(400, { ok: false, error: 'path is not a regular file' });
+    bytes = st.size;
+  } catch (_) { return json(404, { ok: false, error: 'no such file at workspaces/' + agentId + '/' + served }); }
+
+  const kind = String(body.kind || 'files').trim().slice(0, 20) || 'files';
+  let status = 'kept', verifyReason = '';
+  if (kind === 'video') {
+    const verdict = verifyVideoFile(real);
+    if (!verdict.ok) { status = 'failed'; verifyReason = String(verdict.reason || 'unverified'); }
+  }
+  const summary = status === 'kept'
+    ? String(body.summary || '')
+    : ('Video rejected: ' + verifyReason + ' — ' + String(body.summary || ''));
+  const row = {
+    id, agentId, runId,
+    title: String(body.title || id), source: 'register', status, kind, summary,
+    // Mirrors the studio bridge: a file that failed verification is listed with NO playable
+    // member, so the panel cannot offer a preview of something the host just refused to vouch for.
+    files: status === 'kept' ? [{ path: rel, bytes }] : [],
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  if (status !== 'kept') { row.verifyReason = verifyReason; row.verifyBytes = bytes; }
+  try { await deliverableStore.record(row, Date.now()); }
+  catch (e) { return json(500, { ok: false, error: 'could not record deliverable: ' + ((e && e.message) || 'unknown') }); }
+  json(200, { ok: true, registered: status === 'kept', status, kind, bytes, served, verifyReason: verifyReason || undefined, row });
 }
 async function handleDeliverablesCleanupUndo(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
