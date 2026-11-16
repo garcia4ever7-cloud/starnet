@@ -1825,3 +1825,195 @@ all three. **I added zero**; the 362 figure was stale and the ratchet failure is
 `2f5f3486c` the arm/disarm log line that still laundered attribution (missed by the first pass, caught by the
 live log within minutes) · `a3cc291aa` the taskintent regression. The 9 pre-existing untracked items
 (`memorial/`, `PROGRESS.md`, `pnpm-*`, …) were deliberately left unstaged.
+
+## 2026-11-16 — connector vault keyed, the "stale" Airtable PAT was already dead, and codex is PROVEN headless
+
+### DO NOT go on an Airtable revocation errand — it is already done
+
+A prior audit reported "a superseded Airtable PAT sitting on disk… two live Airtable PATs at rest unless
+the owner revoked it." **The second half was wrong and the first half is harmless.** Measured by SHA-256
+fingerprint prefix (one-way; no value was ever read into output):
+
+| connector | live `state.json` | `state.json.bak` | verdict |
+|---|---|---|---|
+| exa | `de107eb6` | `de107eb6` | identical — never stale |
+| apify | `2d552f3b` | `2d552f3b` | identical — never stale |
+| **airtable** | `c93abd70` | **`e4ec6e67`** | differs — one superseded |
+
+Then a read-only identity probe (`GET api.airtable.com/v0/meta/whoami`, no data read, no write):
+
+```
+LIVE  pat fp c93abd70: HTTP 200  tokenUserId=usr9mBSnLbfglyL87
+STALE pat fp e4ec6e67: HTTP 401  error=UNAUTHORIZED
+```
+
+**The stale PAT is already revoked upstream.** What sits in the `.bak` is an inert dead string. Nothing to
+revoke, no owner action. **The `.bak` was deliberately NOT hand-deleted** — it is the vault's own
+write-before-write safety copy, and removing a recovery path to delete a credential that no longer works is a
+bad trade. The vault migration overwrites it with ciphertext anyway.
+
+**Technique worth reusing:** to decide whether an at-rest credential is a live risk, probe the vendor's own
+identity endpoint. It is free, read-only, returns scopes/ids rather than the secret, and it answers "is this
+actually dangerous" instead of guessing. Compare credentials by fingerprint prefix, never by value.
+
+### The connector vault is KEYED. Losing one env line now costs three credentials.
+
+`sidecar/connector-vault.js` was always a complete AES-256-GCM envelope vault, wired at `index.js:26-27`,
+and simply **unkeyed** — `connector-vault.js`'s `if (!key) return value;` meant `encode()` returned the
+object verbatim and the file was plaintext. `required` is only true under `STARNET_DESKTOP_SHELL === '1'`,
+which Termux never sets, so it failed OPEN. `/api/connectors` reported `credentialStorage:{encrypted:false}`
+honestly the whole time — the law was violated in the open, not hidden.
+
+`STARNET_CONNECTOR_ENCRYPTION_KEY` is now set in `~/.config/starnet/env` (mode 600, CSPRNG, 64 lowercase
+hex — the shape `makeConnectorVault` enforces). **Key fingerprint `09eb3a68`.** Backup of the pre-change env:
+`~/.config/starnet/env.bak-vaultkey-20261116`.
+
+> **LOSE THAT LINE AND THE CONNECTOR CREDENTIALS ARE UNRECOVERABLE CIPHERTEXT.** exa, Apify and Airtable
+> would all have to be re-issued at the vendors. `connector-vault.js` is deliberately merciless — it returns
+> `UNAVAILABLE` on every path rather than silently resetting. `~/.config/starnet/env` now needs a backup
+> discipline it did not have before.
+
+**Verified by behaviour, not by configuration** — on temp copies of the real config, the live file never
+written:
+
+| test | result |
+|---|---|
+| unkeyed vault | `protected:false`, raw credential on disk (the defect, reproduced) |
+| keyed vault | `protected:true`, format `starnet.connector-vault.v1`, iv/tag/data present |
+| raw credential in ciphertext | **false** — and no field name (`airtable`/`apify`/`x-api-key`) leaked |
+| decrypt round-trip | canonical fingerprint matches; **all 3 carriers byte-exact** |
+| **wrong key** | **THROWS `UNAVAILABLE`** — real AES-GCM, not obfuscation |
+| malformed key | refused at construction |
+| `migrate()` | seals the target **and the `.bak`**, and clears the legacy file |
+| with the ACTUAL installed key | sealed, then **reopened by a fresh vault rebuilt from the env file** |
+
+That last row is the one that matters: a bad key would otherwise surface only after the file was sealed and
+the station was broken.
+
+### WHY THE FILE IS STILL PLAINTEXT, and why that was the right call
+
+Migration is boot-gated (`index.js:4862`, on `connectorVault.protected`), so **the key is inert until the
+next restart.** Sealing the live file by hand was deliberately refused — CLAUDE.md's own rule, "In-memory
+state wins over files you edit behind its back… Use the proper API, or restart." The sidecar holds these
+configs in memory and would either write plaintext back on any connector change or fail reading ciphertext it
+has no key for. **If `credentialStorage.encrypted` is still `false`, the restart has not happened yet**;
+that is the only remaining step, and the three connectors were `state=up` (exa 3 / apify 7 / airtable 56
+tools) before and after the env change.
+
+**Be honest about what this buys.** The key sits beside the ciphertext, same device, same UID. It defends
+against **exfiltration of the data directory** — a `tar` of `workspaces/`, a device/adb backup, a cloud sync
+of `~/.local/share/`, a copied `.bak`. It does **not** defend against anything that can already read
+`~/.config/starnet/env`, which includes `shell.exec` (whose filesystem floor is self-described as
+"best-effort"; jailing it is still an open side mission). Do not describe this as confidentiality against a
+local attacker.
+
+**Also do not describe `hostquota.js` as protection against Apify token leakage.** It caps StarNet's OWN
+outbound calls (8/day, shared counter). An attacker holding the token calls `api.apify.com` directly and
+never traverses this station.
+
+### codex IS PROVEN HEADLESS. That was the largest open unknown.
+
+Three autonomous runs fired at 2026-11-16T17:00Z on `codex/gpt-6-luna`:
+
+```
+17:00:51 agent codex/gpt-6-luna | done | usd=0 | turns=1 | toolsOk=0 | surface=autonomous
+17:01:36 agent codex/gpt-6-luna | done | usd=0 | turns=2 | toolsOk=1 | surface=autonomous
+17:02:26 agent codex/gpt-6-luna | done | usd=0 | turns=7 | toolsOk=5 | surface=autonomous
+```
+
+Before this, all 16 codex runs were `surface: interactive` and the lane 9 agents depend on was unproven for
+unattended work. Two of the three emitted real successful tool calls, which is the station's own evidence
+standard (`toolsOk > 0`, not `reason: done`). **Total cost $0.00** — lifetime stayed at $123.877.
+
+**But `usd: 0` on codex is a BOOKING, not proof of zero cost.** codex is `unmetered: true`; real consumption
+is against the owner's ChatGPT plan quota, which nothing on this station can observe. That is the same
+telemetry blindness this file flags for `cloude-free`. And `gpt-6-luna` is **not** in `codex.js`'s static
+catalog — it resolves dynamically.
+
+**SCOUT failed in the same window, exactly as predicted:**
+`openrouter http 402 — requested up to 64000 tokens, but can only afford 681`. Its Gemini primary failed and
+it rotated to the saved chain's **single** entry, which is out of credit. `consecutiveFailures: 1`. This is
+the one-entry-chain defect firing in production.
+
+**Trap when reading cron rows:** `d22650c8`'s `lastError` said "Production is DISARMED" while production was
+armed — a STALE message from an older fire. `lastError` is not re-cleared on a later success of a different
+kind. Check `lastRunAt`/`lastStatus` before believing a `lastError`.
+
+### NEW sidecar/readiness.js — a readiness judge that cannot be talked into green
+
+Pure (no IO, no clock, no live require — pinned by test). Three states, never two: `ok` / `blocked` /
+`unknown`. **Three things are UNKNOWN permanently and no input can flip them:** provider credit (needs a
+billed call), visual correctness (a 171-second film of solid black clears every byte gate here), and
+tool-calling under the full prompt. `verdict.ready` is false while anything is blocked.
+
+Eight checks, each a scar: routine authorization · recent autonomous work (the independent witness; requires
+`toolsOk > 0`) · fallback depth AND vendor spread · provider concentration · dark tools · deliverable
+verification · ledger health paired with whether a SAVED `perDay` makes the day rail strict · delegated-worker
+cap. Replayed against the real 2026-11-03..11 state it returns `ready:false` with 6 blockers and **fires at
+49h** — it would have caught the eight-day outage on day two. Live on 2026-11-16: `ready:false`, 2 blocked
+(one-entry chain, uncapped worker), 6 unknown, 4 ok.
+
+**Not wired to a route yet, deliberately** — a route needs a restart. `darktools` reports UNKNOWN
+out-of-process because the tool registry is built per run, which is the evidence that any eventual
+`/api/readiness` must live INSIDE the sidecar, not in a standalone script.
+
+### Three incompatible tool-def shapes — two were registered NAMELESS
+
+`registry.register` does `tools[t.name] = t`, so a def with no top-level `name` lands under the literal key
+`"undefined"` and the next one silently overwrites it. Worse, the shape that causes it also hides the safety
+attributes: `{properties:{id, scope, requiresConsent, network}}` gives `makeTool` no `def.scope` and no
+`def.requiresConsent`, so a **paid, network, consent-gated writer registers as a free read**.
+
+Two files were live offenders: `video-kling.js` (properties.id + `invoke`) and `image-kling-upscale.js`
+(top-level `id` + `.impl`). **Neither tool has ever been callable by anyone** — that, not the consent gate, is
+the real reason PRODUCER could never render a video. Both registrations removed (behaviour-preserving; an
+uncallable tool loses nothing). Neither was ported: both are paid network writers against wallets this station
+cannot audit, so porting is an owner spend decision.
+
+`tool.js` now has `assertToolName` beside `assertSchemaKey` and **throws** on both bad shapes. That guard is
+how the second offender was found — it broke `payload.budget`'s private sidecar at boot. **If a boot or
+`payload.budget` breaks after touching tools, suspect a nameless def and read the throw.** Seven dark `studio`
+grants removed (21 → 14); `video.process` and `higgsfield.enhance` had no implementation anywhere in the repo.
+
+### Corrections to earlier claims in this file and in my own reports
+
+1. **The Gemini 429 is NOT the 20-requests/day cap.** All ten are
+   `generate_content_free_tier_input_token_count, limit: 250000` — **input tokens per MINUTE, per model**.
+   Daily request counts were 1–5. SCOUT at 78–105k tokens/run succeeds every time; DESIGNER at 172–255k fails
+   every time on the identical model. **It is a SIZE problem, fixable for $0 by shrinking DESIGNER's context** —
+   no provider change, no funding. Also: `recoveryAttempts: []` on all ten, and retries fired 2–6s later
+   against the same saturated model while Google's response said `retry in 29.07s`.
+2. **`perRun: 0` does NOT mean unlimited.** `cron-driver.js` forwards a routine's own ceiling as
+   `callerMaxCostUsd` (lower-only via `Math.min`). Every armed routine now carries `maxCostUsd: 0.25`. What IS
+   uncapped is a **dispatched worker**: `BUDGET_PER_WORKER` unset → `perWorker: 0` → `maxCostUsd: 0` → falls
+   through to `perRun: 0` → `Infinity`. `orchestration.js`'s promise that "a runaway worker can't blow the
+   lead's per-run ceiling" is inert.
+3. **A `noAgent` script routine IS exempt from the production gate** — it returns at `index.js:17138` about
+   sixty lines before the gate at `:17200`. An earlier version of `cronStateSnapshot`'s `gateFor` reported such
+   routines as `gateBlocked:true`, which was the INVERSE of the lie it was built to remove. Fixed in
+   `c0a1d0096`, exemption placed before the gate call.
+4. **The Anthropic key is the wrong credential CLASS, not expired.** 106 chars, prefix `sk-ant-usr-` (a
+   Claude.ai subscription token) in a slot that sends `x-api-key`. Live probe: `HTTP 401 invalid x-api-key`.
+   `/api/providers` says `configured:true`, which only means the variable is non-empty — that is why nothing
+   flagged it. Only the owner can mint `sk-ant-api03-`; never accept it pasted into a transcript.
+5. **`.ob.json` was never a filesystem anomaly.** It is 9 bytes of ASCII, `not found`, with no newline —
+   captured stdout from a `curl -o` of a sidecar URL that 404'd (`index.js:9704` ends with exactly
+   `res.end('not found')`). `cat` succeeded and printed the file's contents; an earlier session read that as a
+   shell error.
+6. **No "pipeline manifest" exists** — zero hits repo-wide. Five unrelated artifacts get confused for it;
+   the closest are `routing.plan.json` (the drawn belt, currently `gateDocks:{}` and an EMPTY `lines` array)
+   and `blueprint.json`/`workflow.json` (studio state). Disambiguate before changing anything called that.
+
+### Why an approval gate on inter-agent handoffs is the WRONG fix
+
+Measured, not argued: an approval gate would block on **57 of 57** manifest rows (`approval: pending` on
+every one) and **zero** rows have ever passed QC. `permissions.js` treats an unattended run with no approver
+as a hard deny — *"silence is not consent"* — with no park-and-wait branch, so the gate would not make
+handoffs safer, it would stop them permanently. That contradicts Rule 1.
+
+The real gaps are **verification** and **independence**: a studio stage advances on `captureAgentOutput`
+returning **≥20 characters**, the belt chain advances on non-whitespace, the handoff record is written and
+**never read**, and `setVerification` has exactly one call site. The reviewer mechanism already exists and is
+switched off — `sidecar/routing/verdict.js` implements `VERDICT: approved|revise` with a revise loop, and the
+live floor has `gateDocks: {}`. Drawing a reviewer dock is a floor edit, not code. Where a HUMAN gate belongs
+is the irreversible act — publishing — and `approval` + `production-gate.js` already own that.
