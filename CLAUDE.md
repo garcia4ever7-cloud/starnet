@@ -2156,3 +2156,22 @@ Pre-flight each time: `.spend-pending` empty · **zero unfinished runs** (`/api/
 **normalised**. Derive the launcher from the node process's **ppid** and confirm with `ps -o args=` —
 `pgrep -f 'start-starnet\.sh'` matches Claude Code's own shell and killing it kills your session, not the
 station. Kill launcher first, then node, then relaunch detached with `setsid nohup`.
+
+### Commits for this session (local to `feat/harness-backend`, NOT pushed)
+
+| commit | what |
+|---|---|
+| `fbc370ebb` | `feat(deliverables)` — `POST /api/deliverables/register` (+69 lines, 0 removals, two hunks in `index.js`): the route, the video honesty gate, and the `workshop/<runId>/` resolution fix. |
+| `63cb51308` | `docs` — the section above. |
+
+Nothing else was staged. `STATION_FIELD_NOTES.md` is modified in the working tree by an **earlier**
+session and was deliberately left unstaged, along with the 9 pre-existing untracked items
+(`PROGRESS.md`, `pnpm-*`, `ENGINEERING_ASSESSMENT_*`, `.ob.json`, …). The remote diverged on
+2026-09-28 and is a PARALLEL line, not a stale copy — see the 2026-11-10 push notes before attempting
+to reconcile it.
+
+**Not committed and still live on the station** (config, not code): `BUDGET_PER_WORKER=5.00` and
+`STARNET_CONNECTOR_ENCRYPTION_KEY` in `~/.config/starnet/env`, the sealed
+`workspaces/connectors/state.json`, and the registered deliverable row
+`memorial:fulltest-20261116:video` with its 32.8 MB file at
+`workspaces/agent/workshop/memorial/fulltest-20261116.mp4`.
