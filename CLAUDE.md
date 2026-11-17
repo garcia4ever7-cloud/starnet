@@ -2295,3 +2295,65 @@ fail under that profile (`agent-capabilities.test.js` does), so verify both.
 
 `STATION_FIELD_NOTES.md` shows as modified in the working tree — that is the **cron system's own
 auto-warning** appended 2026-11-11 (the pipeline-chain 429), not a human edit. Leave it unstaged.
+
+## 2026-11-17 — YouTube is reachable after all (via Gemini), and a reviewer caught me fabricating
+
+### yt-dlp CANNOT fetch YouTube on this device. Gemini can. Use the script.
+
+`yt-dlp` is blocked by YouTube's **"Sign in to confirm you're not a bot"** gate — IP-level, against
+this phone. Proven dead ends, do not retry them: the newest `yt-dlp` (2026.10.26, both system and
+the learn-skill venv), **five** extractor clients (`tv_embedded`, `android`, `ios`, `web_safari`,
+`mweb`), `WebFetch` (returns YouTube's SPA footer only), the Chrome extension (not connected), both
+`youtu.be` share-token forms, and StarNet's own Chromium cookie store (no YouTube session).
+**`?is=`/`?si=` are share-tracking tokens, not auth — a fresh one never helps.**
+
+**What works: `~/starnet/scripts/yt-transcript.sh <url>`.** The Gemini API accepts a YouTube URL as
+`file_data.file_uri` and fetches it **server-side**, so the device gate never applies. Output lands
+in `~/transcripts/<id>.md` with title, channel, duration, a timestamped verbatim transcript, and
+every on-screen command/file transcribed. Two live results: an 11:25 video cost **62,490** prompt
+tokens, a 28:02 video **153,209** — well under the 1M window but a real slice of the free tier's
+250k/min, so **run videos one at a time**.
+
+Gotchas the script already handles, learned the hard way:
+- **`gemini-3.8-flash` hung for the full 900s** on a video and returned nothing. The script walks a
+  ladder (3.8 → 3.6 → 3.5 → flash-latest → 2.5) and **`gemini-3.6-flash` is what actually worked,
+  twice.** Pass `--model gemini-3.6-flash` to skip the 15-minute dead end.
+- A **503 "high demand" is the model being busy, not a bad request** — the ladder retries a
+  *different* model rather than hammering the same one.
+- The key is read into a shell variable from `~/.config/starnet/env`, never echoed, never written to
+  the output file, and never placed in argv (the POST body comes from stdin), so it cannot leak via `ps`.
+
+### NEW skill `~/.claude/skills/software-factory/SKILL.md`
+
+Distilled from two real transcripts (Matt Pocock's "Sandcastle", 11:25; ZazenCodes' "Build a
+Software Factory with Claude", 28:02). The one line worth carrying: **the builder never approves its
+own work** — both sources make an independent reviewer the load-bearing stage. Install commands,
+URLs and CLI invocations from both videos were deliberately stripped out; nothing from either was
+executed.
+
+### A SUBAGENT REVIEWER CAUGHT ME FABRICATING A MEASUREMENT — in a skill about verification
+
+I had a subagent check the draft against the transcripts instead of vouching for it myself. It found
+three defects, all of which I then re-verified against the source and all of which held:
+
+1. **I wrote "Observed live in [B]: swapping the orchestrator to a smaller model barely changed
+   wall-clock."** He never measured it. At `[18:35]` he *predicts* it, and the only thing he actually
+   observes points the other way (`[19:20]` "Sonnet is flying"). **I converted a presenter's untested
+   intuition into an observation** — in a document about independent verification.
+2. **A false convergence:** I claimed both pipelines end in a gated merge. Pocock's has **no human
+   gate at all** (the merger agent merges and closes the issue itself) and no spec stage — the issue
+   *is* the spec.
+3. **An overstated disagreement:** I wrote that the sources "disagree" about sandboxing. One argues
+   for it; the other never mentions it in 28 minutes. That is divergence-plus-silence. The reviewer
+   also supplied the context I had missed — **one presenter is away from the keyboard, the other is
+   sitting there watching every agent** — which explains the difference without any conflict.
+
+It also recovered four teachings I had dropped, one of which is better than anything I kept:
+**cross-vendor adversarial review** (one vendor's model implements, another's reviews — a model does
+not share a different vendor's blind spots).
+
+**The lesson, and it generalises past this skill:** a fabricated claim is most likely exactly where
+you feel most authoritative. The cheap guard is to hand the artifact plus its sources to a reviewer
+with no stake in the draft and ask it to find what is unsupported. It cost ~114k subagent tokens and
+three minutes, and it caught an invented measurement I would otherwise have shipped into every future
+session. **Pre-correction draft kept at `SKILL.md.bak-predraft-20261117`.**
