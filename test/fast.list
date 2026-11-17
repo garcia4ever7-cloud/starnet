@@ -988,6 +988,7 @@ test/audio-finish.test.js
 test/headless-tools-granted.test.js
 test/headless-dispatch.test.js
 test/dispatch-handoff-race.test.js
+test/orchestration-worker-pool.test.js
 test/deliverable-manifest.test.js
 test/source-hygiene-ratchet.test.js
 test/outbox-studio-bridge.test.js
@@ -1004,6 +1005,7 @@ test/tool-schema-contract.test.js
 test/outbox-approval-route.test.js
 test/outbox-unverified-approval.test.js
 test/production-gate.test.js
+test/etsy-workflow.test.js
 test/cron-runnability-truth.test.js
 test/memorial-business.test.js
 test/memorial-fit.test.js
