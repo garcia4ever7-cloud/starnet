@@ -335,13 +335,78 @@ appear — not just that the run ended `done`. This is behavioural rule 8 applie
   enum (`priority` = ordered fallback; `"fallback"` is rejected).
 - **Never print a key, a password, or a combo credential.** Compare by SHA-256 fingerprint.
 
-### cloude-free
+### cloude-free — REBUILT 2026-11-17. 7 entries, every one verified TWICE.
 
-10 entries, `priority` strategy, providers alternating so one daily cap cannot stall the
-chain, Cloudflare last. Known-bad, do not re-add without re-probing: `gemini/gemini-2.5-flash`
-and `-flash-lite` are retired ("no longer available to new users"); `gemini-3.8-flash` and
-`gemini-3.7-flash` time out at 90s. `~/start-starnet.sh` now starts OmniRoute first if
-`:20128` is not answering.
+**The description that used to sit here was stale in three ways** and is corrected below: it said
+10 entries on `priority` with "Cloudflare last". The live combo was found at **12 entries on
+`lkgp`**, and — the part that mattered — `lkgp` is an *intelligent* strategy
+(`INTELLIGENT_STRATEGIES = ["auto","lkgp"]`) that scores on `quota/health/latency/…`. Every
+quota table in OmniRoute's DB (`provider_quota_state`, `provider_key_limits`, `provider_plans`,
+`connection_runtime_state`) is **empty**, so the quota weight was inert and the latency weight
+dominated — meaning the scorer picked the *fastest* model, which is the *smallest* one. Measured:
+`totalFallbacks: 0` lifetime, and **100% of `omni` traffic was being served by
+`@cf/meta/llama-3.2-3b-instruct`, a 3-billion-parameter model.**
+
+Current chain (combo id `e486b6dc-745d-4360-b975-ecc829ef2242`, strategy **`priority`**):
+
+```
+p1  openrouter/cohere/north-mini-code:free         256k   openrouter    code-specialised
+p2  cf/@cf/openai/gpt-oss-120b                     131k   cloudflare (main-2)
+p3  openrouter/nvidia/nemotron-3.5-super-vl:free   1M     openrouter    big-context catcher
+p4  cf/@cf/nvidia/nemotron-3-120b-a12b             128k   cloudflare (main)
+p5  openrouter/nvidia/nemotron-3.5-lightning:free  1M     openrouter
+p6  cf/@cf/zai-org/glm-4.7-flash                   128k   cloudflare (main-2)   correct but ~8.6s
+p7  gemini/gemini-3.1-flash-lite                   1M     gemini        LAST on purpose
+```
+
+**Vendors alternate** because the dominant failure mode — rate limiting — is vendor-wide, so the
+next rung must belong to a different vendor or it inherits the same cap. Cloudflare entries are
+**split across both CF connections**, doubling the free neuron budget. **Gemini is last
+deliberately**: its free tier trains on submitted prompts and these sessions carry proprietary
+source — a privacy cost, not a quality one (it actually scored highest).
+
+**Two gates, not one. A tool-call probe is NOT enough** (this file's own law). Every entry passed
+(a) a real Anthropic-format `tool_use` call AND (b) a two-turn agentic coding probe — read a file
+via a tool, then diagnose a planted non-obvious defect (an unfloored `length / 2` index).
+**Four models passed the tool probe and FAILED the reasoning probe** by confidently inventing a
+defect that was not in the code. Do not re-add without re-running both:
+`cf/@cf/qwen/qwen3-30b-a3b-fp8` · `openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`
+· `cf/@cf/mistralai/mistral-small-3.1-24b-instruct` · `cf/@cf/meta/llama-4-scout-17b-16e-instruct`
+(the last also took 32s).
+
+**Gated behind a PAID Cloudflare plan — all 403, re-probed 16 days apart:** `kimi-k2.7-code`,
+`kimi-k2.6`, `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, and every `deepseek-v4*`. Cloudflare's own
+docs say these are not on Workers Free billing. Do not keep retrying them.
+
+**Known-bad, do not re-add without re-probing:** `gemini/gemini-2.5-flash` and `-flash-lite` are
+retired ("no longer available to new users"); `gemini-3.8-flash` and `gemini-3.7-flash` time out
+at 90s; `poolside/laguna-xs-2.1:free` and `laguna-s-2.1:free` are **404 — gone from OpenRouter**;
+`nemotron-3-ultra-550b-a55b:free` 503s; `dots-3-note-preview:free` chats but 400s on a tool call.
+
+**OmniRoute pre-routes by CONTEXT SIZE — it does not try-and-fail small rungs.** `[Likely]` — a
+497,040-token request to the combo was served by p3 (1M) with **no failure recorded against p1
+(256k) or p2 (131k) and `totalFallbacks` unchanged**. So a 256k model at p1 costs nothing on
+oversized prompts. This also explains the historical
+`400 Input exceeds maximum input tokens for … north-mini-code:free` errors: those came from a path
+naming the model **directly**, not through the combo.
+
+**Failover is PROVEN, not assumed.** A deliberately invalid rung was prepended and one harmless
+request sent: `p0 fail=1 lastStatus=error` → `p1 ok` → real answer, `totalFallbacks 0 → 1`. Full
+exhaustion (every rung invalid, tested on the unused `cloude-free-copy` so production was never
+left broken) returns a **structured HTTP 400 in 0.69s** naming each failed rung — no hang, no
+silent success, no paid fallback.
+
+**Paid routing is structurally impossible here, for two independent reasons.** Of OmniRoute's 12
+providers only **three hold credentials** — `cloudflare-ai` (2 connections), `gemini` (1),
+`openrouter` (1). The other nine, including `codex-app-server` (the owner's ChatGPT plan) and
+`devin-cli-agentic`, have **0 active connections** and cannot be selected by any strategy. And
+every OpenRouter rung carries the `:free` suffix. `omni-status` re-asserts both on every run.
+
+**Capacity, honestly:** OpenRouter `:free` is the backbone (~1000 req/day, since ≥10 credits have
+been purchased on that account; 20 RPM). Cloudflare free is ~10k neurons/day **per account** ≈
+2-3 Claude Code turns each. This is a much stronger free chain, **not an unlimited one**.
+
+`~/start-starnet.sh` starts OmniRoute first if `:20128` is not answering.
 
 ## Headless-tool wiring fix (2026-10-27)
 
@@ -822,9 +887,18 @@ Agent shows no model / blank? Just **reload the browser tab** — it's a display
 |---------|------|------|
 | `cc-sub` | your Claude subscription | plan quota |
 | `cc-api` | Console API credits (reads key from `~/.config/starnet/env`) | paid |
-| `omni` or `cc-omni` | OmniRoute cloude-free combo | $0 |
+| `omni` or `cc-omni` | OmniRoute `cloude-free` combo (7 verified free models) | $0 |
+| **`omni-status`** | **read-only health view of that chain — see below** | $0 |
 
 **Resume the last chat:** `cd ~/starnet && claude --continue`
+
+`omni` also pins the **sonnet and opus aliases** to the combo
+(`ANTHROPIC_DEFAULT_SONNET_MODEL` / `_OPUS_MODEL`, added 2026-11-17). Without them, typing
+`/model sonnet` inside an `omni` session breaks it — measured:
+`API Error: 400 Ambiguous model 'claude-sonnet-5'`, with the combo seeing zero requests. This
+matters because `~/.claude/settings.json` carries `"model": "opus"`. Do not remove those two
+lines. `omni` also `unset`s `ANTHROPIC_API_KEY` so a parent shell's credential cannot take
+precedence over the local proxy token — `~/.bashrc` exports one, so this is load-bearing.
 
 ⚠️ If "CANNOT LINK EXECUTABLE … syscall-shim.so not found":
 ```bash
@@ -855,7 +929,29 @@ Saved restore points:
 
 Dashboard: `http://localhost:20128/dashboard`
 
+**`omni-status`** — read-only diagnostic for the free chain. Answers the two questions the
+launcher could not: *which model is serving me right now*, and *if it fell back, why*. Shows the
+active rung, the chain in priority order with live per-rung success rate / avg latency / last
+status, every failure with its reason, connection rate-limit state, and a **PAID-SAFE** assertion.
+GETs only — changes nothing, prints no credential.
+
+```bash
+omni-status                    # the whole picture
+OMNI_STATUS_COMBO=other-combo omni-status    # point it at a different combo
+```
+
+Implementation is a bash shim at `$PREFIX/bin/omni-status` that execs
+`~/.omni-free/omni-status.mjs`. The shim exists because **Termux has no `/usr/bin/env`**, so a
+`#!/usr/bin/env node` shebang can never run here (same trap that kept OmniRoute itself from ever
+auto-starting — see the OmniRoute diagnosis notes above).
+
 ⚠️ A 401 that comes back instantly means your **client key file is stale** (`~/.omniroute/client_api_key.local` must match `OMNIROUTE_API_KEY` in your env file), not a provider problem. **Restart the sidecar after changing it.**
+
+⚠️ Combos are edited by `PUT /api/combos/<UUID>` — **by id; the name 404s**. Back up first with
+`GET` and keep the raw body: the 2026-11-17 rebuild's backups are in
+`~/.omni-free/backups-20261117T175229Z/` (`combo-cloude-free.before.json` = the original 12-entry
+`lkgp` combo, `combo-cloude-free.intended-FINAL.json` = current). Rolling back is one re-PUT and
+needs **no restart** — combos are read per request.
 
 ### 🧵 Driving an agent from curl (the shape that actually works)
 
