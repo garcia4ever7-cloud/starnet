@@ -2223,3 +2223,45 @@ production **DISARMED**, `spentToday $2.11 of $25`.
 4. Then the real decision is the owner's: fund a provider. `claude-haiku-5-5` ran these workflows at
    ~$0.005/run, so even $10 is thousands of runs, and the $25/day rail plus the new per-routine caps already
    bound it. Until then the pipeline is proven but cannot produce.
+
+- 2026-11-11T11:01:56.943Z AUTO-WARNING (cron, 2 failures in a row): ⚠ "Etsy pipeline chain (NIGHT4CHRIST leads)" (agent: agent) has failed 2 runs in a row. Last error: gemini http 429 - You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. 
+* Quota exceeded for metric: generativelanguag
+
+## 2026-11-17 — accepted risk: commits are not signed
+
+Decided by the owner, recorded so a future audit does not re-raise it as an open defect.
+
+`git log %G?` is `N` for every commit; `commit.gpgsign`, `user.signingkey` and `gpg.format` are all
+unset. **This is accepted, not an oversight.** The repo is a single-owner phone checkout: there is no
+second committer to impersonate, no CI trusting signatures, and no release pipeline verifying them.
+Generating a signing key on a device whose `shell.exec` filesystem floor is self-described
+"best-effort" would add a key to steal without adding a check anyone performs.
+
+What this costs, stated plainly so nobody overclaims later: local git objects existing is NOT the same
+as commits being signed, and neither is the same as logs being immutable or externally anchored. Any
+claim of tamper-evident history is unsupported here. If the repo ever gains a second committer or a
+release pipeline, revisit this.
+
+## 2026-11-17 — security:secrets now RUNS, and what it found
+
+`gitleaks 8.30.1-2` installed from the Termux repo (`pkg install gitleaks`), so `npm run
+security:secrets` is no longer BLOCKED. First full run: **13,688 commits, 185 MB, 54s, 45 findings,
+exit 1.** Exit 1 is the script doing its job — "review every finding before making the repository
+public" — not a tool failure.
+
+Triage, by rule and location, with **no value ever printed**:
+- **38 of 45 are inside `test/`** — fixtures in files like `keys-save`, `vision-input`, `onepassword`,
+  `redact.linear`. Expected for a repo whose tests exercise key handling and redaction.
+- **7 sit outside `test/`**: `CLAUDE.md` (an Airtable *tokenUserId*, an identifier rather than a
+  credential, which I added myself on 2026-11-16), `VIDEO_DELIVERY_COMPLETE.md` (an
+  `x-starnet-token:` in a curl example), three `qa/evidence/**` probe scripts, and one hit each in
+  `src-tauri/src/sidecar_output.rs` and `sidecar/tools/builtin/station-control.js`.
+- **None of them matches the live `STARNET_API_TOKEN`** — compared by SHA-256 fingerprint against
+  every 16+ character candidate in each file, in-tree and from history. So no live credential is
+  exposed by these findings.
+
+**Reusable technique:** to decide whether a scanner hit is a live risk, fingerprint the committed
+candidates and compare against the live secret. It answers "is this dangerous" without printing
+either value, and it is the same method used for the already-dead Airtable PAT.
+
+The repo still must not be made public without reviewing all 45.
