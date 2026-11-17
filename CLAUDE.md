@@ -2175,3 +2175,123 @@ to reconcile it.
 `workspaces/connectors/state.json`, and the registered deliverable row
 `memorial:fulltest-20261116:video` with its 32.8 MB file at
 `workspaces/agent/workshop/memorial/fulltest-20261116.mp4`.
+
+## 2026-11-17 — the empty-combinator schema bug, and five baseline claims that were wrong
+
+A read-only Etsy-readiness audit. One defect found, traced to a single line, reproduced locally and fixed.
+The rest of the assignment ended in **NO SAFE PATCH**, deliberately.
+
+### The bug: `scrubSchema` emitted an INVALID empty array where its own comment promised a permissive `{}`
+
+`sidecar/mcp/translate.js`, the array branch of `scrubSchema`:
+
+```js
+if (Array.isArray(node)) return depth > SCHEMA_DEPTH_MAX ? [] : node.map(...)   // SCHEMA_DEPTH_MAX = 24
+```
+
+`{}` is permissive; **`anyOf: []` is malformed JSON Schema**, and a strict validator rejects the WHOLE
+function definition — `Invalid schema for function 'mcp__airtable__update_view': [] has less than 1 item`.
+So one over-deep branch in one connector tool silently disables that tool for an entire run.
+
+**Airtable's own schema is innocent — the empty array is created here.** Measured on the real `update_view`
+inputSchema (fetched read-only via `tools/list`; no record touched, nothing billable):
+
+| stage | invalid-empty combinators |
+|---|---|
+| raw schema from Airtable | **0** |
+| after `translateSchema` | **1** ← introduced locally |
+| codex wire · openai-compatible `wireTools` · moonshot | **1 each → broken** |
+| gemini `forGemini` · anthropic `normalize` | 0 — *incidentally* pruned |
+
+That last row is why it looked like a Codex-only problem and why a per-provider fix would have left two
+wires broken. **Fix it in `translate.js`, not in an adapter.**
+
+### Only ONE nesting depth reproduces it — so a fixed-depth test passes against broken code
+
+This is the part worth carrying forward. The truncation emits `[]` only when the node sitting *just* past
+the budget is an ARRAY: one level shallower it is in budget, one level deeper the truncation lands on the
+enclosing OBJECT and yields a harmless `{}`. Swept depths 1..40 against the pre-change module: **exactly one
+— a plain chain of 12 levels** (the `anyOf` value scrubbed at depth 25). My first regression test used a
+realistic recursive filter shape at depth 44 and **passed against the broken module**. The test now
+**sweeps every depth** to `SCHEMA_DEPTH_MAX + 16`, which also survives a change to the budget constant.
+
+### Two things the fix must NOT do
+
+- **`required: []` must be preserved.** It is valid and load-bearing — `toolschema`'s `ensureRequired` emits
+  exactly that, so stripping it would break the Moonshot shaper. Same for `examples` / `default`. Only
+  `anyOf, oneOf, allOf, enum, prefixItems, type, items` are invalid when empty.
+- **An author-chosen NAME is not a keyword.** Under `properties` / `patternProperties` / `$defs` /
+  `definitions` a tool may legitimately declare an argument called `anyOf` or `enum`; treating that name as
+  a combinator would delete real arguments. The sanitizer recurses into values only, and a test pins it.
+
+Regression: `test/mcp.schema-empty-combinators.test.js` (38 assertions, in `test/fast.list`). Proven in both
+directions — against the pre-change module it produces 8 concrete failures. Note the depth *sweep* is inert
+against the backup because the old module does not export `SCHEMA_DEPTH_MAX`; the triggering depth is proven
+by the separate scan above, not by that run.
+
+### FIVE baseline claims that the runtime contradicted
+
+Re-checking a hand-written status report against live state is worth doing every time:
+
+1. **Production is ARMED**, not disarmed (`.production-arm.json`, armed 2026-11-11T02:35:53Z).
+2. **HARVEST's "refused — production DISARMED" is a STALE `lastError`.** That run was 2026-11-10T18:00Z,
+   *before* the arm; today `gateBlocked=false`. `lastError` is never cleared by a later success of a
+   different kind — check `lastRunAt`/`lastStatus` before believing it.
+3. **SCOUT's "provider mismatch" is not a mismatch — it is silent fallback rotation.** Run `9635c2df`:
+   `run.start model=gemini-flash-lite-latest` → `run.error openrouter http 402`. The configured choice was
+   honoured; the primary failed and rotated to the saved chain's **single** entry
+   (`anthropic/claude-sonnet-4.5` on OpenRouter), which is out of credit.
+   **The real defect is diagnostic: the primary's failure is NEVER LOGGED.** `recoveryAttempts` on the run
+   record holds it (`action:"fallback", reason:"overloaded", delayMs:0`), but nothing surfaces it and the
+   routine's `lastError` carries only the terminal provider's message — so a gemini-configured routine
+   reports an OpenRouter error and reads as misconfiguration. **Still unfixed.**
+4. **The Gemini 429s are a DIFFERENT trace** — dated ≈Nov 3–11 and belonging to the pipeline chain
+   `ebc4f07d` (`consecutiveFailures=5`), not to the SCOUT failure.
+5. **Model routing has drifted again (4th recorded instance).** §18 specifies `anthropic` primaries; the
+   live roster is 8 agents on `openai`, 1 on `codex`, 1 on `gemini` — which is *why* the schema bug bites
+   here, since gemini and anthropic are the two wires that mask it.
+
+`errorClass.js` needs no work: 429 already splits `quota_exhausted`/`billing`/`rate_limit` (`:314-322`),
+402 splits `rate_limit`/`billing` (`:311`), and `retryAfterMs` is parsed relative AND absolute (`:159-186`).
+
+### NO SAFE PATCH — and why inventing one would have been worse
+
+- **The Etsy approval gates do not exist in code.** `approved-for-design` / `approved-to-publish` appear in
+  **zero** files under `sidecar/`, `shared/`, `frontend/` — only in agent dossiers, `task-briefs.json`,
+  `skills.jsonl` and model output. They are prompt text, not a state machine. The station's REAL,
+  code-enforced owner gates are elsewhere: `production-gate.js`, and the Outbox four-axis `approval`
+  (`setApproval` hardcoded to `OUTBOX_COMMANDER`, 409 on unverified). **The Etsy line references a parallel
+  approval vocabulary nothing enforces.** Wiring it to the real gate is a design decision, not a patch.
+- **Per-agent effective grants for SCHEDULED runs are unobtainable.** `handleToolsetsList` hardcodes
+  **`lead: true`**, so `/api/toolsets` reports the interactive-lead projection for every agent. No other
+  grant API exists. Mark per-agent scheduled grants UNVERIFIED; the only supported check is the UI.
+
+### Two measurement traps hit in one session
+
+- **`cmd | tail` reports TAIL's exit code, not the command's.** `timeout 1500 npm run test:fast 2>&1 | tail -25`
+  returned **exit 0** while the gate had actually `FAILED at step 219/1008`. Reporting that exit code as a
+  pass would have been a false green. Read the output, never the piped status.
+- **Process start time is NOT measurable on this device.** `/proc/<pid>` directory mtime tracks *now*, not
+  start, and both `/proc/stat` (btime) and `/proc/uptime` are permission-denied under Termux — so the
+  `uptime - starttime/HZ` recipe divides by zero and yields a confident wrong answer. If you need to know
+  whether a running process predates a file edit, use the boot-banner position in `sidecar.log` or the
+  session's own restart record; do not compute it from `/proc`.
+
+### Test evidence — state it this way
+
+`npm run test:fast` halts at **219/1008** on `workshop-undo.e2e`, **proven pre-existing** by restoring the
+pre-change `translate.js`, re-running, and getting the identical four failures (restore md5-verified). The
+gate therefore never reaches the new test, so it was also run through the gate's own hermetic runner:
+`npm run test:fast -- mcp.schema-empty-combinators` → `OK — 1 step(s) green`. A test can pass standalone and
+fail under that profile (`agent-capabilities.test.js` does), so verify both.
+
+15 targeted suites green: `mcp.schema-empty-combinators` (38) · `mcp.client` (78) · `mcp.catalog` (1204) ·
+`mcp.transport` (100) · `mcp.resources-prompts` (44) · `mcp.description-untrusted` (24) ·
+`mcp.structured-content-fallback` (7) · `mcp.schema-lifecycle` (22) · `tool-schema-contract` (110) ·
+`contract` (105) · `schema` (42) · `harness.integration` (188) · `capgate` (54) · `payload.budget` (17) ·
+`source-text-integrity` (2486 files). `npm run lint:evidence-secrets` → OK.
+
+### Operational note
+
+`STATION_FIELD_NOTES.md` shows as modified in the working tree — that is the **cron system's own
+auto-warning** appended 2026-11-11 (the pipeline-chain 429), not a human edit. Leave it unstaged.
