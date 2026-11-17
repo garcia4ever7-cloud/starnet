@@ -287,6 +287,18 @@
   const QUOTA_EXHAUSTED_RE = /usage[_ ]?limit(?:[_ ]?(?:has|is)(?:[_ ]?been)?)?[_ ]?reached|hit (?:your|the) (?:usage|weekly|monthly|plan|daily) limit|(?:weekly|monthly|daily) (?:quota|limit)|resets? in \s*\d+\s*(?:day|hour|week)|resets? (?:on|at) \d|quota (?:will )?reset(?:s)? (?:in|on|at)/;
   const SHORT_WINDOW_RE = /per[- ]?(?:minute|second)|quota metric|\brpm\b|\btpm\b|requests per/;
   function isQuotaExhausted(low) { return QUOTA_EXHAUSTED_RE.test(low) && !SHORT_WINDOW_RE.test(low); }
+  /* Markers that only ever appear on a REFILLING window, never on an empty wallet. Checked against the
+     structured body as well as the message, because Gemini puts them in details[].violations[].quotaId and
+     details[].RetryInfo.retryDelay — not in the sentence a human reads. Deliberately narrow: each marker
+     names a time window or a free allowance, so an OpenAI `insufficient_quota` (no retry hint, no window,
+     no free tier) still classifies as billing and still refuses to fall through to another provider. */
+  const SHORT_WINDOW_BODY_RE = /retry[_ ]?delay|resource[_ ]?exhausted|free[_ ]?tier|per[_ ]?(?:minute|second|min)\b/;
+  function isShortWindow429(low, err) {
+    if (SHORT_WINDOW_RE.test(low) || SHORT_WINDOW_BODY_RE.test(low)) return true;
+    let raw = '';
+    try { const b = extractBody(err); raw = (typeof b === 'string' ? b : JSON.stringify(b || '')).toLowerCase(); } catch (_) { return false; }
+    return !!raw && (SHORT_WINDOW_RE.test(raw) || SHORT_WINDOW_BODY_RE.test(raw));
+  }
 
   function pickReason(status, code, low, err, ctx) {
     // 0. errors that never reached an API: a certificate the machine rejects, or a crash in our own code. First,
@@ -317,8 +329,20 @@
            so the plain status read burned every retry slot against a wallet that needs topping up. */
         const c429 = String(code || '').toLowerCase();
         if (isQuotaExhausted(low) || /usage_limit_reached|quota_exhausted|plan_limit/.test(c429)) return 'quota_exhausted';
-        if (/insufficient[_ ]?quota|exceeded your current quota|out of credit|add credits|payment required/.test(low)
-          || /insufficient[_ ]?quota/.test(c429)) return 'billing';
+        /* THE SHORT-WINDOW VETO MUST GUARD **BOTH** TERMINAL CLASSES, NOT JUST quota_exhausted.
+           Gemini answers a PER-MINUTE free-tier token limit with the sentence "You exceeded your current
+           quota, please check your plan and billing details" — word for word what OpenAI says when a wallet
+           is genuinely empty. The message alone cannot tell them apart; the distinguishing marker lives in
+           the STRUCTURED BODY (a free-tier quota metric, a PerMinute quotaId, a RetryInfo of seconds, or
+           Google's RESOURCE_EXHAUSTED status). Falling through to `billing` here classified a limit that
+           clears in ~30s as {retryable:false, shouldFallback:false}, so the run died on the spot with
+           recoveryAttempts: [] — no retry, no backoff, no rotation. That is what stalled DESIGNER at
+           255,177 input tokens against a 250,000/min ceiling and burned the Etsy chain's five consecutive
+           failures into an auto-pause. A provider that tells you WHEN to retry is not telling you your
+           account is out of money. */
+        if (!isShortWindow429(low, err)
+          && (/insufficient[_ ]?quota|exceeded your current quota|out of credit|add credits|payment required/.test(low)
+            || /insufficient[_ ]?quota/.test(c429))) return 'billing';
         return 'rate_limit';
       }
       if (status === 500) return 'server_error';

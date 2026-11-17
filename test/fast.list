@@ -118,6 +118,7 @@ test/credpool.test.js
 test/credrotate.test.js
 test/sanitize.test.js
 test/errorclass.test.js
+test/errorclass-429-short-window.test.js
 test/billing.test.js
 test/credits.test.js
 test/credits-link.test.js
