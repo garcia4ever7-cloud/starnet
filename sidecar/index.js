@@ -730,6 +730,10 @@ const BUDGET_CAPS = {
 const MAX_CONCURRENT_AGENTS = resolveKnob('MAX_CONCURRENT_AGENTS', 'maxConcurrentAgents', 0);   // P1-9: env > saved > default
 // Optional per-worker USD ceiling for delegated sub-runs. 0 = ungoverned.
 const ORCH_PER_WORKER = num(ENV('BUDGET_PER_WORKER'), 0);
+// Optional POOLED USD budget shared by ALL workers dispatched within ONE lead run (orchestration.js), so N
+// workers can't multiply the cost. 0 = disabled (today's per-worker-only behaviour); inert when the per-worker
+// ceiling above is 0.
+const ORCH_WORKER_POOL = num(ENV('BUDGET_WORKER_POOL'), 0);
 // Optional per-worker tool-turn ceiling. 0 inherits the unlimited station policy.
 const ORCH_WORKER_MAX_ITERS = num(ENV('WORKER_MAX_ITERS'), 0);
 // Background-worker LIVENESS (Step 2 F3, subagents.js checkStalls): a worker that emits no progress (tokens, tool
@@ -17786,7 +17790,7 @@ async function runOnceCore(o) {
     // failures. An unattended chain is otherwise invisible: the worker's text comes back as a tool result
     // inside the lead's messages and dies with the run, and an ASK-mode worker cannot fs.write it itself.
     recordHandoff: (h) => handoffStore.record(h),
-    perWorker: ORCH_PER_WORKER, workerMaxIters: ORCH_WORKER_MAX_ITERS, newId: () => crypto.randomUUID(),
+    perWorker: ORCH_PER_WORKER, workerPool: ORCH_WORKER_POOL, workerMaxIters: ORCH_WORKER_MAX_ITERS, newId: () => crypto.randomUUID(),
     dispatchTimeoutMs: ORCH_DISPATCH_TIMEOUT_MS,   // minutes, not the 30s fast-tool cap (see constant)
     // Saved session metadata is available headlessly; visual delivery still uses
     // the page bridge and recovers from the durable run ledger on reconnect.

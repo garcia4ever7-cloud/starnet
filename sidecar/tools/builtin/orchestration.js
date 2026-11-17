@@ -9,6 +9,9 @@
      roster    : () -> Map(agentId -> { system, name, model }) — the live crew identities (pushed by the browser)
      key       : this run's API key (per-run)        model : the lead's model (worker fallback)
      perWorker : per-WORKER USD ceiling (a runaway worker can't blow the lead's per-run cap)
+     workerPool: optional POOLED USD budget shared by ALL workers dispatched in this ONE lead run, so N
+                 workers cannot multiply the cost. Only ever LOWERS a grant; 0/omitted = disabled, and it
+                 is forced off when perWorker is 0. Exhaustion REFUSES the next dispatch (never hangs).
      workerMaxIters: optional per-WORKER iteration ceiling (0/omitted = unlimited)
      newId     : () -> a fresh runId for each child (crypto.randomUUID, injected so this UMD stays dep-free)
      maxWorkers: optional cap on workers per dispatch (0/omitted = unlimited)
@@ -385,6 +388,30 @@
     const perWorker = (typeof deps.perWorker === 'number' && isFinite(deps.perWorker) && deps.perWorker > 0) ? deps.perWorker : 0;
     // Zero means no user-work quota. Narrow task contracts and structured-output repair
     // still impose their own local ceilings below; those are correctness safeguards.
+    /* POOLED PER-LEAD-RUN WORKER BUDGET (2026-11-17). `perWorker` above is a PER-WORKER ceiling, so N
+       dispatched workers multiply the lead run's exposure by N. `deps.workerPool` is ONE shared USD pool
+       for the whole LEAD RUN. makeOrchestrationTools is called once per run (inside runOnceCore), so this
+       closure accumulator is per-run BY CONSTRUCTION and cannot leak across runs.
+       0 = disabled, and it is also forced off when perWorker is 0 (ungoverned) — in both cases every
+       expression below is byte-identical to the pre-pool behaviour and adds no refusal. The pool only ever
+       LOWERS a grant; the per-worker ceiling remains the upper bound. */
+    const workerPool = (perWorker > 0 && typeof deps.workerPool === 'number' && isFinite(deps.workerPool) && deps.workerPool > 0) ? deps.workerPool : 0;
+    let poolSpent = 0;
+    const poolLeft = () => Math.max(0, workerPool - poolSpent);
+    const poolDry = () => workerPool > 0 && poolLeft() <= 0;
+    const chargePool = (usd) => { if (workerPool > 0) { const n = Number(usd); if (isFinite(n) && n > 0) poolSpent += n; } };
+    const poolRefusal = () => 'dispatch refused — this lead run\'s POOLED worker budget is exhausted: $'
+      + poolSpent.toFixed(4) + ' of the $' + workerPool.toFixed(4) + ' shared pool (BUDGET_WORKER_POOL) has'
+      + ' already been spent by workers dispatched in THIS run, so no new worker was started and no work was done.'
+      + ' Report this subtask as unfinished; it needs a raised BUDGET_WORKER_POOL or a fresh lead run.';
+    /* The grant for one worker: its per-worker allowance, lowered by whatever the pool has left.
+       `ceiling` 0 means ungoverned, so a caller MUST check poolDry() FIRST — handing the run host a 0 here
+       would read as "no cap" and leak the whole point of the pool. */
+    const pooled = (ceiling) => {
+      if (workerPool <= 0) return ceiling;
+      const c = (typeof ceiling === 'number' && isFinite(ceiling) && ceiling > 0) ? ceiling : workerPool;
+      return Math.min(c, poolLeft());
+    };
     const workerMaxIters = (typeof deps.workerMaxIters === 'number' && isFinite(deps.workerMaxIters) && deps.workerMaxIters > 0) ? Math.floor(deps.workerMaxIters) : 0;
     const lowerPositive = (a, b) => {
       const aa = (typeof a === 'number' && isFinite(a) && a > 0) ? Math.floor(a) : 0;
@@ -718,6 +745,9 @@
         const runWorker = withHandoff(async (job, o2) => {
           o2 = o2 || {};
           if (job.error) return { agentId: job.agentId, reason: 'error', result: job.error, usd: 0 };
+          // POOL FAIL-CLOSED: refuse BEFORE the worker starts, with an honest row (and therefore an honest
+          // handoff file) rather than a silent empty result or a 0 = "uncapped" grant.
+          if (poolDry()) return { agentId: job.agentId, reason: 'refused', result: poolRefusal(), usd: 0 };
           const wire = workerWire(job.ident);   // the worker's OWN provider+model when resolvable (see workerWire)
           // PER-WORKER WALL CLOCK (2026-07-26 audit finding A). Before this, the ONLY clock was the registry's
           // tool timeout over the WHOLE dispatch: one slow worker ate the shared budget, the registry rejected, and
@@ -792,7 +822,7 @@
               // permissions-surface decision, not something to fix by editing this comment.
               consent: ctx && ctx.consent,
               extraObjects: WORKER_KIT,
-              maxCostUsd: perWorker,           // a runaway worker can't blow the lead's per-run ceiling
+              maxCostUsd: pooled(perWorker),   // a runaway worker can't blow the lead's per-run ceiling (pool lowers it)
               maxIters: bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters,
               maxToolCalls: bounded ? bounded.workerMaxTools : undefined,
               steer: typeof o2.steer === 'function' ? o2.steer : undefined
@@ -802,6 +832,7 @@
             if (timedOut) return timeoutRow(null);   // the abort we fired surfaced as a throw — still an honest timeout
             return { agentId: job.agentId, reason: 'error', result: 'worker run failed: ' + ((e && e.message) || e), usd: 0 };
           } finally {
+            chargePool(result && result.usd);   // pooled budget: book what this worker actually cost, however it ended
             endWorker();
             if (timer) clearTimeout(timer);
             if (child) child.detach();
@@ -816,6 +847,7 @@
             const spent = Number(result.usd) || 0;
             const remaining = perWorker > 0 ? Math.max(0, perWorker - spent) : 0;
             if (perWorker > 0 && remaining <= 0) return null;
+            if (poolDry()) return null;   // pooled budget spent: skip the repair rather than grant an uncapped 0
             const repairRunId = newId();
             const repair = await runOnce({
               outputOnly: true,
@@ -830,11 +862,12 @@
               parentRunId: ctx && ctx.runId, streamId: job.streamId || undefined,
               sessionTitle: job.streamId ? (job.sessionTitle || job.session || '') : undefined,
               consent: ctx && ctx.consent, extraObjects: WORKER_KIT,
-              maxCostUsd: perWorker > 0 ? remaining : 0,
+              maxCostUsd: pooled(perWorker > 0 ? remaining : 0),
               maxIters: lowerPositive(4, bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters),
               maxToolCalls: bounded ? bounded.workerMaxTools : undefined,
               steer: typeof o2.steer === 'function' ? o2.steer : undefined
             });
+            chargePool(repair && repair.usd);   // the repair turn spends from the same pool
             return repair ? { text: lastAssistant(repair.messages), result: repair, runId: repairRunId } : null;
           });
           endContract();
@@ -1040,6 +1073,11 @@
           let settle; const done = new Promise(res => { settle = res; });
           const runner = async (h) => {
             let result;
+            // POOL FAIL-CLOSED (see runWorker): refuse before the clone starts, never with a 0 = uncapped grant.
+            if (poolDry()) {
+              const r = { label, agentId: ephemeralId, reason: 'refused', result: poolRefusal(), usd: 0 };
+              settle(r); return { status: 'error', reason: 'refused', result: r.result, usd: 0 };
+            }
             const bounded = boundedDomainTask(prompt);
             const contractedPrompt = openingMessage(prompt, task.context, task.resultSchema);
             try {
@@ -1057,7 +1095,7 @@
                 consent: ctx && ctx.consent,                // same approval posture as the orchestrator
                 extraObjects: WORKER_KIT,                   // WORKBENCH only — NO 'lead' → no orchestrator object →
                                                             // team.spawn never exposed to it → FLAT DEPTH (no re-spawn)
-                maxCostUsd: perWorker,                       // a runaway clone can't blow the lead's per-run ceiling
+                maxCostUsd: pooled(perWorker),               // a runaway clone can't blow the lead's per-run ceiling (pool lowers it)
                 maxIters: bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters,
                 maxToolCalls: bounded ? bounded.workerMaxTools : undefined,
                 steer: h.steer
@@ -1068,6 +1106,7 @@
                 : { label, agentId: ephemeralId, reason: 'error', result: 'subagent run failed: ' + ((e && e.message) || e), usd: 0 };
               settle(r); return { status: 'error', reason: r.reason, result: r.result, usd: 0 };
             }
+            chargePool(result && result.usd);   // pooled budget: book what this clone actually cost
             // Stopped by the HOST (its parent run was cancelled, or the liveness check found it hung): say which,
             // with whatever partial text it produced — never a clean-looking 'cancelled'/'done' row.
             const hostStopped = hostStopCode(h.signal);
@@ -1085,6 +1124,7 @@
               const spent = Number(result.usd) || 0;
               const remaining = perWorker > 0 ? Math.max(0, perWorker - spent) : 0;
               if (perWorker > 0 && remaining <= 0) return null;
+              if (poolDry()) return null;   // pooled budget spent: skip the repair rather than grant an uncapped 0
               const repairRunId = newId();
               const repair = await runOnce({
               outputOnly: true,
@@ -1096,10 +1136,11 @@
                 emit: (n, p) => { try { h.emit(n, p); } catch (_) {} childEmit(n, p); },
                 signal: h.signal, runId: repairRunId, parentRunId: ctx && ctx.runId,
                 trigger: 'directive', surface: 'autonomous', consent: ctx && ctx.consent,
-                extraObjects: WORKER_KIT, maxCostUsd: perWorker > 0 ? remaining : 0,
+                extraObjects: WORKER_KIT, maxCostUsd: pooled(perWorker > 0 ? remaining : 0),
                 maxIters: lowerPositive(4, bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters),
                 maxToolCalls: bounded ? bounded.workerMaxTools : undefined, steer: h.steer
               });
+              chargePool(repair && repair.usd);   // the repair turn spends from the same pool
               return repair ? { text: lastAssistant(repair.messages), result: repair, runId: repairRunId } : null;
             });
             const repaired = contract.repairResult || null;
@@ -1234,6 +1275,8 @@
         const ident = crew.get(rec.agentId);
         if (!ident) return { status: 'error', reason: 'error', result: 'worker is no longer in the live roster', usd: 0 };
         const wire = workerWire(ident);   // same cross-provider resolution as a fresh dispatch
+        // POOL FAIL-CLOSED (see runWorker): a resume is a new worker turn and spends from the same pool.
+        if (poolDry()) return { status: 'error', reason: 'refused', result: poolRefusal(), usd: 0 };
         let result;
         const bounded = boundedDomainTask(rec.prompt || '');
         // The durable record carries the lead's handoff `context`, so a resumed worker rebuilds the SAME
@@ -1256,7 +1299,7 @@
             trigger: 'directive', surface: 'autonomous',
             consent: ctx && ctx.consent,
             extraObjects: WORKER_KIT,
-            maxCostUsd: perWorker,
+            maxCostUsd: pooled(perWorker),   // the pool lowers it; the per-worker ceiling stays the upper bound
             maxIters: bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters,
             maxToolCalls: bounded ? bounded.workerMaxTools : undefined,
             steer: h.steer
@@ -1264,12 +1307,14 @@
         } catch (e) {
           return { status: 'error', reason: 'error', result: 'worker run failed: ' + ((e && e.message) || e), usd: 0 };
         }
+        chargePool(result && result.usd);   // pooled budget: book what this resumed worker actually cost
         if (!result) return { status: 'error', reason: 'refused', result: 'worker could not restart', usd: 0 };
         const firstText = lastAssistant(result.messages) || '(the worker returned no text)';
         const contract = await enforceStructured(rec.resultSchema, firstText, async (errors) => {
           const spent = Number(result.usd) || 0;
           const remaining = perWorker > 0 ? Math.max(0, perWorker - spent) : 0;
           if (perWorker > 0 && remaining <= 0) return null;
+          if (poolDry()) return null;   // pooled budget spent: skip the repair rather than grant an uncapped 0
           const repairRunId = newId();
           const repair = await runOnce({
               outputOnly: true,
@@ -1282,10 +1327,11 @@
             agentId: rec.agentId, isTask: true, emit: h.emit, signal: h.signal, runId: repairRunId,
             parentRunId: ctx && ctx.runId, trigger: 'directive', surface: 'autonomous',
             consent: ctx && ctx.consent, extraObjects: WORKER_KIT,
-            maxCostUsd: perWorker > 0 ? remaining : 0,
+            maxCostUsd: pooled(perWorker > 0 ? remaining : 0),
             maxIters: lowerPositive(4, bounded ? lowerPositive(workerMaxIters, bounded.workerMaxIters) : workerMaxIters),
             maxToolCalls: bounded ? bounded.workerMaxTools : undefined, steer: h.steer
           });
+          chargePool(repair && repair.usd);   // the repair turn spends from the same pool
           return repair ? { text: lastAssistant(repair.messages), result: repair, runId: repairRunId } : null;
         });
         const repaired = contract.repairResult || null;
