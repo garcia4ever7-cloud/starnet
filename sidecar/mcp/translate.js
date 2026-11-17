@@ -64,10 +64,53 @@
   // guarantee an object-typed root so a server that omits `type` still validates the model's argument object.
   function translateSchema(inputSchema) {
     if (!inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema)) return { type: 'object', properties: {} };
-    const s = scrubSchema(inputSchema, 0);
+    const s = dropEmptyCombinators(scrubSchema(inputSchema, 0), 0);
     if (!s || typeof s !== 'object' || Array.isArray(s)) return { type: 'object', properties: {} };
     if (s.type === undefined) s.type = 'object';
     return s;
+  }
+
+  /* EMPTY COMBINATORS ARE NOT "NO CONSTRAINT" — THEY ARE INVALID, AND THEY REJECT THE WHOLE TOOL.
+
+     scrubSchema's array branch returns [] for a node past SCHEMA_DEPTH_MAX, which contradicts the
+     "collapses to {} (permissive)" intent its own comment states: {} is permissive, but `anyOf: []` is
+     malformed JSON Schema. A strict validator refuses the entire function definition — OpenAI/Codex answers
+     `Invalid schema for function '<name>': [] has less than 1 item` — so ONE over-deep branch in ONE
+     connector tool takes out that tool for the whole run. Airtable's recursive filter groups do exactly
+     this. Measured on the real `update_view` schema: the server's own schema carries zero empty arrays;
+     the empty `anyOf` is introduced here. It then reaches the wire on the codex, openai-compatible and
+     Moonshot routes; the Gemini and Anthropic shapers happen to prune it, which is why only codex reported
+     it and why fixing it per-provider would have left two wires broken.
+
+     Stripping the keyword — rather than emitting an empty one, or inventing a placeholder branch — is the
+     permissive reading, and it is what the truncation was always documented to mean. */
+  const EMPTY_ARRAY_INVALID = ['anyOf', 'oneOf', 'allOf', 'enum', 'prefixItems', 'type', 'items'];
+  /* `required: []` is deliberately NOT in that list: an empty `required` is valid and load-bearing
+     (toolschema's ensureRequired emits exactly that), and so are `examples` / `default`. */
+  const SCHEMA_MAP_KEYS = ['properties', 'patternProperties', '$defs', 'definitions'];
+  const setOwn = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+
+  function dropEmptyCombinators(node, depth) {
+    if (depth > SCHEMA_DEPTH_MAX) return node;
+    if (Array.isArray(node)) return node.map(v => dropEmptyCombinators(v, depth + 1));
+    if (!node || typeof node !== 'object') return node;
+    const out = {};
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      /* Under these keys the names are AUTHOR-CHOSEN, not keywords: a tool may legitimately declare a
+         property called `anyOf` or `enum`, and treating that name as a combinator would delete real
+         arguments from the schema. Recurse into the values only. */
+      if (SCHEMA_MAP_KEYS.indexOf(k) >= 0 && v && typeof v === 'object' && !Array.isArray(v)) {
+        const map = {};
+        for (const name of Object.keys(v)) setOwn(map, name, dropEmptyCombinators(v[name], depth + 1));
+        setOwn(out, k, map);
+        continue;
+      }
+      const cleaned = dropEmptyCombinators(v, depth + 1);
+      if (Array.isArray(cleaned) && cleaned.length === 0 && EMPTY_ARRAY_INVALID.indexOf(k) >= 0) continue;
+      setOwn(out, k, cleaned);
+    }
+    return out;
   }
 
   /* SERVER-SUPPLIED DESCRIPTIONS ARE UNTRUSTED TEXT (sec-taint2 09-25).
@@ -346,5 +389,5 @@
     return out;
   }
 
-  return { makeMcpToolDef, connectorAuxDefs, mcpToolName, RESULT_MAX_CHARS, _internals: { sanitizePart, translateSchema, renderContent, clampResult, untrustedText, DESC_MAX, FIELD_MAX } };
+  return { makeMcpToolDef, connectorAuxDefs, mcpToolName, RESULT_MAX_CHARS, _internals: { sanitizePart, translateSchema, renderContent, clampResult, untrustedText, dropEmptyCombinators, DESC_MAX, FIELD_MAX, SCHEMA_DEPTH_MAX } };
 });
