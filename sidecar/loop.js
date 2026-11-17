@@ -1188,6 +1188,17 @@
       if (reason === 'budget' && (bs === 'run' || bs === 'agent' || bs === 'day' || bs === 'global')) {
         endPayload.budgetScope = bs;
         if (typeof extra.budgetCapUsd === 'number' && isFinite(extra.budgetCapUsd)) endPayload.budgetCapUsd = extra.budgetCapUsd;
+        /* WHICH KIND of run-cap stop this was (2026-11-17). Two different rules end a run 'budget' with
+           scope 'run': the trailing `spentUsd >= maxCostUsd` ceiling, and the worst-turn RESERVATION that
+           refuses to START an unaffordable turn. Only the reservation passes budgetReserved/budgetSpent,
+           and this allowlist used to drop both — so the stream could not tell "already over" from "the
+           next turn would not have fit", even though the comment at the reservation promised exactly that
+           visibility and shared/events.js accepts the fields. Absent on every other budget stop, so old
+           payloads stay valid. */
+        if (typeof extra.budgetReserved === 'number' && isFinite(extra.budgetReserved)) {
+          endPayload.budgetReserved = extra.budgetReserved;
+          if (typeof extra.budgetSpent === 'number' && isFinite(extra.budgetSpent)) endPayload.budgetSpent = extra.budgetSpent;
+        }
         // the UNPRICED-token ceiling: name the model the seatbelt could not price so the stop is legible
         // ("hit the 2,000,000-token ceiling for unpriced model X") instead of a $-cap with no dollar figure.
         if (extra.unpricedModel) {
@@ -1202,6 +1213,12 @@
       const out = { reason, messages, text: terminalText, usd: spentUsd, turns, tokens: spentTokens, model, unpricedUsage: unpricedUsage.slice() };
       if (cut) out.finishReason = cut;
       if (endPayload.budgetScope) { out.budgetScope = endPayload.budgetScope; if (endPayload.budgetCapUsd != null) out.budgetCapUsd = endPayload.budgetCapUsd; }
+      // same two fields on the RETURN value: index.js/cron read the result, not the bus, when deciding how to
+      // report a stop, so a reservation stop must be legible there too.
+      if (endPayload.budgetReserved != null) {
+        out.budgetReserved = endPayload.budgetReserved;
+        if (endPayload.budgetSpent != null) out.budgetSpent = endPayload.budgetSpent;
+      }
       if (endPayload.unpricedModel) {
         out.unpricedModel = endPayload.unpricedModel; out.unpricedTokens = endPayload.unpricedTokens; out.unpricedCapTokens = endPayload.unpricedCapTokens;
         out.budgetNote = 'stopped: ' + endPayload.unpricedTokens.toLocaleString('en-US') + ' tokens on unpriced model ' + endPayload.unpricedModel + ' reached the ' + endPayload.unpricedCapTokens.toLocaleString('en-US') + '-token ceiling (no published rate - set SKYNET_MODEL_PRICES or SKYNET_MAX_UNPRICED_TOKENS)';
@@ -1918,6 +1935,21 @@
       const final = cost ? cost.reconcile(usage, model) : { usd: 0, tokensIn: 0, tokensOut: 0, reasoningTokens: 0, cachedTokens: 0 };
       spentUsd += final.usd || 0;
       spentTokens += (final.tokensIn || 0) + (final.tokensOut || 0);
+      /* FEED THE WORST-TURN RESERVATION FROM THE SUCCESS PATH TOO (2026-11-17).
+         maxTurnUsd arms the "do not start a turn the budget cannot afford" guard above (search
+         budgetReserved). It was introduced with that guard on 2026-11-03 and written in ONE place only —
+         bookUsage() — which runs on the retry / fallback / cancel / fatal paths. A turn that simply
+         SUCCEEDS reconciles here instead and never called it, so on the ordinary all-success run
+         maxTurnUsd stayed 0 for the whole run, the guard's own `maxTurnUsd > 0` precondition was
+         permanently false, and the cap silently degraded back to the trailing `spentUsd >= maxCostUsd`
+         check it was written to replace. Measured on the real loop before this line existed: 4 successful
+         turns of $0.303 against a $1.00 cap ended at $1.212 (21% over on a $0.50 cap, 39.7% over when
+         cheap turns preceded an expensive one) — the same QC_EDITOR overrun test/budget-reservation.test.js
+         cites as its reason to exist. That test modelled the rule in its own code and source-locked the
+         loop's text, so it could not see that the variable was never fed.
+         This is deliberately NOT a call to bookUsage(): that would add final.usd to spentUsd a second time
+         and emit a duplicate agent.cost. Only the high-water mark is shared; the booking stays here. */
+      if ((final.usd || 0) > maxTurnUsd) maxTurnUsd = final.usd || 0;
       noteUnpriced(model, final);
       noteReading(usage);   // the usage anchor for the next fold decision (real count + the ruler on this same request)
       const costPayload = {
