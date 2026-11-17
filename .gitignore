@@ -238,3 +238,10 @@ website/**/*.bak
 # Regenerate with: node memorial/examples/make-demo-assets.mjs && node memorial/cli.mjs
 memorial/**/render/
 memorial/examples/*/
+
+# The repo installs with npm (package-lock.json is the tracked lockfile). A stray pnpm install
+# on 2026-10-30 left these behind and suppressed native builds via allowBuilds:false, which broke
+# node-pty until it was repaired by hand. Ignored so the npm/pnpm split cannot be committed by
+# accident; delete them if you are not deliberately running pnpm.
+pnpm-lock.yaml
+pnpm-workspace.yaml
