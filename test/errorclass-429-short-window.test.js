@@ -105,4 +105,21 @@ const OPENAI_INSUFFICIENT_QUOTA = err(429, {
     'an unreadable body falls back to the terminal reading rather than inventing a retry');
 }
 
+
+/* ---- 7. the wait is actually EXTRACTED, not just classified ---- */
+{
+  const r = classifyApiError(GEMINI_PER_MINUTE);
+  A.eq(r.retryAfterMs, 29000, 'RetryInfo supplies the wait: retryDelay "29s" -> 29000ms');
+  A.eq(classifyApiError(err(429, { error: { message: 'x', details: [{ retryDelay: '250ms' }] } })).retryAfterMs, 250,
+    'a millisecond RetryInfo parses');
+  A.eq(classifyApiError(err(429, { error: { message: 'x', details: [{ retry_delay: '1.5s' }] } })).retryAfterMs, 1500,
+    'the snake_case spelling and a fractional second both parse');
+  A.eq(classifyApiError(OPENAI_INSUFFICIENT_QUOTA).retryAfterMs, null,
+    'a wallet problem still carries no wait - nothing to wait for');
+  A.eq(classifyApiError(err(429, { error: { message: 'x', details: [{ retryDelay: 'soon' }] } })).retryAfterMs, null,
+    'an unparseable duration is ignored rather than guessed');
+  A.notThrows(() => classifyApiError(err(429, { error: { message: 'x', details: 'not-an-array' } })),
+    'a malformed details field does not throw');
+}
+
 A.report('errorclass: 429 short-window veto');

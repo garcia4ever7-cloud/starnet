@@ -173,6 +173,22 @@
       if (n > 1e12) resetAtMs = Math.round(n);            // already epoch-ms
       else if (n > 1e9) resetAtMs = Math.round(n * 1000); // epoch-seconds
     }
+    /* 2.5 Google's RetryInfo. A Gemini 429 carries its wait in details[]["@type" ...RetryInfo].retryDelay
+       as a protobuf Duration string ("29s", "1.5s", "250ms") — not in a header and not in the sentence,
+       so steps 1-4 all miss it and retryAfterMs stayed null. recovery-policy.js already honours a stated
+       wait (MAX_SERVER_WAIT_MS-capped), so parsing this is what makes a per-minute Gemini limit wait the
+       ~30s it actually asks for instead of retrying blind. */
+    if (retryAfterMs == null) {
+      const details = e && Array.isArray(e.details) ? e.details : [];
+      for (const d of details) {
+        const rd = d && (d.retryDelay || d.retry_delay);
+        if (rd == null) continue;
+        const m = String(rd).trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s)$/);
+        if (!m) continue;
+        retryAfterMs = m[2] === 'ms' ? Math.round(parseFloat(m[1])) : Math.round(parseFloat(m[1]) * 1000);
+        break;
+      }
+    }
     // 3. message text: "(try again|retry|resets|available) in <n><unit>"
     if (retryAfterMs == null) {
       const m = String(message || '').toLowerCase().match(/(?:try again|retry|resets?|available|wait)\s+(?:in\s+)?(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|secs|seconds?|m|min|mins|minutes?)\b/);

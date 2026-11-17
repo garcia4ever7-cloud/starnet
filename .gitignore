@@ -245,3 +245,8 @@ memorial/examples/*/
 # accident; delete them if you are not deliberately running pnpm.
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# A credential store, never a repo artifact. credential.helper=store is set at the REPO level here, so
+# this file is one misconfiguration away from being writable inside the worktree. security:secrets scans
+# git history only and could never catch it.
+.git-credentials
