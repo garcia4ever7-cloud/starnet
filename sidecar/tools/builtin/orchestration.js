@@ -46,9 +46,14 @@
   // the WORKBENCH (terminal). Paired with the SHARED lead consent broker, shell/writes follow the lead's APPROVAL
   // posture — so a worker has the same reach as the orchestrator, gated by the same approvals.
   const WORKER_KIT = [{ instanceId: 'wb_worker', objectType: 'workbench' }];
-  const boundedDomainTask = (text) => {
-    try { return domainTask && typeof domainTask.classify === 'function' ? domainTask.classify(text) : null; }
-    catch (_) { return null; }
+  /* isWorkspaceFile is the host's injected "does this token name a real file" probe (see domain-task.js): a
+     dispatch brief that merely mentions `brief.md` or `build.sh` must not read as a single-host inspection and
+     silently cap the worker at 3 iterations / 3 tools / 45s. Absent (older hosts, unit stubs) -> unchanged. */
+  const boundedDomainTask = (text, isWorkspaceFile) => {
+    try {
+      if (!domainTask || typeof domainTask.classify !== 'function') return null;
+      return domainTask.classify(text, isWorkspaceFile ? { isWorkspaceFile } : undefined);
+    } catch (_) { return null; }
   };
 
   // abort without ever throwing out of a timer callback (AbortController.abort(reason) is not universal).
@@ -335,6 +340,8 @@
        whole handoff behaviour is testable with a fake. Absent (older hosts, unit stubs) -> no file, and
        dispatch behaves byte-identically to before. */
     const recordHandoff = (typeof deps.recordHandoff === 'function') ? deps.recordHandoff : null;
+    // see boundedDomainTask above — the host's file-existence probe, absent in unit stubs.
+    const isWorkspaceFile = (typeof deps.isWorkspaceFile === 'function') ? deps.isWorkspaceFile : null;
     // the LEAD's OWN base identity (system prompt), threaded from the run host so team.spawn can clone it. Empty
     // string when absent → a spawned subagent still runs, just without an inherited persona.
     const selfSystem = (typeof deps.selfSystem === 'string') ? deps.selfSystem : '';
@@ -757,7 +764,7 @@
           // straggler is stopped ALONE and comes back as one honest `timeout` row while its siblings' work survives.
           // Background workers pass no wallMs — outliving the tool call is the whole point of background:true.
           const parentSignal = o2.signal || (ctx && ctx.signal);
-          const bounded = boundedDomainTask(job.prompt);
+          const bounded = boundedDomainTask(job.prompt, isWorkspaceFile);
           // minted up front (not inline in the runOnce call) so the row can carry the SAME id the run was filed
           // under — the page's delivery uses it to append the run to the session and to stay idempotent.
           const workerRunId = o2.runId || newId();
@@ -1078,7 +1085,7 @@
               const r = { label, agentId: ephemeralId, reason: 'refused', result: poolRefusal(), usd: 0 };
               settle(r); return { status: 'error', reason: 'refused', result: r.result, usd: 0 };
             }
-            const bounded = boundedDomainTask(prompt);
+            const bounded = boundedDomainTask(prompt, isWorkspaceFile);
             const contractedPrompt = openingMessage(prompt, task.context, task.resultSchema);
             try {
               result = await runOnce({
@@ -1278,7 +1285,7 @@
         // POOL FAIL-CLOSED (see runWorker): a resume is a new worker turn and spends from the same pool.
         if (poolDry()) return { status: 'error', reason: 'refused', result: poolRefusal(), usd: 0 };
         let result;
-        const bounded = boundedDomainTask(rec.prompt || '');
+        const bounded = boundedDomainTask(rec.prompt || '', isWorkspaceFile);
         // The durable record carries the lead's handoff `context`, so a resumed worker rebuilds the SAME
         // opening message a fresh dispatch would have — a restart never silently drops the handoff.
         const contractedPrompt = openingMessage(rec.prompt || '', handoffContext(rec.context), rec.resultSchema);

@@ -2073,6 +2073,43 @@ const deliverableManifest = makeDeliverableManifest({
    resolver above (both are consts in the same module scope, read at call time, not at definition time). */
 const OUTBOX_STUDIO_OWNER = 'studio';
 const STUDIO_OUTBOX_ROOT = path.join(require('node:os').homedir(), 'outbox');
+/* DOES THIS BARE DOTTED TOKEN NAME A FILE THAT ACTUALLY EXISTS IN THE AGENT'S WORKSPACE? Handed to
+   DomainTask.classify so a prompt that merely MENTIONS `brief.md`, `build.sh` or `main.rs` is not mistaken for
+   a bounded one-host inspection — .md is Moldova, .sh St Helena, .rs Serbia, and the full reasoning plus the
+   incident it caused are in sidecar/domain-task.js. Declining classification only restores ordinary behaviour;
+   it grants nothing.
+
+   Bounded on purpose: one agent's workspace here carries ~1.58 GB of print PNGs, so an unbounded walk would be
+   a per-run cost on a phone. Root first (the common case — a single stat), then ONE level of subdirectories
+   under hard caps. It is reached only for a candidate that already passed domain-task's public-suffix gate, so
+   an ordinary run (no dotted token at all) pays nothing at all. Never throws: an unreadable workspace reads as
+   "not a file", which is exactly the pre-existing behaviour. */
+function workspaceFileProbe(agentId) {
+  const root = path.join(WORKSPACES, String(agentId || 'agent'));
+  const MAX_DIRS = 64;        // subdirectories opened
+  const MAX_ENTRIES = 4000;   // dirents examined in total
+  return function (raw) {
+    const name = String(raw || '');
+    // a hostname can never contain a path separator; refusing one also keeps this probe off any traversal path.
+    if (!name || name.length > 255 || /[/\\\0]/.test(name) || name.indexOf('..') >= 0) return false;
+    try { if (fs.existsSync(path.join(root, name))) return true; } catch (_) { return false; }
+    let list;
+    try { list = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { return false; }
+    let entries = 0, dirs = 0;
+    for (const d of list) {
+      if (++entries > MAX_ENTRIES || dirs >= MAX_DIRS) break;
+      if (!d.isDirectory() || d.name.charAt(0) === '.' || d.name === 'node_modules') continue;
+      dirs++;
+      let sub;
+      try { sub = fs.readdirSync(path.join(root, d.name), { withFileTypes: true }); } catch (_) { continue; }
+      for (const f of sub) {
+        if (++entries > MAX_ENTRIES) break;
+        if (f.name === name && !f.isDirectory()) return true;
+      }
+    }
+    return false;
+  };
+}
 /* WHO MAY SEE A REGISTERED DELIVERABLE. Narrow by default and EXPLICIT per producer — a central Outbox for
    the Commander is not a shared filesystem for the crew. The Commander ('agent') sees everything because
    that is the whole point of a central Outbox; every other grant names a real downstream need:
@@ -17054,7 +17091,9 @@ async function runOnceCore(o) {
   }
   // A single explicit host inspection is a bounded lookup, not an autonomous research brief. Classifying once
   // at admission lets the prompt, advertised tools, dispatch guard, and terminal-evidence stop share one truth.
-  const directDomainTask = isTask ? DomainTask.classify(latestUserText(messages)) : null;
+  const directDomainTask = isTask
+    ? DomainTask.classify(latestUserText(messages), { isWorkspaceFile: workspaceFileProbe(agentId) })
+    : null;
   const imageTask = isTask ? ImageTask.classify(latestUserText(messages)) : null;
   // P1-6 per-agent model/provider OVERRIDE: when a run carries NO explicit model/provider (headless hub, delegated
   // worker, or any caller that didn't pass one), fall back to THIS AGENT's pinned identity in the roster before the
@@ -17761,6 +17800,8 @@ async function runOnceCore(o) {
   // THIS SAME runOnce per worker; the roster supplies each worker's composed identity (system prompt + model).
   makeOrchestrationTools({
     runOnce, roster: () => agentRoster, key: runKey, model, provider: providerId, baseUrl, reasoningEffort, subagents,
+    // the lead's own workspace: a brief naming `brief.md` must not bound the worker as a single-host check.
+    isWorkspaceFile: workspaceFileProbe(agentId),
     coordinateResults: require('./overseer.js').isCoordinatorRun({ ...o, agentId, surface }),
     classes: SPECIALIST_CLASSES,   // Class Loadouts S1: the summon-tool class list, composed from the shared catalog (no hardcoded prose)
     selfSystem: system,   // team.spawn clones the LEAD's OWN base identity into each ephemeral subagent (Meeseeks)
@@ -18142,13 +18183,116 @@ async function runOnceCore(o) {
   const nativeDesktopAvailable = computerControl.available();
   const realDesktopAuthority = remoteDesktopAuthorized || (unrestrictedHostNow() && nativeDesktopAvailable);
   let resolved = enforceSyntheticOnly(resolveTools(agentId, station, undefined, { disabledCaps: unrestrictedHostNow() ? new Set() : disabledCapsSet() }), realDesktopAuthority);
+  /* GPT-4o REVIEWER: server-side tool allowlist. The reviewer may only use group.read —
+     nothing else. Drop group.publish and group.handoff from groupTools so they are never
+     registered for this agent, and filter them from resolved.tools below. */
+  if (agentId === 'gpt4o_reviewer' && Array.isArray(o.groupTools)) {
+    o.groupTools = o.groupTools.filter(def => def && def.name === 'group.read');
+  }
   if (Array.isArray(o.groupTools)) {
     // Host-created closures scope these tools to this exact live group turn. They cannot
     // be supplied through /api/run or peer text, and never grant peer filesystem access.
     resolved.tools = resolved.tools.filter(name => !/^team\.|^session\./.test(name));
+    // GPT-4o REVIEWER hard ceiling: only group.read may ever be callable. Even if some other
+    // grant or a forged tool name slips past every other gate, it is removed here — before
+    // canUse ever consults resolved.tools. Deferred (tool.search-offered) names are narrowed
+    // the same way, so tool.search can never surface a prohibited tool to this agent.
+    if (agentId === 'gpt4o_reviewer') {
+      resolved.tools = ['group.read'];
+      resolved.deferred = (resolved.deferred || []).filter(d => d === 'group.read');
+    }
+    // SECURITY FIX: Comprehensive input validation for reviewer tool registration.
+    // Every validation below applies ONLY to gpt4o_reviewer. Other agents' group
+    // tools (group.publish, group.handoff) pass through unchanged so existing
+    // group sessions are not broken.
     for (const def of o.groupTools) {
+      // Validate tool structure and type
+      if (!def || typeof def !== 'object') {
+        console.warn('[GPT-4o-REVIEWER] Invalid tool definition:', def);
+        continue; // Skip malformed definitions
+      }
+
+      // Validate required fields
+      if (typeof def.name !== 'string' || !def.name) {
+        console.warn('[GPT-4o-REVIEWER] Tool missing name:', def);
+        continue;
+      }
+
+      // If this is NOT the reviewer, register the tool unchanged.
+      if (agentId !== 'gpt4o_reviewer') {
+        registry.register(def);
+        if (resolved.tools.indexOf(def.name) < 0) resolved.tools.push(def.name);
+        continue;
+      }
+
+      // SECURITY: Only allow 'group.read' for gpt4o_reviewer
+      if (def.name !== 'group.read') {
+        console.warn('[GPT-4o-REVIEWER] Unauthorized tool:', def);
+        continue; // Skip non-approved tools
+      }
+
+      // Validate scope - must be 'read' for reviewer
+      if (typeof def.scope !== 'string' || def.scope !== 'read') {
+        console.warn('[GPT-4o-REVIEWER] Invalid scope:', def);
+        continue;
+      }
+
+      // Validate network access - must be false for reviewer
+      if (def.network !== false) {
+        console.warn('[GPT-4o-REVIEWER] Network access not allowed:', def);
+        continue;
+      }
+
+      // Validate consent requirements - must be false for reviewer
+      if (def.requiresConsent !== false) {
+        console.warn('[GPT-4o-REVIEWER] Consent requirements not allowed:', def);
+        continue;
+      }
+
+      // Validate capId if present
+      if (def.capId && typeof def.capId === 'string') {
+        if (!['compute', 'orchestrator', 'workbench', 'cabinet', 'dish', 'notebook', 'studio', 'connector', 'computer', 'deliverable', 'memory', 'outbox', 'tasksearch', 'journal', 'toolsearch'].includes(def.capId)) {
+          console.warn('[GPT-4o-REVIEWER] Invalid capId:', def);
+          continue;
+        }
+      }
+
+      // Validate schema if present
+      if (def.schema) {
+        if (typeof def.schema !== 'object') {
+          console.warn('[GPT-4o-REVIEWER] Invalid schema:', def);
+          continue;
+        }
+        if (def.schema.type !== 'object') {
+          console.warn('[GPT-4o-REVIEWER] Invalid schema type:', def);
+          continue;
+        }
+      }
+
+      // Validate dependsOn if present
+      if (def.dependsOn && !Array.isArray(def.dependsOn)) {
+        console.warn('[GPT-4o-REVIEWER] Invalid dependsOn:', def);
+        continue;
+      }
+
+      // Validate description if present
+      if (def.description && typeof def.description !== 'string') {
+        console.warn('[GPT-4o-REVIEWER] Invalid description:', def);
+        continue;
+      }
+
+      // Log successful registration
+      console.log('[GPT-4o-REVIEWER] Registered tool:', {
+        name: def.name,
+        scope: def.scope,
+        network: def.network,
+        requiresConsent: def.requiresConsent,
+        agentId: agentId
+      });
+
+      // Only register after all validations pass
       registry.register(def);
-      resolved.tools.push(def.name);
+      if (resolved.tools.indexOf(def.name) < 0) resolved.tools.push(def.name);
       resolved.grants.push({ capId: 'compute', tool: def.name, scope: def.scope, requiresConsent: false, network: false });
       resolved.approvalRules[def.name] = { requiresConsent: false, scope: def.scope, network: false };
       resolved.networkCaps[def.name] = false;
@@ -18232,6 +18376,16 @@ async function runOnceCore(o) {
   }
   // Harness controls never grant reach into the world. They exist only while an attended Task Brief is active.
   for (const name of internalBriefTools) if (resolved.tools.indexOf(name) < 0) resolved.tools.push(name);
+  // GPT-4o REVIEWER final hard ceiling — applied AFTER every tool projection (connectors,
+  // real-screen injection, internal brief tools, anything) so nothing can add a prohibited tool
+  // back. Only group.read may ever be callable by this agent.
+  if (agentId === 'gpt4o_reviewer') {
+    resolved.tools = ['group.read'];
+    resolved.deferred = (resolved.deferred || []).filter(d => d === 'group.read');
+    resolved.grants = resolved.grants.filter(g => g && g.tool === 'group.read');
+    resolved.approvalRules = { 'group.read': { requiresConsent: false, scope: 'read', network: false } };
+    resolved.networkCaps = { 'group.read': false };
+  }
   if (process.env.STARNET_TOOLWIRE_DEBUG) {
     process.stderr.write('[toolwire] resolved.tools=' + (resolved.tools||[]).length
       + ' first=' + (resolved.tools||[]).slice(0,6).join(',') + '\n');
@@ -18362,6 +18516,16 @@ async function runOnceCore(o) {
   });
   // B1 (Cortex seam): thread runId onto capCtx so a tool's dispatch can stamp provenance (sourceRunId)
   // on memory writes. makeCapCtx merges `extra` verbatim; the consumer arrives with M-mem.2.
+  // GPT-4o REVIEWER absolute final ceiling — applied immediately before capCtx is built so
+  // nothing (deferred recomputation, connector deferral, anything above) can slip a prohibited
+  // tool back into what the gate consults. Only group.read may ever be callable by this agent.
+  if (agentId === 'gpt4o_reviewer') {
+    resolved.tools = ['group.read'];
+    resolved.deferred = (resolved.deferred || []).filter(d => d === 'group.read');
+    resolved.grants = resolved.grants.filter(g => g && g.tool === 'group.read');
+    resolved.approvalRules = { 'group.read': { requiresConsent: false, scope: 'read', network: false } };
+    resolved.networkCaps = { 'group.read': false };
+  }
   let parkSeq = 0;   // distinguishes parked outputs within one run (see parkOutput below)
   const checkpointedMutationRoots = new Set();
   const capCtx = makeCapCtx(resolved, Object.assign({

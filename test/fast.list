@@ -605,6 +605,7 @@ test/recruit-identity-ui.test.js
 test/subagents.test.js
 test/orchestration.test.js
 test/domain-terminal.test.js
+test/domain-task-workspace-file.test.js
 test/worker-iteration-cap.test.js
 test/channels.test.js
 test/comms-presence.test.js
@@ -1000,6 +1001,7 @@ test/outbox-nine-agents.test.js
 test/run-cost-cap.test.js
 test/budget-reservation.test.js
 test/dispatch-lease-invariant.test.js
+test/etsy-preflight.test.js
 test/provider-configured-from-sidecar.test.js
 test/tool-schema-contract.test.js
 test/outbox-approval-route.test.js

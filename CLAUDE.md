@@ -109,7 +109,7 @@ change); and `routine.create`, `routine.manage`, `loop.*`, `team.configure`, `ta
 
 This repo doubles as the live runtime for the owner's actual Etsy business, so a few project facts worth knowing before touching agent config:
 
-- **Five agents exist**: NIGHT4CHRIST (Commander, Etsy team), SCOUT (research), DESIGNER (product creation), PUBLISHER (listing drafts), HARVEST (independent peer agent — zero-cost income-opportunity hunting outside Etsy, parked routine, see its `docs.identity` for the full mandate).
+- **Six agents exist**: NIGHT4CHRIST (Commander, Etsy team), SCOUT (research), DESIGNER (product creation), PUBLISHER (listing drafts), HARVEST (independent peer agent — zero-cost income-opportunity hunting outside Etsy, parked routine, see its `docs.identity` for the full mandate), GPT-4o Independent Reviewer (`gpt4o_reviewer`, Group Chat critic — advisory only, see reviewer restrictions below).
 - **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval.
 - **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter, and are not yours to clean up. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and avoid `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief for this work.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room (ARCHIVE — SCOUT has no desk, so its room resolves via its bay, see the remote-bay ruling in `frontend/app/worldmodel.js`). Verified by one real cron run: the `skill.view` error is gone.
@@ -533,6 +533,7 @@ ASK agent in the Etsy chain is PUBLISHER:
 | SCOUT (`scout`) | `claude-haiku-5-5` | **full** |
 | PUBLISHER (`publisher`) | `claude-haiku-5-5` | **ask** |
 | HARVEST (`harvest`) | `claude-haiku-5-5` | **full** |
+| GPT-4o Independent Reviewer (`gpt4o_reviewer`) | `gpt-4o` | **ask** |
 | QC_EDITOR / DIRECTOR / PRODUCER / COPYWRITER | `opus-5` / `sonnet-5-5` | ask |
 
 Why it matters, and why the error was invisible: the ASK-mode `fs.write` ban is real, but it applies
@@ -753,6 +754,56 @@ Taking the 5x-above-100k claim as given, a 150k-token call records $0.016 agains
 **80% under-report** on the live path, but **100% over** on the offline snapshot, and nothing in the ledger
 records which path priced the row. **The 5x/100k figure itself is UNVERIFIED here** — it is not in the cache
 (the extractor keeps only input/output) and no live price page was fetched. Treat it as claim-conditional.
+
+## GPT-4o Independent Reviewer — reviewer restrictions (2026-11-18)
+
+A separate, advisory-only reviewer agent (`gpt4o_reviewer`, provider `openai`, model `gpt-4o`) participates in Group Chat. It is **not** a production agent and must never be treated as one.
+
+### Enforced restrictions (server-side, not advisory)
+
+The reviewer is restricted by four defense-in-depth ceilings in `sidecar/index.js` `runOnceCore()` (lines 18186, 18196, 18379, 18519). Each independently narrows `resolved.tools` to exactly `['group.read']`:
+
+| Ceiling | Line | Purpose |
+|---|---|---|
+| `groupTools` filter before registration | 18186 | `group.publish` and `group.handoff` stripped from `o.groupTools` before `registry.register()` — never registered |
+| `resolved.tools` hard ceiling after enabled-toolsets | 18196 | Tools narrowed to `['group.read']`; deferred (tool.search-offered) names narrowed to `['group.read']` |
+| Final hard ceiling after all projection | 18379 | Re-applies after connectors, real-screen injection, internal brief tools — nothing can add a prohibited tool back |
+| Absolute final ceiling before `makeCapCtx` | 18519 | Re-applies immediately before capCtx is built; deferred recomputation cannot slip a prohibited tool through |
+
+The `capCtx.canUse()` gate consults `resolved.tools` directly (`sidecar/capability/capGate.js`), so no prohibited tool can be dispatched — direct, deferred, forged/manual, recovery replay, or nested calls.
+
+### Allowed operation
+
+- `group.read` — read an explicitly shared Group Chat artifact by artifact ID (text or binary facts). Read-only, id-addressed, no path access.
+
+### Prohibited operations (all blocked)
+
+`group.publish`, `group.handoff`, `fs.*`, `shell.*`, `terminal.*`, `verify.*`, `code.run`, `browser.*`, `web_*`, `connectors.*`, `team.*`, `session.*`, `skill.*`, `notebook.*`, `image_*`, `video.*`, `voice.*`, `routine.*`, `outbox_*`, `deliverable_note`, `channel.*`
+
+### Group Chat integration
+
+- Appears as a separate participant via `makeGroupSessions` (`sidecar/group-sessions.js`)
+- Receives conversation context through `context()` in `group-sessions.js` (bounded: last 80 messages + origin + shared artifacts)
+- Reads only explicitly shared artifacts via `group.read` by artifact ID — never a path, never cross-workspace
+- Responds normally in the Group Chat transcript
+- Independently selectable/invitable via the Group Chat `invite` mechanism
+- Remains separate from NIGHT4CHRIST roles; no access to other agents' private workspaces
+
+### System prompt
+
+Establishes the reviewer as an independent critic, not a production operator: analyze evidence, challenge assumptions, check factual accuracy, distinguish verified facts from guesses, identify risks, give direct recommendations, disagree when evidence supports, never claim uninspected access, never execute production tasks, never request secrets, never publish/edit/modify deliverables.
+
+### Authentication
+
+The `/api/run` route requires `X-StarNet-Token` header. The token is randomly generated per sidecar boot (`crypto.randomBytes(32).toString('hex')`, `sidecar/index.js:397`) and injected into the frontend as `window.__STARNET_API_TOKEN__`. The browser's `Harness.apiToken()` reads it (`sidecar/frontend/app/harness.js:167`) and attaches it to every `/api/` fetch via the hardened `window.fetch` wrapper (`sidecar/frontend/app/harness.js:1336`).
+
+### Live validation
+
+Performing one live validation call is authorized (owner instruction). The call uses `agentId: gpt4o_reviewer`, `provider: openai`, `model: gpt-4o`, short prompt, strict output-token limit (100 tokens). No production pipelines, routines, or paid image/video generation are run.
+
+### Roster persistence
+
+The reviewer entry is in `workspaces/agent.roster.json` with `provider: openai`, `model: gpt-4o`, `approvalMode: ask`, `executionProfile: station-gear`, `skills: []`. Backed up at `agent.roster.json.bak-gpt4o-reviewer-20261118`.
 
 ### Undo
 

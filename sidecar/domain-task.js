@@ -38,7 +38,30 @@
     return String(host || '').trim().toLowerCase().replace(/^www\./, '').replace(/\.+$/, '');
   }
 
-  function hostsOf(text) {
+  /* opts.isWorkspaceFile(rawToken) -> true when that token names a file that actually exists in the run's
+     workspace. INJECTED, never read from disk here: this module is pure by design (the UMD branch loads it
+     where `fs` does not exist) and three independent seams depend on that.
+
+     Why it exists: dozens of ordinary FILE EXTENSIONS are also assigned country-code TLDs — .md Moldova,
+     .sh St Helena, .rs Serbia, .pl Poland, .py Paraguay, .so Somalia, .tf, .ps, .it, .in, .co — so the
+     conservative public-suffix gate above admits `etsy-creative-brief.md` as a hostname. A prompt that merely
+     NAMES a workspace file then classified as a one-host inspection, and the host stripped every team.*,
+     browser.*, web_search and web_request from the advertised wire list. That is how the 2026-11-17 Etsy chain
+     fire lost delegation: team_dispatch answered "withheld" in 0 ms — before capability, consent or taint were
+     consulted — and nothing in the run named the cause.
+
+     Only BARE candidates are tested. An explicit URL stays a URL: `https://foo.md/x` still classifies even if
+     a file of that name exists, because a host the Commander actually typed must never be suppressed by a
+     coincidence on disk. Absent, or throwing, leaves behaviour byte-identical to before — and declining to
+     classify is the documented-safe direction (it restores ordinary research behaviour, nothing more). */
+  function namesAnExistingFile(raw, isWorkspaceFile) {
+    if (!isWorkspaceFile) return false;
+    // strictly true: a stat object, a Promise or any other truthy value must not be able to veto a real host.
+    try { return isWorkspaceFile(String(raw)) === true; } catch (_) { return false; }
+  }
+
+  function hostsOf(text, opts) {
+    const isWorkspaceFile = (opts && typeof opts.isWorkspaceFile === 'function') ? opts.isWorkspaceFile : null;
     const found = [];
     const seen = new Set();
     const src = String(text || '');
@@ -54,15 +77,17 @@
       // remain case-insensitive when explicit; for a bare ambiguous token, declining classification is safer.
       if (!explicitUrl && m[1] !== m[1].toLowerCase()) continue;
       if (!explicitUrl && !PUBLIC_SUFFIXES.has(suffix)) continue;
+      // the raw matched token, not the normalized host: a file is referenced by the name it has on disk.
+      if (!explicitUrl && namesAnExistingFile(m[1], isWorkspaceFile)) continue;
       if (!host || seen.has(host)) continue;
       seen.add(host); found.push(host);
     }
     return found;
   }
 
-  function classify(text) {
+  function classify(text, opts) {
     const src = String(text || '').trim();
-    const hosts = hostsOf(src);
+    const hosts = hostsOf(src, opts);
     if (hosts.length !== 1 || !DIRECT_RE.test(src) || EXPANSIVE_RE.test(src)) return null;
     return {
       kind: 'direct-domain', host: hosts[0],

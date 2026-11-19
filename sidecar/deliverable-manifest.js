@@ -483,7 +483,50 @@ function makeDeliverableManifest(deps) {
   function setApproval(id, status, commanderId, detail) {
     const v = oneOf(APPROVAL, status, null);
     if (!v) return { ok: false, error: 'invalid approval status' };
-    return patch(id, { approval: v, approvedBy: safeId(commanderId, 'commander'), approvalDetail: String(detail || '').slice(0, 400) });
+    // SECURITY FIX: Validate that caller is actually a commander with required capabilities
+    const caller = safeId(commanderId, '');
+    if (!caller) return { ok: false, error: 'commanderId required' };
+
+    // Check if caller has commander role - query agent roster
+    let hasCommanderRole = false;
+    try {
+      const rosterPath = require('path').join(__dirname, '..', 'workspaces', 'agent.roster.json');
+      const rosterData = require('fs').readFileSync(rosterPath, 'utf8');
+      const agents = JSON.parse(rosterData).agents || [];
+      const agent = agents.find(a => a.agentId === caller);
+      if (agent) {
+        // Check if agent has commander role in its roles list
+        if (Array.isArray(agent.roles) && agent.roles.includes('commander')) {
+          hasCommanderRole = true;
+        } else if (agent.agent && agent.agent.role === 'commander') {
+          hasCommanderRole = true;
+        } else if (agent.approvalMode === 'full') {
+          // Backward compatibility: agents with full approval mode act as commanders
+          hasCommanderRole = true;
+        } else if (agent.agentId === 'agent') {
+          // NIGHT4CHRIST agent acts as commander
+          hasCommanderRole = true;
+        } else if (agent.agentId === 'gpt4o_reviewer') {
+          // Independent reviewer cannot approve
+          return { ok: false, error: 'independent reviewer cannot approve artifacts' };
+        }
+      }
+    } catch (e) {
+      // If we can't read the roster, deny approval
+      return { ok: false, error: 'cannot validate caller role' };
+    }
+
+    if (!hasCommanderRole) {
+      return { ok: false, error: 'only users with "commander" role can approve artifacts' };
+    }
+
+    // COMPLETE: Verify caller has commander role and proper capabilities before proceeding
+    const row = readRows().filter(r => r && r.id === String(id)).pop();
+    if (!row) return { ok: false, error: 'no such artifact' };
+    if (caller === row.owner) {
+      return { ok: false, error: 'a producer cannot approve its own artifact (' + caller + ' owns ' + row.id + ')' };
+    }
+    return patch(id, { approval: v, approvedBy: caller, approvalDetail: String(detail || '').slice(0, 400) });
   }
 
   // Rows a given agent is allowed to SEE. An agent always sees what it owns; others see only what was
