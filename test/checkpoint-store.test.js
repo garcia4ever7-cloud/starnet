@@ -209,20 +209,55 @@ function runGit(args, opts) {
     const freshStore = () => makeCheckpointStore({ fs, pathMod: path, root, runGit, clock, keep: 5, maxRepoBytes: 1 });
     const unwinnable = freshStore();
     const sweep1 = await unwinnable.enforceSizeCeiling(aid2);
-    A.ok(sweep1.swept, 'the first enforce over an unwinnable ceiling does sweep');
+    A.eq(sweep1.swept, false, 'gc is skipped when the work tree alone exceeds ceiling (futile sweep)');
+    A.eq(sweep1.deferred, true, 'it reports deferred');
+    A.eq(sweep1.reinit, false, 're-init is not attempted');
     A.ok(sweep1.bytesAfter > 1, 'and it ends still over the 1-byte ceiling (nothing could shrink it that far)');
     const sweep2 = await unwinnable.enforceSizeCeiling(aid2);
     A.eq(sweep2.swept, false, 'a repeat enforce with no growth does NOT sweep again');
     A.eq(sweep2.deferred, true, 'it reports deferred, so the skip is visible rather than silent');
     A.ok(fs.existsSync(path.join(gitDir2, 'HEAD')), 'and the repo is still intact after the deferral');
-    // the memo is per-store, so a fresh store re-measures rather than inheriting another instance's verdict
-    A.ok((await freshStore().enforceSizeCeiling(aid2)).swept, 'a new store re-measures (memo is process/instance-local)');
+    // the memo is per-store: a fresh store re-measures. But when the work tree alone already
+    // exceeds ceiling (sz holds ~1KB vs the 1-byte cap), gc is futile for every store.
+    const freshSweep = await freshStore().enforceSizeCeiling(aid2);
+    A.eq(freshSweep.swept, false, 'a fresh store also skips gc when the work tree alone exceeds ceiling');
+    A.eq(freshSweep.deferred, true, 'and reports deferred');
     /* ---- 11b. RE-INIT IS REFUSED WHEN THE WORK TREE ALONE EXCEEDS THE CEILING ----
        A re-init baseline is one commit of the current tree, so it can never be smaller than that tree.
        Attempting it anyway hashes the whole tree and destroys every rollback point to land over the
        ceiling regardless. The 1-byte ceiling above is exactly that case: the tree is ~1KB. */
     A.eq(sweep1.reinit, false, 're-init is refused when the work tree alone is over the ceiling');
     A.ok(unwinnable.list(aid2).snapshots.length >= 1, 'and the rollback history was not sacrificed for nothing');
+    /* ---- 11d. FUTILE GC IS SKIPPED WHEN THE WORK TREE ALONE EXCEEDS THE CEILING ----
+       Regression test for the 2026-11-20 fix: when the repo is over ceiling AND the work tree alone
+       already exceeds ceiling, `enforceSizeCeiling` skips git gc entirely (gc reclaims nothing on
+       reachable packed objects; re-init of an over-ceiling tree can never fit). The memo records the
+       futile verdict and repeats defer without sweeping. Rollback history remains intact. */
+    {
+      const aid3 = 'sz3';
+      const wt3 = path.join(root, aid3);
+      fs.mkdirSync(wt3, { recursive: true });
+      const gitCalls = [];
+      const trackingRunGit = (args, opts) => { gitCalls.push(args.slice()); return runGit(args, opts); };
+      const futile = makeCheckpointStore({ fs, pathMod: path, root, runGit: trackingRunGit, clock, keep: 5, maxRepoBytes: 1 });
+      fs.writeFileSync(path.join(wt3, 'big.bin'), Buffer.alloc(100000)); // 100KB >> 1-byte ceiling
+      const s3 = await futile.snapshot(aid3, { runId: 'r3', turn: 0, label: 'fs.write' });
+      A.ok(s3 && s3.created, 'baseline snapshot created for futile-gc test');
+      const gitDir3 = path.join(root, '.checkpoints', aid3, 'git');
+      A.ok(fs.existsSync(path.join(gitDir3, 'HEAD')), 'repo exists for futile-gc test');
+      const gcCallsBefore = gitCalls.filter(a => a[0] === 'gc').length;
+      const sweep = await futile.enforceSizeCeiling(aid3);
+      const gcCallsAfter = gitCalls.filter(a => a[0] === 'gc').length;
+      A.eq(gcCallsAfter, gcCallsBefore, 'git gc was NOT invoked when the work tree alone exceeds ceiling');
+      A.eq(sweep.swept, false, 'enforceSizeCeiling did NOT sweep when work tree alone exceeds ceiling');
+      A.eq(sweep.deferred, true, 'it reports deferred');
+      A.eq(sweep.reinit, false, 're-init was not attempted');
+      const sweep2 = await futile.enforceSizeCeiling(aid3);
+      const gcCallsAfter2 = gitCalls.filter(a => a[0] === 'gc').length;
+      A.eq(gcCallsAfter2, gcCallsAfter, 'repeat deferral also does NOT invoke git gc');
+      A.eq(sweep2.deferred, true, 'repeat call is also deferred');
+      A.ok(await futile.restore(aid3, s3.id), 'snapshot remains restorable after futile-gc skip');
+    }
     /* ---- 11c. RE-INIT STILL RUNS WHEN IT CAN WIN (the ceiling sits between tree and repo) ---- */
     {
       const du = (dir) => { let t = 0; for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); try { t += e.isDirectory() ? du(f) : fs.statSync(f).size; } catch (_) {} } return t; };

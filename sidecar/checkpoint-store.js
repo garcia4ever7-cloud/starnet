@@ -308,6 +308,18 @@
       if (memo && before < memo.bytesAfter * SWEEP_RETRY_GROWTH) {
         return { swept: false, reinit: false, deferred: true, bytesBefore: before, bytesAfter: before };
       }
+      // If the work tree itself already exceeds the ceiling, git gc cannot shrink the shadow repo below
+      // it (all blobs are reachable and packed; gc reclaimed 6KB of 1.445GB on the live station) and a
+      // re-init is provably futile (a fresh single-commit repo of the tree can never fit under ceiling).
+      // Skip the futile sweep entirely rather than paying ~22s of pegged CPU per boot.
+      const workTreeBytes = dirBytes(workTreeFor(aid, scope));
+      if (before > maxRepoBytes && workTreeBytes > maxRepoBytes) {
+        sweepMemo.set(memoKey, { bytesAfter: before });
+        try {
+          console.warn('[checkpoint] shadow repo for ' + aid + ' over ceiling (' + before + 'B); work tree alone is ' + workTreeBytes + 'B; gc futile, skipping; no further sweeps until it grows past ' + Math.floor(before * SWEEP_RETRY_GROWTH) + 'B');
+        } catch (_) {}
+        return { swept: false, reinit: false, deferred: true, bytesBefore: before, bytesAfter: before };
+      }
       try { await git(aid, scope, ['gc', '--prune=now', '-q']); } catch (_) {}
       let after = dirBytes(gitDir);
       let reinit = false;
