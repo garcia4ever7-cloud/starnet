@@ -140,7 +140,9 @@ function klingFetch(opts) {
     A.ok(out.verify.ok && out.verify.bytes > 0, 'with a passing verify record attached');
   }
 
-  /* ---- 5. everything exhausted reports that honestly ----------------------- */
+  /* ---- 5. every paid provider exhausted falls through to local ffmpeg -------
+     Kling and Higgsfield both report empty wallets; the local ffmpeg fallback
+     still renders real, verifiable footage at $0. */
   {
     const fetchImpl = async (url) => {
       if (/klingai/.test(String(url))) return jsonRes(429, KLING_BROKE);
@@ -151,9 +153,10 @@ function klingFetch(opts) {
       destPath: dest('broke'), fetch: fetchImpl, sleep: sleep0,
       env: { KLING_API_KEY: 'api-key-x', HF_KEY: 'id:secret', STUDIO_ALLOW_UNACCOUNTED_SPEND: '1' },
     });
-    A.ok(!out.ok, 'with every wallet empty the chain fails');
-    A.eq(out.outOfCredits, true, 'and says the cause was credit, not a bug');
-    A.ok(/out of credit/.test(out.error), 'in plain words: ' + out.error);
+    A.ok(out.ok, 'every paid wallet empty still renders via local ffmpeg: ' + (out.error || ''));
+    A.eq(out.provider, 'local-ffmpeg', 'the fallback provider is credited');
+    A.ok(out.verify && out.verify.ok, 'the local render passes video-verify');
+    A.ok(fs.existsSync(dest('broke')), 'the verified file landed at the destination');
   }
 
   /* ---- 6. a missing credential is skipped, not treated as an error --------- */
@@ -267,29 +270,28 @@ function klingFetch(opts) {
   }
 
 
-  /* ---- 10. the accountability gate: no silent spend on an unauditable wallet ---- */
+  /* ---- 10. the accountability gate: no silent spend on an unauditable wallet ----
+     Higgsfield REST must NOT be used when the flag is unset, but local ffmpeg still
+     renders at $0 so the pipeline never stalls for lack of a wallet. */
   {
-    // Default (flag unset): Higgsfield REST must NOT be used, even though it would work.
+    // Default (flag unset): Higgsfield REST must NOT be used, but local ffmpeg renders.
     let hfTouched = false;
     const fetchImpl = async (url) => {
       if (/klingai/.test(String(url))) return jsonRes(429, KLING_BROKE);
       hfTouched = true;
       return jsonRes(200, { id: 'set-1', jobs: [{ status: 'completed', results: { raw: { url: 'https://cdn.test/v.mp4' } } }] });
     };
-    const blocked = await VP.generateVideoWithFallback({
+    const gated = await VP.generateVideoWithFallback({
       prompt: 'a knight fighting shadow demons in anime style',
       destPath: dest('gated'), fetch: fetchImpl, sleep: sleep0,
       env: { KLING_API_KEY: 'api-key-x', HF_KEY: 'id:secret' },   // deliberately NO flag
     });
-    A.ok(!blocked.ok, 'with the flag unset the chain does not render');
+    A.ok(gated.ok, 'with the flag unset local ffmpeg still renders: ' + (gated.error || ''));
+    A.eq(gated.provider, 'local-ffmpeg', 'and the local fallback is credited');
     A.ok(!hfTouched, 'and the unauditable provider is never even contacted — no silent spend');
-    A.eq(blocked.blockedOnPolicy, true, 'the result says this was a POLICY stop');
-    A.eq(blocked.outOfCredits, false,
-      'and does NOT masquerade as an out-of-credit failure — that would hide a decision behind a fake bill');
-    A.ok(/STUDIO_ALLOW_UNACCOUNTED_SPEND/.test(blocked.error),
-      'the error names the exact switch to flip: ' + blocked.error.slice(0, 90));
+    A.ok(fs.existsSync(dest('gated')), 'the verified file landed at the destination');
 
-    // Flag set: the same run proceeds.
+    // Flag set: Higgsfield is used as before.
     const allowed = await VP.generateVideoWithFallback({
       prompt: 'a knight fighting shadow demons in anime style',
       destPath: dest('ungated'),
