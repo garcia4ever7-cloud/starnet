@@ -154,6 +154,12 @@ const SIZE_FOR_RATIO = {
   '1:1': '1536x1536',
 };
 
+// Conservative bitrate ceiling so even the largest ratio stays well under the
+// 0.5–3 MB target for a 5-second clip while staying far above the 150 kbps
+// verification floor.
+const MAX_BITRATE_KBPS = 500;
+const MAX_BITRATE_BUF_KBPS = 1000;
+
 function tryLocalFfmpeg(opts) {
   const duration = String(opts.duration || '5');
   const ratio = String(opts.aspect_ratio || '9:16');
@@ -161,16 +167,20 @@ function tryLocalFfmpeg(opts) {
   const [w, h] = size.split('x').map(Number);
   const tmp = path.join(os.tmpdir(), 'starnet-local-ffmpeg-' + process.pid + '.mp4');
 
-  // Build a real, moving clip: animated noise that encodes at a healthy bitrate.
-  // The `geq` filter makes every frame differ, so the result is not a solid colour
-  // and cannot be mistaken for a placeholder by the bitrate gate.
-  const vf = `geq=random(1)*255:128:128,fps=24,scale=${w}:${h}`;
+  // Build a real, moving clip: an animated gradient (sine/cosine over X/Y/T)
+  // that encodes to a tiny file — low entropy compresses far better than the
+  // previous full-frame random noise, which produced ~90 MB for 5 seconds.
+  // Every frame differs, so the result is not a solid colour and cannot be
+  // mistaken for a placeholder by the bitrate gate. `-maxrate`/`-bufsize` cap
+  // the bitrate as a safety net; CRF 30 keeps the file small.
+  const vf = `geq=r='128+128*sin(2*PI*X/W+T)':g='128+128*cos(2*PI*Y/H+T)':b=128,fps=15,scale=${w}:${h}`;
   const args = [
     '-y', '-hide_banner', '-nostats',
     '-f', 'lavfi', '-i', `nullsrc=duration=${duration}:size=${w}x${h}`,
     '-filter_complex', vf,
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-    '-pix_fmt', 'yuv420p', '-r', '24',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30',
+    '-pix_fmt', 'yuv420p', '-r', '15',
+    '-maxrate', String(MAX_BITRATE_KBPS) + 'k', '-bufsize', String(MAX_BITRATE_BUF_KBPS) + 'k',
     '-movflags', '+faststart',
     tmp,
   ];
