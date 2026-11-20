@@ -95,13 +95,15 @@ function outboxShareFor(agentId) {
   const m = freshManifest();
   const reg = m.register({
     ownerAgentId: STUDIO_OWNER, runId: PROJ, projectId: PROJ,
-    shareWith: outboxShareFor(STUDIO_OWNER), files: [path.join(PROJ, 'video.mp4')]
+    shareWith: outboxShareFor(STUDIO_OWNER), files: [path.join(PROJ, 'video.mp4')],
+    provider: 'local-ffmpeg'
   });
   A.ok(reg.ok, 'a studio video registers: ' + (reg.error || 'ok'));
   A.eq(reg.entries.length, 1, 'exactly one entry');
   const e = reg.entries[0];
   A.eq(e.filename, 'video.mp4', 'the filename is recorded');
   A.eq(e.kind, 'video', 'classified as a video');
+  A.eq(e.provider, 'local-ffmpeg', 'the synthetic-fallback provider is recorded');
   A.eq(e.bytes, VIDEO.length, 'the real byte count is recorded');
   A.eq(e.sha256, crypto.createHash('sha256').update(VIDEO).digest('hex'), 'checksummed from the real bytes');
 
@@ -109,6 +111,7 @@ function outboxShareFor(agentId) {
   const seen = m.list('agent', { kind: 'video' });
   A.eq(seen.length, 1, 'the Commander sees the studio video');
   A.eq(seen[0].projectId, PROJ, 'under its project id');
+  A.eq(seen[0].provider, 'local-ffmpeg', 'list() exposes provider on the row');
 
   // QC_EDITOR sees it — this is what was structurally impossible before
   A.eq(m.list('qceditor', { kind: 'video' }).length, 1, 'QC_EDITOR can now see a studio video');

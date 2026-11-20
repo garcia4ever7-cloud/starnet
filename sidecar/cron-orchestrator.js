@@ -277,6 +277,10 @@ QUALITY CHECKLIST:
 3. Media quality: All assets present? Consistent style and quality?
 4. Completeness: All required scenes present? No gaps?
 5. Faith authenticity: Does the final product honor the original intent?
+6. Provenance: the host records which provider rendered the video (PRODUCER's video.provider).
+   If it is local-ffmpeg, the clip is the $0 synthetic fallback — animated noise produced when
+   every paid wallet is empty. It is NOT real footage. Flag the review as FAILED and say so plainly;
+   a fallback clip must never be passed off as the owner's video.
 
 OUTPUT REQUIREMENTS:
 1. Provide a comprehensive QC report with pass/fail for each criterion

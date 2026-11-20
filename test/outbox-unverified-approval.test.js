@@ -437,5 +437,58 @@ function makeManifest() {
   A.eq(man.get('agent', id).approval, 'approved', 'finally approved');
 }
 
+/* ---------- L. LOCAL-FFMPEG CLIPS ARE HARD-BLOCKED FROM APPROVAL ----------
+   A local-ffmpeg fallback clip passes every byte gate, but it is not the owner's footage.
+   setApproval() must refuse to mark it 'approved' even with acknowledgeUnverified: true. */
+{
+  const man = makeManifest();
+
+  fs.mkdirSync(path.join(ws, 'webdesigner'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'webdesigner', 'vid.mp4'),
+    Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42', 'ascii'), Buffer.alloc(4096, 7)]));
+  fs.writeFileSync(path.join(ws, 'webdesigner', 'real-vid.mp4'),
+    Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42', 'ascii'), Buffer.alloc(4096, 9)]));
+
+  const reg = man.register({
+    ownerAgentId: 'webdesigner', projectId: 'studio-1', shareWith: ['agent'],
+    files: ['vid.mp4'], provider: 'local-ffmpeg'
+  });
+  A.ok(reg.ok && reg.entries.length === 1, 'a local-ffmpeg clip registers');
+  const id = reg.entries[0].id;
+  A.eq(reg.entries[0].provider, 'local-ffmpeg', 'provider persisted on the row');
+
+  // It passes host verification (the gate judges bytes, not origin).
+  A.eq(man.setVerification(id, 'passed', 'video-verify: real footage').ok, true,
+    'the clip passes host verification — as local-ffmpeg clips always do');
+
+  // Approving it is refused outright.
+  const plain = man.setApproval(id, 'approved', 'agent', 'ship it');
+  A.eq(plain.ok, false, 'approving a local-ffmpeg clip is refused outright');
+  A.ok(/local-ffmpeg/.test(String(plain.error)), 'the error names the synthetic fallback: ' + String(plain.error));
+
+  // The override does NOT unlock it.
+  const overridden = man.setApproval(id, 'approved', 'agent', 'ship anyway',
+    { acknowledgeUnverified: true });
+  A.eq(overridden.ok, false, 'acknowledgeUnverified:true does NOT unlock a local-ffmpeg clip');
+  A.eq(man.get('agent', id).approval, 'pending', 'the approval axis was not touched');
+
+  // rejected and pending are still allowed — the gate is only on approval.
+  A.eq(man.setApproval(id, 'rejected', 'agent', 'synthetic, not real footage').ok, true,
+    'rejecting a local-ffmpeg clip is allowed');
+  A.eq(man.get('agent', id).approval, 'rejected', 'rejection persisted');
+  A.eq(man.setApproval(id, 'pending', 'agent', 'reset').ok, true,
+    'resetting to pending is allowed');
+  A.eq(man.get('agent', id).approval, 'pending', 'pending persisted');
+
+  // A real provider with verification passed still approves normally (different artifactId = different file).
+  const realId = man.register({
+    ownerAgentId: 'webdesigner', projectId: 'studio-1', shareWith: ['agent'],
+    files: ['real-vid.mp4'], provider: 'kling'
+  }).entries[0].id;
+  man.setVerification(realId, 'passed', 'video-verify: real footage');
+  A.eq(man.setApproval(realId, 'approved', 'agent', 'ship it').ok, true,
+    'a kling clip with verification passed still approves normally');
+}
+
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
 A.report('outbox unverified approval');

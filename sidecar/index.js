@@ -20649,7 +20649,10 @@ async function registerOrchestrationOutputs(projectId, blueprint) {
         runId: projectId,
         projectId: projectId,
         shareWith: outboxShareFor(OUTBOX_STUDIO_OWNER),
-        files: [path.join(projectId, 'video.mp4')]
+        files: [path.join(projectId, 'video.mp4')],
+        provider: (blueprint.outputs && blueprint.outputs.producer
+          && blueprint.outputs.producer.video
+          && blueprint.outputs.producer.video.provider) || null
       });
       if (reg && reg.ok && reg.entries.length) {
         const entryId = reg.entries[0].id;

@@ -378,5 +378,91 @@ function station(agents) {
     fs.rmSync(s13.tmp, { recursive: true, force: true });
   }
 
+  /* ---------- 14. PROVIDER TRACKING AND THE SYNTHETIC-CLIP APPROVAL GATE ----------
+     A local-ffmpeg fallback clip passes every byte gate (size, bitrate, frames) but is not the
+     owner's footage. The manifest now records `provider` on each row, and setApproval() hard-blocks
+     approving a row whose provider is 'local-ffmpeg' — even with acknowledgeUnverified: true. */
+  {
+    const s14 = station(['webdesigner', 'publisher', 'qceditor', 'agent']);
+    const mkvid = (tag) => Buffer.concat([
+      Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42', 'ascii'), Buffer.alloc(4096, tag.charCodeAt(0))
+    ]);
+    s14.write('webdesigner', 'outbox/vid-kling.mp4', mkvid('k'));
+    s14.write('webdesigner', 'outbox/vid-ffmpeg.mp4', mkvid('f'));
+    s14.write('webdesigner', 'outbox/vid-legacy.mp4', mkvid('l'));
+
+    const vid = (provider, file) => s14.m.register({
+      ownerAgentId: 'webdesigner', projectId: 'studio-1', shareWith: ['agent', 'qceditor'],
+      files: [file], provider: provider
+    });
+
+    // 14a. provider is persisted and returned by list(); legacy rows (no provider) still work.
+    {
+      const kling = vid('kling', 'outbox/vid-kling.mp4');
+      A.ok(kling.ok && kling.entries.length === 1, 'a kling render registers with provider');
+      A.eq(kling.entries[0].provider, 'kling', 'provider persisted as kling');
+
+      const ffmpeg = vid('local-ffmpeg', 'outbox/vid-ffmpeg.mp4');
+      A.ok(ffmpeg.ok && ffmpeg.entries.length === 1, 'a local-ffmpeg render registers with provider');
+      A.eq(ffmpeg.entries[0].provider, 'local-ffmpeg', 'provider persisted as local-ffmpeg');
+
+      const legacy = s14.m.register({
+        ownerAgentId: 'webdesigner', projectId: 'studio-1', shareWith: ['agent'],
+        files: ['outbox/vid-legacy.mp4']
+      });
+      A.ok(legacy.ok && legacy.entries.length === 1, 'a legacy register without provider still works');
+      A.eq(legacy.entries[0].provider, null, 'a legacy row carries null provider, not undefined');
+
+      const rows = s14.m.list('agent', { projectId: 'studio-1', kind: 'video' });
+      const providers = new Set(rows.map(r => r.provider));
+      A.ok(providers.has('kling') && providers.has('local-ffmpeg') && providers.has(null),
+        'list() exposes provider on every row: ' + JSON.stringify(Array.from(providers)));
+    }
+
+    // 14b. local-ffmpeg + passed verification is HARD-BLOCKED from approval (override or not).
+    {
+      const reg = vid('local-ffmpeg', 'outbox/vid-ffmpeg.mp4');
+      const id = reg.entries[0].id;
+      A.eq(s14.m.setVerification(id, 'passed', 'video-verify: real footage').ok, true,
+        'the clip passes host verification — as all local-ffmpeg clips do');
+
+      const plain = s14.m.setApproval(id, 'approved', 'agent', 'ship it');
+      A.eq(plain.ok, false, 'approving a local-ffmpeg clip is refused outright');
+      A.ok(/local-ffmpeg/.test(String(plain.error)), 'the error names the synthetic fallback: ' + String(plain.error));
+
+      const overridden = s14.m.setApproval(id, 'approved', 'agent', 'ship anyway',
+        { acknowledgeUnverified: true });
+      A.eq(overridden.ok, false, 'and acknowledgeUnverified:true does NOT unlock it');
+      A.eq(s14.m.get('agent', id).approval, 'pending', 'the approval axis was not touched');
+
+      // rejected and pending are still allowed — the gate is only on approval.
+      A.eq(s14.m.setApproval(id, 'rejected', 'agent', 'synthetic, not real footage').ok, true,
+        'rejecting a local-ffmpeg clip is allowed');
+      A.eq(s14.m.get('agent', id).approval, 'rejected', 'rejection persisted');
+      A.eq(s14.m.setApproval(id, 'pending', 'agent', 'reset').ok, true,
+        'resetting to pending is allowed');
+      A.eq(s14.m.get('agent', id).approval, 'pending', 'pending persisted');
+    }
+
+    // 14c. Real providers (or omitted) with verification passed still approve normally.
+    {
+      const cases = [
+        ['kling', 'outbox/vid-kling.mp4'],
+        ['higgsfield', 'outbox/vid-kling.mp4'],
+        [null, 'outbox/vid-legacy.mp4']
+      ];
+      for (const [provider, file] of cases) {
+        const reg = vid(provider, file);
+        const id = reg.entries[0].id;
+        s14.m.setVerification(id, 'passed', 'video-verify: real footage');
+        const ok = s14.m.setApproval(id, 'approved', 'agent', 'ship it').ok;
+        A.eq(ok, true, (provider || '(omitted)') + ' + passed still approves normally');
+        A.eq(s14.m.get('agent', id).approval, 'approved', (provider || '(omitted)') + ' approval persisted');
+      }
+    }
+
+    fs.rmSync(s14.tmp, { recursive: true, force: true });
+  }
+
   A.report('deliverable manifest bridge');
 })().catch(e => { console.error(e); process.exit(1); });

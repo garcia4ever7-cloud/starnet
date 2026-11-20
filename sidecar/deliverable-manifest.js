@@ -327,6 +327,8 @@ function makeDeliverableManifest(deps) {
     const shareWith = Array.isArray(input.shareWith)
       ? Array.from(new Set(input.shareWith.map(a => safeId(a, '')).filter(Boolean))) : [];
     const files = Array.isArray(input.files) ? input.files.slice(0, 200) : [];
+    // provider: optional, trimmed, null when absent. Legacy rows simply lack the field.
+    const provider = input.provider ? String(input.provider).trim() || null : null;
     const at = now();
     const entries = [], invalid = [], supersede = [];
 
@@ -411,6 +413,7 @@ function makeDeliverableManifest(deps) {
         width: meta.width, height: meta.height, dpi: meta.dpi,
         parents: Array.isArray(input.parents) ? input.parents.slice(0, 20).map(String) : [],
         sharedWith: shareWith,
+        provider: provider,            // 'kling' | 'higgsfield' | 'local-ffmpeg' | null — legacy rows lack it
         createdAt: createdAt,                   // when the PRODUCER wrote it
         at: new Date(at).toISOString(),         // when the host registered it
         // --- the four axes (see COMPLETION/VERIFICATION/QC/APPROVAL above) ---
@@ -514,6 +517,15 @@ function makeDeliverableManifest(deps) {
         return { ok: false,
           error: 'this artifact has never passed host verification (verification: ' + (verify || 'unverified') +
             ') — approving it asserts quality the harness cannot prove. Pass acknowledgeUnverified:true to override.' };
+      }
+
+      /* A synthetic $0 local-ffmpeg fallback clip — real bytes, real bitrate, but not the owner's
+         footage. It must never reach the Outbox as an approved deliverable no matter what the
+         verification axis says. Rejected and pending stay allowed; only approval is refused. */
+      if (String(row.provider || '') === 'local-ffmpeg') {
+        return { ok: false,
+          error: 'this artifact was rendered by the local-ffmpeg $0 fallback, not a real video provider — ' +
+            'synthetic fallback clips cannot be approved for publishing.' };
       }
     }
 
