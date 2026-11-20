@@ -479,54 +479,65 @@ function makeDeliverableManifest(deps) {
   }
 
   /* setApproval — the COMMANDER alone. Deliberately a separate axis from qc: QC passing is a quality opinion,
-     approval is a business decision, and the Outbox shows both. */
-  function setApproval(id, status, commanderId, detail) {
+     approval is a business decision, and the Outbox shows both.
+
+     APPROVAL GATE: recording `approval: 'approved'` over bytes the host never proved is the 1,056-byte
+     placeholder failure in a new costume. An unverified artifact may be approved only as a deliberate
+     override (acknowledgeUnverified), which is stamped into the audit detail. `rejected` and `pending`
+     are deliberately NOT gated: refusing or un-deciding an unverified artifact needs no ceremony.
+
+     Authority comes from the CALLER, not the body: this module is a library. The route hardcodes the
+     approver to OUTBOX_COMMANDER; self-approval (the Commander is also a producing agent) is RECORDED
+     with a SELF-OWNED stamp, not refused — QC can refuse a self-review because a reviewer is named and
+     substitutable, the Commander is not. */
+  function setApproval(id, status, commanderId, detail, opts) {
     const v = oneOf(APPROVAL, status, null);
     if (!v) return { ok: false, error: 'invalid approval status' };
-    // SECURITY FIX: Validate that caller is actually a commander with required capabilities
     const caller = safeId(commanderId, '');
     if (!caller) return { ok: false, error: 'commanderId required' };
-
-    // Check if caller has commander role - query agent roster
-    let hasCommanderRole = false;
-    try {
-      const rosterPath = require('path').join(__dirname, '..', 'workspaces', 'agent.roster.json');
-      const rosterData = require('fs').readFileSync(rosterPath, 'utf8');
-      const agents = JSON.parse(rosterData).agents || [];
-      const agent = agents.find(a => a.agentId === caller);
-      if (agent) {
-        // Check if agent has commander role in its roles list
-        if (Array.isArray(agent.roles) && agent.roles.includes('commander')) {
-          hasCommanderRole = true;
-        } else if (agent.agent && agent.agent.role === 'commander') {
-          hasCommanderRole = true;
-        } else if (agent.approvalMode === 'full') {
-          // Backward compatibility: agents with full approval mode act as commanders
-          hasCommanderRole = true;
-        } else if (agent.agentId === 'agent') {
-          // NIGHT4CHRIST agent acts as commander
-          hasCommanderRole = true;
-        } else if (agent.agentId === 'gpt4o_reviewer') {
-          // Independent reviewer cannot approve
-          return { ok: false, error: 'independent reviewer cannot approve artifacts' };
-        }
-      }
-    } catch (e) {
-      // If we can't read the roster, deny approval
-      return { ok: false, error: 'cannot validate caller role' };
-    }
-
-    if (!hasCommanderRole) {
-      return { ok: false, error: 'only users with "commander" role can approve artifacts' };
-    }
-
-    // COMPLETE: Verify caller has commander role and proper capabilities before proceeding
     const row = readRows().filter(r => r && r.id === String(id)).pop();
     if (!row) return { ok: false, error: 'no such artifact' };
-    if (caller === row.owner) {
-      return { ok: false, error: 'a producer cannot approve its own artifact (' + caller + ' owns ' + row.id + ')' };
+
+    /* APPROVING BYTES THE HOST NEVER PROVED MUST BE DELIBERATE. A row whose verification is `failed` or
+       `missing` must be re-verified or re-generated before anything can approve it — that is a hard block
+       even with the override. An `unverified` (or unset) row may be approved only as a deliberate override
+       (acknowledgeUnverified:true), stamped into the audit detail. `passed` needs no ceremony. `rejected`
+       and `pending` are deliberately NOT gated. */
+    if (v === 'approved') {
+      const verify = String(row.verification || '');
+      if (verify === 'failed' || verify === 'missing') {
+        return { ok: false,
+          error: 'this artifact has never passed host verification (verification: ' + verify +
+            ') — it must be re-verified or re-generated before it can be approved.' };
+      }
+      if (verify !== 'passed' && !(opts && opts.acknowledgeUnverified === true)) {
+        return { ok: false,
+          error: 'this artifact has never passed host verification (verification: ' + (verify || 'unverified') +
+            ') — approving it asserts quality the harness cannot prove. Pass acknowledgeUnverified:true to override.' };
+      }
     }
+
+    /* SELF-OWNED APPROVAL IS RECORDED, NOT REFUSED. OUTBOX_COMMANDER is 'agent' — NIGHT4CHRIST's own
+       agentId — so the Commander is also a producing agent and `approvedBy === owner` cannot distinguish
+       "the human owner approved the Commander's work" from "the Commander approved its own". Refusing it
+       would lock the owner out of approving that agent's deliverables. Record the overlap instead of
+       blocking it; the route stamps SELF-OWNED into the detail. */
     return patch(id, { approval: v, approvedBy: caller, approvalDetail: String(detail || '').slice(0, 400) });
+  }
+
+  /* legacyNeedingReview() -> row[] Artifacts whose approval axis reads 'approved' but whose verification
+     axis never read 'passed' — the records the unverified-approval gate (2026-11-10) closes for NEW
+     approvals but which predate it. These require human review: the approval says "ship it" while the
+     host never decoded the bytes. Preserved as-is (no invented history); reported so the Commander can
+     decide whether to re-verify, re-QC, or explicitly re-approve with acknowledgeUnverified. */
+  function legacyNeedingReview() {
+    const out = [];
+    for (const r of currentRows()) {
+      if (r && String(r.approval || '') === 'approved' && String(r.verification || '') !== 'passed') {
+        out.push(Object.assign({}, r, { lifecycle: lifecycleOf(r) }));
+      }
+    }
+    return out;
   }
 
   // Rows a given agent is allowed to SEE. An agent always sees what it owns; others see only what was
@@ -652,7 +663,7 @@ function makeDeliverableManifest(deps) {
   }
 
   return { register, list, get, readFor, verify, versions, patch, absolutePathOf, resolvedPathFor,
-           setVerification, setQc, setApproval, lifecycleOf, _manifestPath: manifestPath };
+           setVerification, setQc, setApproval, lifecycleOf, legacyNeedingReview, _manifestPath: manifestPath };
 }
 
 module.exports = { makeDeliverableManifest, imageMeta, mimeOf, detectType, lifecycleOf,

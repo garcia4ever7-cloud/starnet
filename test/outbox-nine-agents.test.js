@@ -173,7 +173,8 @@ function shareFor(agentId) {
        verified its bytes, so the Commander's approval lands as APPROVED_UNVERIFIED — a human opinion may be
        overridden, a missing mechanical proof may not be papered over. Only once verification passes does the
        ladder reach plain APPROVED. Asserted in both directions so neither half can regress alone. */
-    manifest.setApproval(designId, 'approved', COMMANDER, 'ship it');
+    manifest.setApproval(designId, 'approved', COMMANDER, 'ship it',
+      { acknowledgeUnverified: true });
     A.eq(manifest.get(COMMANDER, designId).verification, 'unverified', 'the host never verified this artwork');
     A.eq(lifecycleOf(manifest.get(COMMANDER, designId)), 'APPROVED_UNVERIFIED',
       'approving unverified bytes reads APPROVED_UNVERIFIED, never a plain APPROVED');

@@ -136,7 +136,8 @@ function makeManifest() {
 
   // E. a speed bump, not a veto: with the override the approval axis really does record 'approved'.
   const stamp = 'APPROVED WITHOUT HOST VERIFICATION (verification: unverified)';
-  A.eq(man.setApproval(id, 'approved', COMMANDER, 'ship it — ' + stamp).ok, true,
+  A.eq(man.setApproval(id, 'approved', COMMANDER, 'ship it — ' + stamp,
+    { acknowledgeUnverified: true }).ok, true,
     'with the override acknowledged the approval still persists');
   const after = man.get(COMMANDER, id);
   A.eq(after.approval, 'approved', 'the Commander keeps the final word');
@@ -340,6 +341,100 @@ function makeManifest() {
   const srci = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'index.js'), 'utf8');
   A.ok(/absolutePath: deliverableManifest\.absolutePathOf\(r\)/.test(srci),
     'the feed calls the one resolver instead of rebuilding the path itself');
+}
+
+/* ---------- J. legacyNeedingReview() REPORTS PRE-GATE APPROVALS ---------- (2026-11-20)
+   The unverified-approval gate closes NEW approvals of unverified bytes, but records that predate it
+   (approval: approved + verification !== 'passed') still sit on disk. legacyNeedingReview() surfaces them
+   so the Commander can re-verify, re-QC, or explicitly re-approve with acknowledgeUnverified.
+   Nothing is invented, nothing is mutated — only reported. */
+{
+  const man = makeManifest();
+
+  // start clean: no legacy records yet
+  A.eq(man.legacyNeedingReview().length, 0, 'no legacy records on a fresh manifest');
+
+  // register an unverified artifact
+  fs.mkdirSync(path.join(ws, 'webdesigner'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'webdesigner', 'art.png'),
+    Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]));
+  const reg = man.register({ ownerAgentId: 'webdesigner', projectId: 'p', files: ['art.png'], shareWith: ['agent'] });
+  const unverifiedId = reg.entries[0].id;
+  A.eq(man.get('agent', unverifiedId).verification, 'unverified', 'fixture starts unverified');
+
+  // a plain (non-override) approve must fail — so no new legacy records can be created through the manifest
+  A.eq(man.setApproval(unverifiedId, 'approved', 'agent').ok, false,
+    'approving unverified bytes without the override is refused');
+  A.eq(man.legacyNeedingReview().length, 0, 'and the refusal does not create a legacy record');
+
+  // an explicit override records approval but flags it for review
+  A.eq(man.setApproval(unverifiedId, 'approved', 'agent', 'ship it',
+    { acknowledgeUnverified: true }).ok, true,
+    'the deliberate override records approval');
+  const legacy = man.legacyNeedingReview();
+  A.eq(legacy.length, 1, 'the overridden approval is reported as legacy needing review');
+  A.eq(legacy[0].id, unverifiedId, 'the right row is reported');
+  A.eq(legacy[0].verification, 'unverified', 'still unverified');
+  A.eq(legacy[0].approval, 'approved', 'but approved');
+  A.eq(legacy[0].lifecycle, 'APPROVED_UNVERIFIED', 'and the derived lifecycle stays honest');
+
+  // a fully verified approval is NOT legacy
+  man.setVerification(unverifiedId, 'passed', 'host checked it');
+  A.eq(man.legacyNeedingReview().length, 0, 'once verified it leaves the legacy list');
+
+  // a rejected approval is not legacy
+  man.setApproval(unverifiedId, 'rejected', 'agent', 'no ship');
+  A.eq(man.legacyNeedingReview().length, 0, 'rejected approvals are not legacy');
+
+  // producer self-QC refusal path: nothing written on refusal
+  const self = man.setQc(unverifiedId, 'passed', 'webdesigner', 'mine');
+  A.eq(self.ok, false, 'producer cannot QC its own');
+  A.eq(man.legacyNeedingReview().length, 0, 'and refusals write nothing');
+}
+
+/* ---------- K. HARD-BLOCK ON FAILED / MISSING VERIFICATION ---------- (2026-11-20)
+   The override flag must NOT let a Commander approve an artifact whose bytes the host knows are broken or
+   absent. Those rows must be re-verified or re-generated first — even acknowledgeUnverified:true is refused. */
+{
+  const man = makeManifest();
+
+  fs.mkdirSync(path.join(ws, 'webdesigner'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'webdesigner', 'art.png'),
+    Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]));
+  const reg = man.register({ ownerAgentId: 'webdesigner', projectId: 'p', files: ['art.png'], shareWith: ['agent'] });
+  const id = reg.entries[0].id;
+
+  // start from unverified
+  A.eq(man.get('agent', id).verification, 'unverified', 'fixture starts unverified');
+
+  // mark it failed
+  A.eq(man.setVerification(id, 'failed', 'decode failed').ok, true, 'host marks it failed');
+  const failedRow = man.get('agent', id);
+  A.eq(failedRow.verification, 'failed', 'verification now failed');
+
+  // the override must NOT unlock a failed row
+  const overrideFailed = man.setApproval(id, 'approved', 'agent', 'ship anyway',
+    { acknowledgeUnverified: true });
+  A.eq(overrideFailed.ok, false, 'approving a failed artifact is refused even with the override');
+  A.ok(/re-verified|re-generated/i.test(String(overrideFailed.error)),
+    'the error explains what must happen first: ' + String(overrideFailed.error));
+  A.eq(man.get('agent', id).approval, 'pending', 'and the approval axis was not touched');
+
+  // same for missing
+  A.eq(man.setVerification(id, 'missing', 'file gone').ok, true, 'host marks it missing');
+  const missingRow = man.get('agent', id);
+  A.eq(missingRow.verification, 'missing', 'verification now missing');
+
+  const overrideMissing = man.setApproval(id, 'approved', 'agent', 'ship anyway',
+    { acknowledgeUnverified: true });
+  A.eq(overrideMissing.ok, false, 'approving a missing artifact is refused even with the override');
+  A.eq(man.get('agent', id).approval, 'pending', 'still not approved');
+
+  // but once it passes host verification, the override path still works as before
+  A.eq(man.setVerification(id, 'passed', 're-verified after fix').ok, true, 'host re-verifies it');
+  A.eq(man.setApproval(id, 'approved', 'agent', 'ship it',
+    { acknowledgeUnverified: true }).ok, true, 'and the override now succeeds');
+  A.eq(man.get('agent', id).approval, 'approved', 'finally approved');
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}

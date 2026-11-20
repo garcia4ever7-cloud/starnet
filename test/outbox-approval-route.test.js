@@ -102,7 +102,10 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'sidecar', 'index.js'), '
     A.ok(/cannot QC its own/.test(man.setQc(id, 'passed', 'designer').error), 'and says so');
     A.eq(man.setQc(id, 'passed', 'qceditor').ok, true, 'an independent reviewer can');
     A.eq(man.setApproval(id, 'nonsense', 'agent').ok, false, 'an invalid approval status is refused, never coerced');
-    A.eq(man.setApproval(id, 'approved', 'agent', 'ship').ok, true, 'the Commander can approve');
+    /* APPROVING UNVERIFIED BYTES requires the deliberate override (2026-11-20 lifecycle gate).
+       This fixture was never host-verified, so approval only persists with acknowledgeUnverified. */
+    A.eq(man.setApproval(id, 'approved', 'agent', 'ship', { acknowledgeUnverified: true }).ok, true,
+      'the Commander can approve unverified bytes only as a deliberate override');
     A.eq(man.get('agent', id).approval, 'approved', 'and it persists');
     /* The approval axis records what the Commander said; the DERIVED lifecycle refuses to overclaim. This
        fixture was never host-verified, so it reads APPROVED_UNVERIFIED (2026-11-10). Deliberately asserted

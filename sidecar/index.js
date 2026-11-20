@@ -22916,7 +22916,8 @@ async function handleOutboxApproval(req, res) {
     detail = (room > 0 && caller ? caller.slice(0, room) + ' — ' : '') + stamp;
   }
   let r;
-  try { r = deliverableManifest.setApproval(parsed.id, status, OUTBOX_COMMANDER, detail); }
+  try { r = deliverableManifest.setApproval(parsed.id, status, OUTBOX_COMMANDER, detail,
+    { acknowledgeUnverified: parsed.body.acknowledgeUnverified === true }); }
   catch (e) { failNote('outbox.approval', e); return json(500, { ok: false, error: 'approval failed' }); }
   if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the approval: ' + ((r && r.error) || 'unknown'), accepts: accepts });
 
