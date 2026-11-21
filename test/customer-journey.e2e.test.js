@@ -87,7 +87,7 @@ test('customer journey: connect, select, tool, output, restart and repeat on all
   for (const name of ['OPENROUTER_KEY', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_AI_API_KEY', 'CUSTOM_OPENAI_KEY', 'CREDITS_API_KEY']) {
     env[name] = ''; env['STARNET_' + name] = ''; env['SKYNET_' + name] = '';
   }
-  const fixture = SidecarFixture.create({ prefix: 'customer-journey-', timeoutMs: 20000, env });
+  const fixture = SidecarFixture.create({ prefix: 'customer-journey-', timeoutMs: 20000, env, armed: true });
   try {
     for (const p of providers) {
       fs.mkdirSync(path.join(fixture.workspace, aid(p)), { recursive: true });

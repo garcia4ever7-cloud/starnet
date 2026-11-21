@@ -59,6 +59,7 @@ async function terminate(child, timeoutMs) {
 class SidecarFixture {
   constructor(options) {
     const opts = options || {};
+    this.options = opts;
     this.workspace = fs.mkdtempSync(path.join(os.tmpdir(), opts.prefix || 'starnet-sidecar-'));
     // HERMETIC PROFILE: the sidecar's boot-time station auto-recovery scans the REAL per-user
     // app-data roots (%APPDATA%/%LOCALAPPDATA%/XDG/~) for a lost station, and a fresh temp
@@ -129,6 +130,11 @@ class SidecarFixture {
         this.token = await bootToken(this.baseUrl, this.baseUrl);
         if (!this.token) throw new Error('sidecar became healthy but did not serve a boot token');
       }
+
+      if (this.options.armed) {
+        await this.json('POST', '/api/production/arm', { armed: true });
+      }
+
       return this;
     } catch (error) {
       const output = this._output;

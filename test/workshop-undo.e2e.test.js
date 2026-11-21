@@ -84,7 +84,8 @@ function boot(port, env, attemptsLeft) {
       else if (!settled && /already in use/i.test(out)) { settled = true; try { child.kill(); } catch (_) {}
         if (attemptsLeft > 0) resolve(boot(port + 1, env, attemptsLeft - 1)); else reject(new Error('no free port')); }
     };
-    child.stdout.on('data', onData); child.stderr.on('data', onData);
+    child.stdout.on('data', d => { console.log('SIDECAR:', d.toString()); onData(d); });
+    child.stderr.on('data', d => { console.log('SIDECAR ERR:', d.toString()); onData(d); });
     child.on('error', e => { if (!settled) { settled = true; reject(e); } });
     setTimeout(() => { if (!settled) { settled = true; try { child.kill(); } catch (_) {} reject(new Error('boot timeout:\n' + out)); } }, 9000);
   });
@@ -100,7 +101,7 @@ async function readNdjson(res) {
 (async () => {
   const mock = await startMockOpenRouter();
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-workshop-undo-e2e-'));
-  const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_OPENROUTER_BASE: mock.base, SKYNET_OPENROUTER_KEY: 'sk-or-v1-workshop-fake', SKYNET_DEFAULT_MODEL: 'test/model' };
+  const env = { STARNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_OPENROUTER_BASE: mock.base, SKYNET_OPENROUTER_KEY: 'sk-or-v1-workshop-fake', SKYNET_DEFAULT_MODEL: 'test/model', STARNET_PRODUCTION_ARMED: '1' };
   const firstBoot = await boot(8930 + (process.pid % 30), env, 20);
   let child = firstBoot.child;
   const B = 'http://' + HOST + ':' + firstBoot.port;
