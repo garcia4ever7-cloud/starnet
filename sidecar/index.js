@@ -15451,7 +15451,8 @@ async function handleWorkshopDecide(req, res) {
 // lifecycle row so only a genuine keep can be undone. Auth: the global /api token+origin gate (rejectApi /
 // rejectBadApiToken) covers this like every adjacent workshop route — no separate check here.
 async function handleWorkshopUndo(req, res) {
-  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  console.log("DEBUG: handleWorkshopUndo called");
+  const json = (code, obj) => { console.log("DEBUG: sending response=", JSON.stringify(obj)); res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 1 << 14)) || {}; } catch (e) { return json(400, { error: 'bad request' }); }
   const agentId = String(body.agentId || '');
   const runId = String(body.runId || '');
@@ -15513,8 +15514,9 @@ async function handleWorkshopUndo(req, res) {
   } catch (_) {}
   // No workshop.decided emit: undo is not one of the enum'd decisions (keep|discard|later) on the OWNED bus
   // contract, and that event has no frontend consumer anyway (state flows via this HTTP response). We also leave
-  // the keep-time archetype learning as-is — the Commander wanted this KIND of build; undo only relocated the copy.
-  json(200, { ok: true, removed: removed, missing: missing, destPath: destPath, restored: restored });
+  const response = { ok: true, removed: removed, missing: missing, destPath: destPath, restored: restored };
+  console.log("DEBUG handleWorkshopUndo: response=", JSON.stringify(response));
+  json(200, response);
 }
 
 // ---- W7: OPEN the deliverable, don't display its code ------------------------------------------------------------
