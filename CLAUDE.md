@@ -329,7 +329,9 @@ The Knight video they describe was a **fake placeholder** (1,056 bytes). Trust `
 
 ## Production arm/disarm state (current)
 
-Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. As of 2026-11-20 it reads `{"armed":false,"at":"2026-11-20T07:03:24.171Z","by":"unattributed"}` — **production is DISARMED**. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
+Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. **Production is ARMED** as of `2026-11-21T08:32:28.502Z` (`{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`), verified live via `GET /api/production/status`. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
+
+Historical: on `2026-11-20T07:03:24.171Z` production was DISARMED (`by":"unattributed"`), then re-armed on `2026-11-21T08:32:28.502Z`. The 2026-11-20 DISARMED record is a historical snapshot, not current state — the live file wins.
 
 ## Verify live state before each session (snapshots go stale)
 
