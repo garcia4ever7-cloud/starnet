@@ -14208,7 +14208,7 @@ async function runWorkshopShift(agentId, opts) {
       key: key, model: model, system: cronSystemFor(id),
       messages: [{ role: 'user', content: prompt }],
       agentId: id, isTask: true, emit: emit, signal: signal,
-      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: !!o.broadcast,
+      runId: runId, streamId: 'workshop-' + runId, surface: o.surface || 'autonomous', gateAsInteractive: !!o.gateAsInteractive, trigger: 'schedule', provider: provider, broadcast: !!o.broadcast,
       reflect: true,   // a workshop shift builds real things; its lessons outlive the shift (see the reflect note on /api/run)
       // B5 parity (2026-07-06 audit): a bay-docked agent's workshop shift runs with ITS bay room's objects,
       // never the default office — the same station contract as routed channel messages and cron fires.
@@ -14248,7 +14248,7 @@ async function runWorkshopShift(agentId, opts) {
   // so a crash between the two leaves a reviewable plan rather than nothing).
   if (planAutoBuildAtFree(manifest)) {
     let chained = null;
-    try { chained = await runImplementBuild(id, runId, { emit: emit, broadcast: !!o.broadcast }); }
+    try { chained = await runImplementBuild(id, runId, { emit: emit, broadcast: !!o.broadcast, gateAsInteractive: !!o.gateAsInteractive }); }
     catch (e) { chained = { fired: false, reason: 'chain-crashed: ' + ((e && e.message) || e) }; }
     if (chained && chained.reason === 'built') {
       noteShift({ reason: 'built', runId: chained.runId, title: (chained.manifest || {}).title });
@@ -14431,7 +14431,7 @@ async function runImplementBuild(agentId, sourceRunId, opts) {
       key: key, model: model, system: cronSystemFor(id), provider: provider,
       messages: [{ role: 'user', content: prompt }],
       agentId: id, isTask: true, emit: (typeof o.emit === 'function' ? o.emit : function () {}), signal: signal,
-      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', trigger: 'directive', broadcast: !!o.broadcast,
+      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', gateAsInteractive: !!o.gateAsInteractive, trigger: 'directive', broadcast: !!o.broadcast,
       reflect: true,
       station: router.stationFor(id) || undefined
     });
@@ -15602,7 +15602,7 @@ async function handleWorkshopShiftNow(req, res) {
   const bus = { emit: (name, payload) => { try { res.write(JSON.stringify({ name, payload: redact(payload) }) + '\n'); } catch (_) {} } };
   const emit = wrapEmitDiag(makeEmitter(bus, e => { if (e) console.warn('[event]', e.kind, e.event, (e.errors || []).join(';')); }));
   let result;
-  try { result = await runWorkshopShift(agentId, { emit: emit, broadcast: true }); }
+  try { result = await runWorkshopShift(agentId, { emit: emit, broadcast: true, gateAsInteractive: true }); }
   catch (e) { result = { fired: false, reason: 'error: ' + ((e && e.message) || e) }; }
   kaOff();
   try { res.write(JSON.stringify({ name: 'workshop.shift.result', payload: result }) + '\n'); } catch (_) {}
@@ -15625,7 +15625,7 @@ async function handleWorkshopImplement(req, res) {
   const bus = { emit: (name, payload) => { try { res.write(JSON.stringify({ name, payload: redact(payload) }) + '\n'); } catch (_) {} } };
   const emit = wrapEmitDiag(makeEmitter(bus, e => { if (e) console.warn('[event]', e.kind, e.event, (e.errors || []).join(';')); }));
   let result;
-  try { result = await runImplementBuild(agentId, runId, { emit: emit, broadcast: true, note: body.note }); }
+  try { result = await runImplementBuild(agentId, runId, { emit: emit, broadcast: true, note: body.note, gateAsInteractive: true }); }
   catch (e) { result = { fired: false, reason: 'error: ' + ((e && e.message) || e) }; }
   kaOff();
   try { res.write(JSON.stringify({ name: 'workshop.implement.result', payload: result }) + '\n'); } catch (_) {}
@@ -17128,7 +17128,7 @@ async function runOnceCore(o) {
   // StarNet, while preserving `surface` for the separate question of whether this chat asked for approval cards.
   // This bit is host-minted at channel ingress, never derived from text, tool output, or model state.
   const ownerTrusted = !!o.ownerTrusted;
-  const accessSurface = ownerTrusted ? 'interactive' : surface;
+  const accessSurface = (ownerTrusted || o.gateAsInteractive) ? 'interactive' : surface;
   /* UNATTENDED CAPABILITY GRANT (2026-07-25): the capability families THIS run may use unattended, read off the
      durable routine record by the caller (the cron tick driver / Run Now) — never from prompt text, model
      output or Full Access. Interactive runs ignore it entirely: THE MOAT (floor-real placement) governs there,
