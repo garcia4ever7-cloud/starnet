@@ -331,14 +331,15 @@ The Knight video they describe was a **fake placeholder** (1,056 bytes). Trust `
 
 Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. As of 2026-11-20 it reads `{"armed":false,"at":"2026-11-20T07:03:24.171Z","by":"unattributed"}` — **production is DISARMED**. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
 
-## Contradictions resolved (verified against live state, 2026-11-20)
+## Verify live state before each session (snapshots go stale)
 
-1. **Autonomy vs "last mile manual":** Rule 1 stands (agents run draft production unattended). Publishing is a manual human step on etsy.com — no Etsy API exists, and the chain routine instructs "draft only, publish nothing". No contradiction once the boundary is named.
+This file's dated claims rot faster than the code. Before touching spend, providers, or the production gate, check live state rather than trusting anything written here:
 
-2. **Primary provider:** The §18 table said `anthropic` primaries with an OpenRouter fallback chain. The live roster is 8 agents on `codex`/`openai`, 1 on `gemini`, and the fallback chain is **empty** (`saved:true`). Neither claim matches live state — check `node scripts/station-models.mjs list` and `GET /api/fallback/chain` each session instead of trusting a static table.
-
-3. **PUBLISHER approvalMode:** The roster table listed PUBLISHER/QC_EDITOR as `ask`. The live roster (`agent.roster.json`, updatedAt 2026-11-10T08:53Z) shows PUBLISHER `full` and QC_EDITOR `full`; only DIRECTOR, PRODUCER and COPYWRITER are `ask`. **Read `approvalMode` out of the live roster before asserting what an agent can persist.**
-
-4. **Production armed/disarmed:** CLAUDE.md previously claimed "permanently armed (2026-11-11)". `.production-arm.json` today reads `armed:false` (2026-11-20T07:03Z). Treat this file's armed/disarmed claims as a snapshot — check `.production-arm.json` first.
+- `cat ~/.local/share/StarNet/workspaces/.production-arm.json` — armed/disarmed switch. This file's armed/disarmed claim is a snapshot; the live file wins.
+- `node scripts/station-models.mjs list` — who runs what model, live. The roster has drifted from the `anthropic`-primary design described in §Model rotation at least four times; the live roster and `GET /api/fallback/chain` are authoritative.
+- `GET /api/fallback/chain` — empty chain (`saved:true`) beats the env default; an empty chain means no cross-provider rotation on unattended runs.
 
 All dated session history (2026-10-26 through 2026-11-17) has been moved to `docs/CLAUDE_ARCHIVE_20261120.md` with zero history deleted.
+
+### Live platform fix not yet reflected above
+- `sidecar/workspace-owner.js` — Android/Termux stale-lock recovery: when `process.kill(pid, 0)` returns `EPERM`/`EACCES` (permission-blocked, not a liveness answer), `defaultPidAlive` falls back to `fs.accessSync('/proc/<pid>', F_OK)`; ENOENT there proves the holder is dead and the stale lock is reclaimable. This fixed a `WORKSPACE_BUSY` exit-73 that held a dead PID 14644 claim forever. The fix is uncommitted in the working tree.

@@ -25,6 +25,8 @@ function defaultNonce() {
   catch (_) { try { return require('crypto').randomBytes(16).toString('hex'); } catch (__) { return 'unavailable'; } }
 }
 
+const fs = require('node:fs');
+
 function defaultPidAlive(pid) {
   const n = Number(pid);
   if (!Number.isInteger(n) || n <= 0) return true; // malformed/unprovable is busy, never reclaimable
@@ -32,9 +34,25 @@ function defaultPidAlive(pid) {
   if (n === process.pid) return true;
   try { process.kill(n, 0); return true; }
   catch (e) {
-    // Only ESRCH proves absence. Permission, resource and unsupported-probe errors
-    // leave ownership unknown and must never authorize another writer.
-    return !(e && e.code === 'ESRCH');
+    // ESRCH proves absence outright.
+    if (e && e.code === 'ESRCH') return false;
+    // EPERM/EACCES mean we cannot signal the process (different UID, Android sandbox,
+    // etc.). kill(0) is permission-blocked, not a liveness answer. Fall back to
+    // /proc/<pid>: the kernel removes a dead process's /proc directory, so ENOENT
+    // there is conclusive proof of death even when we cannot send it a signal.
+    // On Android/Termux SELinux blocks stat() on /proc/<pid> itself (EACCES) but
+    // access(F_OK) / reading cmdline still report ENOENT when it is gone, so use
+    // access() instead of stat(). Presence (no error) means alive — fail closed
+    // and stay busy.
+    if (e && (e.code === 'EPERM' || e.code === 'EACCES')) {
+      try { fs.accessSync('/proc/' + n, fs.constants.F_OK); return true; }
+      catch (se) {
+        if (se && (se.code === 'ENOENT' || se.code === 'ENOTDIR')) return false;
+        return true; // unprovable ⇒ busy
+      }
+    }
+    // Any other error leaves ownership unknown and must never authorize another writer.
+    return true;
   }
 }
 
