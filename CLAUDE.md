@@ -48,6 +48,7 @@ npm run desktop:build          # build desktop installers locally
 node scripts/station-models.mjs list     # who runs what model, live — see STATION_FIELD_NOTES.md §6
 node scripts/station-models.mjs set <agentId|all> <model>   # change a model safely (auto-snapshot + sync)
 node scripts/station-models.mjs revert   # undo the most recent model change
+node scripts/git-push-safe.mjs           # report ahead/behind vs remote before pushing (read-only)
 ```
 
 There is no general linter/formatter (`lint:evidence-secrets` only scans QA evidence docs for leaked secrets, it is not a code linter). Tests are plain Node scripts, not a framework — `node test/foo.test.js` runs independently of the gate.
@@ -340,6 +341,10 @@ This file's dated claims rot faster than the code. Before touching spend, provid
 - `cat ~/.local/share/StarNet/workspaces/.production-arm.json` — armed/disarmed switch. This file's armed/disarmed claim is a snapshot; the live file wins.
 - `node scripts/station-models.mjs list` — who runs what model, live. The roster has drifted from the `anthropic`-primary design described in §Model rotation at least four times; the live roster and `GET /api/fallback/chain` are authoritative.
 - `GET /api/fallback/chain` — empty chain (`saved:true`) beats the env default; an empty chain means no cross-provider rotation on unattended runs.
+
+### Live-state documentation rule
+
+Never hardcode a dated armed/disarmed, provider, model, or chain value as "current." If you record one, mark it "historical snapshot, not current state" and link to the live source. Use `/starnet-live-health` to verify before writing any such claim.
 
 All dated session history (2026-10-26 through 2026-11-17) has been moved to `docs/CLAUDE_ARCHIVE_20261120.md` with zero history deleted.
 
