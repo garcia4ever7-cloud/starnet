@@ -4,10 +4,10 @@ slug: out-of-band-roster-writer-emits-save-shaped-entr
 title: Out-of-band roster writer emits save-shaped entries; next boot loads an empty roster
 surface: autonomy
 severity: P1
-status: open
+status: fixed
 found: 2026-11-24
 lane: remediation/scout-20261124
-fix:
+fix: e87ac7181
 origin: audit
 ---
 
@@ -43,6 +43,10 @@ no longer knows, and nothing logs an error. It also silently loses its own save 
   CONSISTENT. `npm run test:fast -- agent-config-integrity` → `1 step(s) green`.
 - Live station 2026-11-24 was **not** affected: `node scripts/agent-config-integrity.mjs` → `CONSISTENT` (10 agents).
 
+## Verdict
+
+_Open until the fix is committed; then `node scripts/qa/bugs.mjs --set 1505860a --status fixed --fix <sha>`._
+
 ## Fix (in working tree, not yet committed)
 
 - `scripts/integrate-christian-studio.mjs` now exits 3 before any read/write unless
@@ -59,7 +63,3 @@ no longer knows, and nothing logs an error. It also silently loses its own save 
   roster gate is time-only). By design; documented in CLAUDE.md "Two copies of agent state". **Coverage gap.**
 - `POST /api/cron/update` re-checks `skills[]` only when the patch includes `skills`; changing `agentId` alone does
   not re-validate the skills against the new agent. **Coverage gap** (adjacent, found in the same sweep).
-
-## Verdict
-
-_Open until the fix is committed; then `node scripts/qa/bugs.mjs --set 1505860a --status fixed --fix <sha>`._

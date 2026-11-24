@@ -4,7 +4,7 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**17** open (open+claimed) of 225 total — 1 P0 · 3 P1 · 13 P2
+**16** open (open+claimed) of 225 total — 1 P0 · 2 P1 · 13 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
@@ -131,7 +131,6 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P0 | fixed | safecell | [The Permissions panel's normalizeGrants regex drops every path: and mcp: standing grant — the ledger prints "No standing approvals yet" while the backend holds](bugs/7274ff21-the-permissions-panel-s-normalizegrants-regex-dr.md) | sweep/safecell | 6afeb9ee |
 | P0 | fixed | sessions | [An attachment-bearing user turn is dropped from the durable transcript and the PREVIOUS turn is written in its place — the string-only scan at index.js:11299 fa](bugs/e7dcb889-an-attachment-bearing-user-turn-is-dropped-from.md) | sweep/sessions | 6afeb9ee |
 | P0 | fixed | skills | [skill.view's hydrate-then-bump stores the RENDERED SKILL.md as the skill's body, so every view→persist cycle re-appends '## Setup' and '## Support Files' — unbo](bugs/c70f8965-skill-view-s-hydrate-then-bump-stores-the-render.md) | sweep/skills | 598ab4a4 |
-| P1 | open | autonomy | [Out-of-band roster writer emits save-shaped entries; next boot loads an empty roster](bugs/1505860a-out-of-band-roster-writer-emits-save-shaped-entr.md) | remediation/scout-20261124 | — |
 | P1 | open | autonomy | [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | sweep/autonomy | — |
 | P1 | open | providers | [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | fix/http2-retry | — |
 | P1 | fixed | autonomy | [Agent loop pause leaves cancelled iteration running and lease held](bugs/c66e8c39-agent-loop-pause-leaves-cancelled-iteration-runn.md) | agent/seam-audit-0912-b | b5c5cba75 |
@@ -145,6 +144,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P1 | fixed | autonomy | [Late cancelled loop settlement strands the resumed iteration](bugs/24b375c9-late-cancelled-loop-settlement-strands-the-resum.md) | release-blockers-0907 | 035513a6d |
 | P1 | fixed | autonomy | [Concurrent loop approval can retain an approved verdict after rejection reverts the files](bugs/bb24585f-loop-approve-reject-race.md) | agent/adversarial-audit-0910 | 64ed8711b |
 | P1 | fixed | autonomy | [Customer reports an ONCE routine absent from Active Routines](bugs/c2a6c3c8-once-routine-reported-missing.md) | reliability-followup | 2b976f5f3df07473b2df8963690421f83ce0a45f |
+| P1 | fixed | autonomy | [Out-of-band roster writer emits save-shaped entries; next boot loads an empty roster](bugs/1505860a-out-of-band-roster-writer-emits-save-shaped-entr.md) | remediation/scout-20261124 | e87ac7181 |
 | P1 | fixed | autonomy | [Persisted E-STOP cannot be resumed from the desktop control](bugs/8f911536-persisted-e-stop-cannot-be-resumed-from-the-desk.md) | estop-recovery-0907 | acdf5160c |
 | P1 | fixed | autonomy | [Repeated promises without tool actions can end with done and no blocker explanation](bugs/b6f04205-repeated-promises-without-tool-actions-can-end-w.md) | agent/recall-report-0916 | 46c929a88 |
 | P1 | fixed | autonomy | [Result contracts reject useful constraints and API JSON formats are ignored](bugs/bc59eefe-result-contracts-reject-useful-constraints-and-a.md) | hermes-stress-0910 | 61eeac2b40c9fd0e2e0a5d2b342f44de74119078 |
@@ -353,7 +353,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | Surface | Open |
 | --- | --- |
 | channels | 1 |
-| autonomy | 5 |
+| autonomy | 4 |
 | providers | 4 |
 | safecell | 1 |
 | sessions | 3 |
