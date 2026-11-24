@@ -33,26 +33,26 @@ no longer knows, and nothing logs an error. It also silently loses its own save 
 
 ## Evidence
 
-- Defect: `scripts/integrate-christian-studio.mjs` (pre-fix copy kept at `scripts/integrate-christian-studio.mjs.bak`)
+- Defect: `scripts/integrate-christian-studio.mjs` (pre-fix version: `git show e5c8da4ab:scripts/integrate-christian-studio.mjs`)
   writes `rosterJson.agents = workspaceJson.doc.agents` (save shape: `id`, no `agentId`), bumps
   `doc.updatedAt` but **not** `doc._saveRevision` (so `sidecar/savestore.js` `compareRevision` accepts the next
   tab save over it), and never calls `POST /api/roster`.
 - Drop rule: `sidecar/index.js` `replaceAgentRoster` — `const id = a && String(a.agentId || ''); if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) continue;`
-- Regression: `test/agent-config-integrity.test.js` (17 assertions, registered in `test/fast.list`) pins that the
+- Regression: `test/agent-config-integrity.test.js` (41 assertions after the review follow-up, registered in `test/fast.list`) pins that the
   save-shaped roster is DIVERGENT with one `roster-agentId` problem per entry, and that a timestamp delta alone is
   CONSISTENT. `npm run test:fast -- agent-config-integrity` → `1 step(s) green`.
 - Live station 2026-11-24 was **not** affected: `node scripts/agent-config-integrity.mjs` → `CONSISTENT` (10 agents).
 
 ## Verdict
 
-_Open until the fix is committed; then `node scripts/qa/bugs.mjs --set 1505860a --status fixed --fix <sha>`._
+Fixed in `e87ac7181` (committed 2026-11-24): the defective writer is retired fail-closed and a content-based check catches the shape it produced. A `/code-review` of that commit found eight issues in the new check (symlinked invocation exited 0 silently; workspace resolved differently from the sidecar; missing sidecar normalization; non-number `_saveRevision` accepted; save duplicates unreported; this record self-contradicting; an untracked `.bak` cited as evidence; no `qa/BUGS.md` backup). All eight were fixed in the follow-up commit, with regressions in the same test file. The siblings below remain open coverage gaps.
 
-## Fix (in working tree, not yet committed)
+## Fix (committed: e87ac7181, review follow-up after it)
 
 - `scripts/integrate-christian-studio.mjs` now exits 3 before any read/write unless
   `STARNET_ALLOW_RETIRED_INTEGRATE=1` (verified: plain run prints RETIRED, exit 3).
 - New read-only `scripts/agent-config-integrity.mjs` compares save vs roster by **content** (the fields
-  `pushRoster()` projects) and flags agentId-less roster entries; wired as step 6 of the `starnet-live-health` skill.
+  `pushRoster()` projects, normalized with the sidecar's own `normalizeProviderId` / `execution-profiles.normalizeId`), resolves the workspace like the sidecar, and flags agentId-less roster entries; wired as step 6 of the `starnet-live-health` skill.
 
 ## Siblings (same defect class: out-of-band agent-config writers)
 

@@ -72,5 +72,58 @@ const { ok, eq, report } = require('./_assert');
   r = compareAgentConfig({}, roster([]));
   ok(!r.ok && r.problems.some(p => p.kind === 'save-shape'), 'unreadable save shape fails closed');
 
+  // ---- Review findings (2026-11-24 /code-review of e87ac7181) ----
+  const mod = await import('../scripts/agent-config-integrity.mjs');
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const { pathToFileURL } = require('url');
+
+  // 6. Sidecar normalization is applied, so legal saves are not false alarms.
+  r = compareAgentConfig(save([saveAgent('scout', { executionProfile: undefined })]), roster([rosterAgent('scout', { executionProfile: 'station-gear' })]));
+  ok(r.ok, 'legacy save with no executionProfile == roster station-gear — got ' + JSON.stringify(r.problems));
+  r = compareAgentConfig(save([saveAgent('scout', { skills: ['a', ' a ', 'b', ''] })]), roster([rosterAgent('scout', { skills: ['a', 'b'] })]));
+  ok(r.ok, 'skills trimmed + deduped like replaceAgentRoster — got ' + JSON.stringify(r.problems));
+  const long = 'N'.repeat(45);
+  r = compareAgentConfig(save([saveAgent('scout', { name: long })]), roster([rosterAgent('scout', { name: long.slice(0, 40) })]));
+  ok(r.ok, 'name capped at 40 like replaceAgentRoster — got ' + JSON.stringify(r.problems));
+  r = compareAgentConfig(save([saveAgent('scout', { provider: 'google' })]), roster([rosterAgent('scout', { provider: 'gemini' })]));
+  ok(r.ok, 'provider alias normalized via the real registry — got ' + JSON.stringify(r.problems));
+  r = compareAgentConfig(save([saveAgent('scout', { executionProfile: 'trusted-project' })]), roster([rosterAgent('scout', { executionProfile: 'safe-cell' })]));
+  ok(r.problems.some(p => p.detail.startsWith('scout.executionProfile')), 'a real executionProfile difference is still caught');
+
+  // 7. _saveRevision must be a finite NUMBER.
+  for (const bad of ['', true, [], '7', null, NaN]) {
+    r = compareAgentConfig(save([saveAgent('scout')], { _saveRevision: bad }), roster([rosterAgent('scout')]));
+    ok(r.problems.some(p => p.kind === 'save-revision'), '_saveRevision ' + JSON.stringify(bad) + ' flagged');
+  }
+  r = compareAgentConfig(save([saveAgent('scout')], { _saveRevision: 0 }), roster([rosterAgent('scout')]));
+  ok(r.ok, '_saveRevision 0 is a valid revision');
+
+  // 8. Duplicate ids in the save are reported.
+  r = compareAgentConfig(save([saveAgent('scout', { model: 'gpt-5' }), saveAgent('scout', { model: 'gemini-x' })]), roster([rosterAgent('scout', { model: 'gemini-x' })]));
+  ok(r.problems.some(p => p.kind === 'save-duplicate'), 'duplicate save id flagged even when the last copy matches');
+
+  // 9. Workspace resolution mirrors the sidecar (ENV('WORKSPACES') → defaultWorkspaces).
+  const H = '/home/u', none = () => false;
+  eq(mod.resolveWorkspaces({ env: {}, platform: 'linux', homedir: H, exists: none }).dir, '/home/u/.local/share/StarNet/workspaces', 'POSIX default');
+  eq(mod.resolveWorkspaces({ env: { XDG_DATA_HOME: '/x' }, platform: 'linux', homedir: H, exists: none }).dir, '/x/StarNet/workspaces', 'XDG_DATA_HOME honored');
+  eq(mod.resolveWorkspaces({ env: { STARNET_WORKSPACES: '/s', SKYNET_WORKSPACES: '/k' }, platform: 'linux', homedir: H }).dir, '/s', 'STARNET_ beats SKYNET_');
+  eq(mod.resolveWorkspaces({ env: { SKYNET_WORKSPACES: '/k' }, platform: 'linux', homedir: H }).dir, '/k', 'SKYNET_ honored');
+  eq(mod.resolveWorkspaces({ env: {}, platform: 'linux', homedir: H, exists: p => p === '/home/u/.local/share/Skynet/workspaces' }).dir,
+    '/home/u/.local/share/Skynet/workspaces', 'legacy Skynet dir used in place when StarNet is absent');
+  ok(!!mod.resolveWorkspaces({ env: { WORKSPACES: '/elsewhere' }, platform: 'linux', homedir: H, exists: none }).error, 'bare WORKSPACES disagreeing with the sidecar is refused');
+  ok(!mod.resolveWorkspaces({ env: { WORKSPACES: '/s', STARNET_WORKSPACES: '/s' }, platform: 'linux', homedir: H }).error, 'bare WORKSPACES agreeing is fine');
+  eq(mod.resolveWorkspaces({ env: { WORKSPACES: '/elsewhere' }, override: '/o' }).dir, '/o', '--workspaces override wins');
+
+  // 10. A symlinked invocation is still recognized as main (was: silent exit 0).
+  const scriptPath = path.join(__dirname, '..', 'scripts', 'agent-config-integrity.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aci-'));
+  const link = path.join(dir, 'link.mjs');
+  try {
+    fs.symlinkSync(scriptPath, link);
+    ok(mod.isMainModule(link, pathToFileURL(scriptPath).href), 'symlink to the script counts as main');
+    ok(!mod.isMainModule(path.join(dir, 'other.mjs'), pathToFileURL(scriptPath).href), 'a different file is not main');
+    ok(!mod.isMainModule('', pathToFileURL(scriptPath).href), 'no argv1 is not main');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+
   report();
 })().catch(e => { console.log('FAIL: test crashed — ' + (e && e.stack || e)); process.exit(1); });

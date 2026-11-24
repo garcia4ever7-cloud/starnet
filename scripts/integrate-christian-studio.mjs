@@ -11,7 +11,7 @@
      3. it skips POST /api/roster, so the running sidecar never sees the change.
    The correct out-of-band procedure is scripts/station-models.mjs applyAssignment (one stamp, bump
    _saveRevision, POST /api/roster with the same stamp). Check the result with
-   `node scripts/agent-config-integrity.mjs`. Original kept at integrate-christian-studio.mjs.bak. */
+   `node scripts/agent-config-integrity.mjs`. Pre-retirement version: `git show e5c8da4ab:scripts/integrate-christian-studio.mjs`. */
 if (process.env.STARNET_ALLOW_RETIRED_INTEGRATE !== '1') {
   console.error('integrate-christian-studio.mjs is RETIRED: re-running it empties the live roster at next boot.\n'
     + 'See the header comment. Use scripts/station-models.mjs for agent edits; verify with scripts/agent-config-integrity.mjs.');

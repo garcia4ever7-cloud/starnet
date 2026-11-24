@@ -49,7 +49,7 @@ node scripts/station-models.mjs list     # who runs what model, live — see STA
 node scripts/station-models.mjs set <agentId|all> <model>   # change a model safely (auto-snapshot + sync)
 node scripts/station-models.mjs revert   # undo the most recent model change
 node scripts/git-push-safe.mjs           # report ahead/behind vs remote before pushing (read-only)
-node scripts/agent-config-integrity.mjs  # save vs roster CONTENT agreement (read-only; exit 0 consistent, 1 divergent)
+node scripts/agent-config-integrity.mjs  # save vs roster CONTENT agreement (read-only; exit 0 consistent, 1 divergent, 2 unreadable/ambiguous workspace)
 ```
 
 There is no general linter/formatter (`lint:evidence-secrets` only scans QA evidence docs for leaked secrets, it is not a code linter). Tests are plain Node scripts, not a framework — `node test/foo.test.js` runs independently of the gate.
