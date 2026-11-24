@@ -564,12 +564,14 @@ Remove it once the shim is back, so the designed behaviour returns.
 its validation checks (no `NEEDED` deps; no undefined symbols beyond `dlsym`), installed to
 `~/.local/share/claude/versions/2.1.220.termux-syscall-shim.so` (0700), then **hardened the wrapper
 to preload only when the shim is readable** and warn otherwise — a missing shim now degrades instead
-of taking every child process down. Rebuild command if it ever vanishes again:
+of taking every child process down. Rebuild command if it ever vanishes again (**output path
+CORRECTED 2026-11-24** — the shim now lives in `~/.local/share/claude-termux/`, which is what the
+wrapper reads; never write it into the updater-managed `versions/`):
 
 ```bash
 clang -nostdlib -fPIC -shared -O2 -Wall -Wextra -Werror \
   -Wl,-soname,libclaude-termux-shim.so \
-  -o ~/.local/share/claude/versions/2.1.220.termux-syscall-shim.so \
+  -o ~/.local/share/claude-termux/termux-syscall-shim.so \
   ~/claude-code-termux/assets/claude-code-termux-syscall-shim.c
 ```
 
@@ -598,21 +600,26 @@ once**. That is what "none of the launchers work" meant; the launchers themselve
   `REQUIRE_API_KEY=true`, set 2026-10-18). Default install binds `0.0.0.0` keyless — never undo this.
 - **~~`$PREFIX/bin` wins on PATH, so 2.1.220 is what actually runs.~~ CORRECTED 2026-11-24 — wrong
   twice over.** `~/.local/bin` is FIRST on PATH, and the self-updater re-points
-  `~/.local/bin/claude` at each raw download in `versions/` — it did so on 2026-11-24 ~07:34 UTC with
-  `autoUpdates:false` in BOTH `~/.claude.json` and `~/.claude/settings.json` (`[Likely]` the updater
-  ignores that key here; a manual `claude update` is not ruled out). **Fixed 2026-11-24:**
-  `env.DISABLE_AUTOUPDATER="1"` added to `~/.claude/settings.json` (backup
-  `settings.json.bak-disable-autoupdater-20261124`). Read in the 2.1.331 code: the updater checks
-  `process.env.DISABLE_AUTOUPDATER` (and `DISABLE_UPDATES`) before the `autoUpdates` key, and settings
-  `env` counts; verified it reaches tool shells live. To upgrade on purpose later, nothing needs
-  re-enabling — the manual procedure below never used the updater. That
-  shadowed the wrapper with an unpatched 2.1.331 whose interpreter `/lib/ld-linux-aarch64.so.1`
-  doesn't exist on Android → `claude` dies with "No such file or directory". Runs now: **2.1.331**.
+  `~/.local/bin/claude` at a raw (unpatched) binary in `versions/`. Observed twice on 2026-11-24, both
+  pointing at raw 2.1.331 (downloaded 2026-11-23 21:51 UTC): `~/.local/bin/claude.broken-glibc-20261124`
+  (made 03:26 UTC, renamed aside 05:21 UTC) and the live link re-made ~07:34 UTC — the same minute a
+  2.1.330 session started, so `[Likely]` that session's updater did it at startup (record:
+  `~/.local/share/claude-termux/local-bin-claude.symlink-record-20261124`). That link shadowed the
+  wrapper with a binary whose interpreter `/lib/ld-linux-aarch64.so.1` doesn't exist on Android →
+  `claude` dies with "No such file or directory". New launches now run **2.1.331** (patched copy).
+- **Why `autoUpdates:false` did nothing (read in the code, identical in 2.1.330 and 2.1.331):** the
+  config gate is `autoUpdates===false && (installMethod!=="native" || autoUpdatesProtectedForNative!==true)`,
+  and `~/.claude.json` has `"installMethod": "native"` + `"autoUpdatesProtectedForNative": true` — so the
+  key is ignored by design here. The env vars `DISABLE_UPDATES` / `DISABLE_AUTOUPDATER` are checked
+  before it, and a settings `env` block counts. **Set 2026-11-24:** `env.DISABLE_AUTOUPDATER="1"` in
+  `~/.claude/settings.json` (backup `settings.json.bak-disable-autoupdater-20261124`); verified it reaches
+  tool shells. Not yet observed holding through a real release — if the "Update installed" banner ever
+  appears again, it didn't. The manual procedure below never needs the updater.
 - **Upgrade procedure (done and verified live 2026-11-24, 2.1.330 → 2.1.331):**
-  1. Verify the updater's file against the signed manifest (same as the installer):
+  1. Get the binary and verify it against the signed manifest (same checks as the installer):
      `downloads.claude.ai/claude-code-releases/<ver>/manifest.json` + `.sig`, key fingerprint
-     `31DDDE24…1A7ECACE`, compare `.platforms["linux-arm64"].checksum` to `sha256sum versions/<ver>`.
-     With the updater disabled nothing lands in `versions/` — download it yourself first:
+     `31DDDE24…1A7ECACE`, compare `.platforms["linux-arm64"].checksum` to `sha256sum` of the binary.
+     With the updater disabled nothing lands in `versions/`, so download it yourself first:
      `curl -fL https://downloads.claude.ai/claude-code-releases/<ver>/linux-arm64/claude -o <scratch>/claude-<ver>`
      (installer's own URL) and checksum THAT file. Latest version: `curl -fsS .../claude-code-releases/latest` (returned `2.1.331`, probed 2026-11-24).
   2. Copy it OUTSIDE `versions/` (updater-managed, it prunes) to

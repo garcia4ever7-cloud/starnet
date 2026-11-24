@@ -327,7 +327,7 @@ npm test             # test:fast + test:http
 
 ### 🔧 Upgrading Claude Code itself on this phone (host tool, not StarNet)
 
-Running: **2.1.331**, glibc-patched copy at `~/.local/share/claude-termux/versions/2.1.331`, launched by
+New launches run **2.1.331**, glibc-patched copy at `~/.local/share/claude-termux/versions/2.1.331`, launched by
 `$PREFIX/bin/claude` (shim preloaded). Upgraded and verified live 2026-11-24 — full steps in
 `STATION_FIELD_NOTES.md` §12 (the launchers section), "Upgrade procedure".
 
@@ -335,11 +335,13 @@ Running: **2.1.331**, glibc-patched copy at `~/.local/share/claude-termux/versio
   re-creates `~/.local/bin/claude` (first on PATH) pointing at a raw binary whose interpreter
   `/lib/ld-linux-aarch64.so.1` doesn't exist on Android → "No such file or directory". Quick fix:
   `rm ~/.local/bin/claude` (then `claude` runs the existing patched version again).
-  Since 2026-11-24 `~/.claude/settings.json` has `env.DISABLE_AUTOUPDATER="1"` (the `autoUpdates:false`
-  key was not stopping it), so this should no longer happen on its own.
+  Since 2026-11-24 `~/.claude/settings.json` has `env.DISABLE_AUTOUPDATER="1"`, so this should no
+  longer happen on its own (not yet observed through a real release). `autoUpdates:false` is ignored
+  by design on this install — the code skips it when `installMethod` is `native` with
+  `autoUpdatesProtectedForNative: true`, which `~/.claude.json` has.
 - **To actually upgrade:** download `downloads.claude.ai/claude-code-releases/<ver>/linux-arm64/claude` (the updater is off, so it won't fetch it), verify it against the signed manifest → copy it OUT of
   `versions/` → `patchelf --set-interpreter` to Termux glibc → test with a COPY of the wrapper (one
-  live `claude -p` tool call that writes a probe file) → back up wrapper, edit only its `exec` line.
+  live `claude -p` tool call that writes a probe file) → back up wrapper, edit only its `exec` line → `rm ~/.local/bin/claude` if it exists.
 - **Never re-run `~/claude-code-termux/install-claude-code-termux.sh` as-is** — it rewrites the
   wrapper with an unconditional `LD_PRELOAD` and puts the shim inside the updater-pruned `versions/`.
 - **Fable 5.2 is gated by account usage credits, not the client version** (`/model` → "Visit
