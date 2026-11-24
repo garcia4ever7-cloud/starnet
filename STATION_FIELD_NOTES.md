@@ -30,10 +30,16 @@ even though a routine run does not get it. Do not use that endpoint to predict w
 
 ### Related consent facts (all verified)
 
-- `approvalMode`: `agent`/NIGHT4CHRIST and `harvest` are `full`; `webdesigner`/`publisher`/`scout` are `ask`.
-  An `ask` agent stalls forever on any `requiresConsent: true` tool in an unattended run.
-- Per-routine `unattendedGrants` accepts **only** `['workbench','connectors']` (`sidecar/cron-store.js`
-  `GRANTABLE`). There is no studio/image grant.
+- ~~`approvalMode`: `agent`/NIGHT4CHRIST and `harvest` are `full`; `webdesigner`/`publisher`/`scout` are `ask`.
+  An `ask` agent stalls forever on any `requiresConsent: true` tool in an unattended run.~~
+  **CORRECTED 2026-11-24 — both sentences were wrong.** (1) The mode list is a 2026-10-20 snapshot; live on
+  2026-11-24 it is `full` for agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor and
+  `ask` for producer, copywriter only — read `agent.roster.json`, never this line. (2) An `ask` agent does not
+  stall in a cron run: an ungranted consent-gated call is **denied immediately** (`sidecar/permissions.js`,
+  `reason: SILENCE`, "silence is not consent"). The only waiting path is `/api/run`, which is always
+  `surface:'interactive'` and auto-denies after `CONSENT_TIMEOUT_MS` (120 s default).
+- Per-routine `unattendedGrants` accepts `['workbench','connectors','orchestrator']` (`sidecar/cron-store.js`
+  `GRANTABLE`; `orchestrator` added 2026-10-27, §16). There is no studio/image grant.
 - `POST /api/permissions/grant` pre-blesses **only** `['cabinet:write']` (`sidecar/permgrants.js`
   `GRANTABLE`). Again no studio.
 - Net: an `ask`-mode specialist cannot do consent-gated work headlessly, by any route.
@@ -1788,6 +1794,11 @@ counter (`workspaces/.host-daily-quota.json`), so eight is eight however the run
   read as "no rail".
 
 ### 16b. Tool gap measured, not guessed — and it was ONE family, plus three stripped tools
+
+> **Historical snapshot (2026-10-27), not current state.** The `mode` column and "SCOUT and PUBLISHER are
+> both ASK" / "the two ASK agents" below were true that day. SCOUT was `full` by 2026-11-01 and PUBLISHER +
+> QC_EDITOR moved to `full` on 2026-11-03 (§21). Live modes: `agent.roster.json`, or
+> `node scripts/agent-config-integrity.mjs` (2026-11-24: only producer and copywriter are `ask`).
 
 Measured against the live `agent.save.json` + roster by replaying the real projection
 (`composeOffice(surface:'autonomous', lead:false)` + `savedPlacement` + profile objects ->

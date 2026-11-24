@@ -1012,3 +1012,4 @@ test/cron-runnability-truth.test.js
 test/memorial-business.test.js
 test/memorial-fit.test.js
 test/studio-qc-integration.test.js
+test/agent-config-integrity.test.js

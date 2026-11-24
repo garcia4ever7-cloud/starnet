@@ -1,6 +1,23 @@
 #!/usr/bin/env node
 /* Integrate Christian Story Studio agents into live StarNet workspace */
 
+/* RETIRED 2026-11-24 — FAIL CLOSED. This one-shot script (2026-10-25, studio agents are already integrated)
+   corrupts live agent config if re-run:
+     1. it writes save-shaped agents ({id}, no agentId) into agent.roster.json — replaceAgentRoster()
+        (sidecar/index.js) skips every entry without a valid agentId, so the NEXT SIDECAR BOOT LOADS AN EMPTY
+        ROSTER with no error;
+     2. it bumps doc.updatedAt but not doc._saveRevision, so any open browser tab's next save (same revision)
+        overwrites the edit (sidecar/savestore.js compareRevision gate);
+     3. it skips POST /api/roster, so the running sidecar never sees the change.
+   The correct out-of-band procedure is scripts/station-models.mjs applyAssignment (one stamp, bump
+   _saveRevision, POST /api/roster with the same stamp). Check the result with
+   `node scripts/agent-config-integrity.mjs`. Original kept at integrate-christian-studio.mjs.bak. */
+if (process.env.STARNET_ALLOW_RETIRED_INTEGRATE !== '1') {
+  console.error('integrate-christian-studio.mjs is RETIRED: re-running it empties the live roster at next boot.\n'
+    + 'See the header comment. Use scripts/station-models.mjs for agent edits; verify with scripts/agent-config-integrity.mjs.');
+  process.exit(3);
+}
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

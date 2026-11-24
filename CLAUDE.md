@@ -49,6 +49,7 @@ node scripts/station-models.mjs list     # who runs what model, live — see STA
 node scripts/station-models.mjs set <agentId|all> <model>   # change a model safely (auto-snapshot + sync)
 node scripts/station-models.mjs revert   # undo the most recent model change
 node scripts/git-push-safe.mjs           # report ahead/behind vs remote before pushing (read-only)
+node scripts/agent-config-integrity.mjs  # save vs roster CONTENT agreement (read-only; exit 0 consistent, 1 divergent)
 ```
 
 There is no general linter/formatter (`lint:evidence-secrets` only scans QA evidence docs for leaked secrets, it is not a code linter). Tests are plain Node scripts, not a framework — `node test/foo.test.js` runs independently of the gate.
@@ -75,6 +76,8 @@ Check `qa/BUGS.md` before starting. Every fix needs a durable record per `qa/bug
 **One process, one truth.** `node sidecar/index.js` is the entire backend: HTTP + SSE on `:8787`, every `/api/*` route, the in-process agent loop, and the static file server for `frontend/`. The desktop app is this same sidecar embedded in Tauri. There is no separate API server or build step for the frontend — `frontend/index.html` loads `app/*.js` modules directly in dependency order.
 
 **Two copies of agent state must agree, and the newer `updatedAt` wins — always.** Agent config lives in two places: `workspaces/agent.save.json` (`doc.agents[]` — the durable source, pulled by the browser via `GET /api/save` at boot) and the live in-memory roster mirrored at `workspaces/agent.roster.json` (pushed via `POST /api/roster`, source of truth for the running sidecar). `frontend/app/cloudsave.js`'s `reconcile()` adopts whichever of {local browser copy, remote/server copy} has the **newer `doc.updatedAt`** — not whichever has "better" content. A server-side edit to `agent.save.json` that doesn't bump `doc.updatedAt` past the browser's last-known value gets silently overwritten the next time that browser tab reconciles, with no error. Any out-of-band edit to agent config (not through the live UI) must: write `doc.agents[]`, bump `doc.updatedAt = Date.now()` and `doc._saveRevision`, then mirror the same fields into `agent.roster.json` via `POST /api/roster` with the identical timestamp.
+
+*Corrected 2026-11-24 (read in code):* `_saveRevision` outranks `updatedAt`. `reconcile()` adopts the server copy whenever the revisions differ, whatever the timestamps (`cloudsave.js`, search `_saveRevision) !== revision`); `POST /api/save` gates on revision and skips the timestamp check (`savestore.js` `compareRevision`). So an out-of-band edit that bumps `updatedAt` but not `_saveRevision` is overwritten by the next tab save. **A save/roster `updatedAt` gap of seconds to hours is normal** — `persist()` and `pushRoster()` are separate writes with separate `Date.now()` stamps, and nothing compares them. Never "sync" the two stamps; judge agreement by content with `node scripts/agent-config-integrity.mjs` (exit 0 = consistent). The procedure that does this correctly is `scripts/station-models.mjs` `applyAssignment`; `scripts/integrate-christian-studio.mjs` did it wrong (save-shaped roster entries → empty roster at next boot) and is retired fail-closed.
 
 **Capability is granted by what's built, not configured per-agent.** `sidecar/capability/registry.js` (`CAP_REGISTRY`) maps station *object types* (`computer`, `notebook`, `cabinet`, `dish`, `workbench`, `connector`, `orchestrator`, `studio`, `jukebox`) to tool grants — e.g. `cabinet` → `fs.read`/`fs.write`/etc. An agent class's `kit` (in `shared/specialties.js`) names which of these *shared station objects* its tools depend on; the kit is never issued per-agent — only a **desk** is a genuine per-agent world object (`workspaces/agent.save.json` → `doc.station.props[]`, `{id, t:'desk', x, y, w, h, agentId}`). A station may already have unowned desks pre-placed in `doc.station.props`; claiming one for a new agent is a matter of setting its `agentId`, not fabricating new geometry — check for one before inventing coordinates.
 
@@ -104,7 +107,8 @@ What still holds: **`GET /api/toolsets` reports the interactive-lead view and wi
 
 This repo doubles as the live runtime for the owner's actual Etsy business. Know before touching agent config:
 
-- **Six agents exist**: NIGHT4CHRIST (Commander), SCOUT (research), DESIGNER (product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), GPT-4o Independent Reviewer (`gpt4o_reviewer`, advisory only).
+- **Ten agents exist** (live roster, 2026-11-24): NIGHT4CHRIST (`agent`, Commander), SCOUT (research), DESIGNER (`webdesigner`, product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), and the studio crew STORYWRITER, DIRECTOR, PRODUCER, QC_EDITOR (`qceditor`), COPYWRITER. The GPT-4o Independent Reviewer (`gpt4o_reviewer`) is **designed but not in the roster** — see its section below.
+- **approvalMode — historical snapshot 2026-11-24, not current state** (live source: `agent.roster.json` / `node scripts/agent-config-integrity.mjs`): `full` on 8 — agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor; `ask` on 2 — producer, copywriter. Only `'full'` and `'ask'` exist; anything else normalizes to `ask`. **An `ask` agent in a cron run never stalls** — an ungranted consent-gated call is denied immediately (`sidecar/permissions.js`, `SILENCE`); unattended capability for `ask` agents comes from routine `unattendedGrants` and the Workshop grant, not from waiting. Full Access allows before even the hardline floor (`permissions.js` `full-power`), and answering "Full access" on any permission card permanently flips that agent to `full` (`persistAgentFullAccess`) — that is how modes drift without a doc trail. Older docs saying SCOUT/DESIGNER/PUBLISHER are `ask` (`STATION_FIELD_NOTES.md` §1, §16 table) are stale.
 - **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval.
 - **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and avoid `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room. Verified by one real cron run: the `skill.view` error is gone.
@@ -228,7 +232,7 @@ Performing one live validation call is authorized (owner instruction). The call 
 
 ### Roster persistence
 
-The reviewer entry is in `workspaces/agent.roster.json` with `provider: openai`, `model: gpt-4o`, `approvalMode: ask`, `executionProfile: station-gear`, `skills: []`. Backed up at `agent.roster.json.bak-gpt4o-reviewer-20261118`.
+**~~The reviewer entry is in `workspaces/agent.roster.json`~~ CORRECTED 2026-11-24 — it is NOT.** Verified live: `gpt4o_reviewer` appears in neither `agent.roster.json` nor `agent.save.json`, and not even in `agent.roster.json.bak-gpt4o-reviewer-20261118` (the backup named after it). The four `runOnceCore()` ceilings exist in code, but there is no live agent for them to apply to. The intended record was `provider: openai`, `model: gpt-4o`, `approvalMode: ask`, `executionProfile: station-gear`, `skills: []` — creating it is a hand-authored `doc.agents[]` entry (see "No headless path creates a new agent"), not done.
 
 ### Undo
 
@@ -278,6 +282,10 @@ curl -sN -X POST http://127.0.0.1:8787/api/run \
 
 ⚠️ The field is **`messages`** (an array). `message` is silently ignored — the run carries no user turn.
 ⚠️ Always pass `provider` + `model` — a bare `/api/run` does not use the agent's roster model.
+⚠️ `"surface":"autonomous"` above is **ignored** — `/api/run` hard-codes `surface: 'interactive'` with a live
+consent prompt (`sidecar/index.js`, search `surface: 'interactive', prompt: promptConsent`). An `ask` agent driven
+this way waits on a permission card (auto-denies after `CONSENT_TIMEOUT_MS`, default 120 s). Only a cron fire is
+truly unattended.
 ⚠️ The stream is NDJSON of `{name, payload}`. A run only counts as real if **both** `agent.tool_call`
 and `agent.tool_result` appear — `reason: done` alone proves nothing.
 
@@ -292,8 +300,16 @@ curl -s -H "x-starnet-token: $STARNET_API_TOKEN" http://127.0.0.1:8787/api/cron
 
 Run one now (spends money):
 ```bash
-curl -s -X POST http://127.0.0.1:8787/api/cron/run -H "x-starnet-token: $STARNET_API_TOKEN" -H "Content-Type: application/json" -d '{"id":"PASTE_ID"}'
+curl -sN -X POST http://127.0.0.1:8787/api/cron/run -H "x-starnet-token: $STARNET_API_TOKEN" -H "Content-Type: application/json" -d '{"id":"PASTE_ID"}'
 ```
+
+⚠️ **`POST /api/cron/run` is Run Now, never a read.** It starts a paid run and streams it; the run is **aborted
+the moment the client disconnects** (`res.on('close', () => { ac.abort(); … })`, deliberate). So never pass
+`curl -m N`, never pipe it to `head`, and never call it during an audit. On 2026-11-24 an audit labelled this call
+"SCOUT ROUTINE DETAIL", ran it with `-m 5`, killed the run at 4.9 s ($0.0116), recorded a `cancelled` failure
+against the routine, then misdiagnosed that self-inflicted failure as a missing skill. Routine detail is
+`GET /api/cron`; run history is `runs.jsonl` and `autonomy.ledger.jsonl` (a `"binding":"run-now"` row marks a manual fire).
+A routine auto-pauses after `maxConsecutiveFailures` (5) terminal failures in a row — a cancelled Run Now counts.
 
 ⚠️ Header is `x-starnet-token`, **never** `Authorization: Bearer`. Enable a routine with
 `POST /api/cron/update {id:"…", patch:{enabled:true}}` — a flat body `{"id":"…","enabled":true}`
