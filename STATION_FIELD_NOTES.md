@@ -610,6 +610,41 @@ once**. That is what "none of the launchers work" meant; the launchers themselve
   **The launcher is fine; the subscription is exhausted.** That is the standing reason to use
   `cc-api` until Oct 26.
 
+### 12a. 2026-11-24 — the shim turns every OTHER seccomp-blocked syscall into a silent infinite hang
+
+Tested live, read-only (throwaway Python children, harmless args, `LD_PRELOAD` stripped vs set).
+Shim: `~/.local/share/claude-termux/termux-syscall-shim.so`, inode 169163, built from
+`~/claude-code-termux/assets/claude-code-termux-syscall-shim.c` (disassembly matches source).
+
+| Syscall (arm64 nr) | No shim | With shim |
+|---|---|---|
+| `rseq` 293, `io_uring_setup` 425, `add_key` 217, `acct` 89, `init_module` 105, `kexec_load` 104 | killed by SIGSYS (31) | **hung, 100% CPU, forever** |
+| `pidfd_open` 434 | ret=4 (allowed) | ret=4 (identical) |
+| `close_range`, `faccessat2`, `clone3`, `epoll_pwait2`, `landlock_create_ruleset`, `userfaultfd`, `pivot_root` | normal result/errno | identical |
+
+**Why:** `handle_sigsys` handles only `si_syscall == SYS_pidfd_open` (sets x0 = -ENOSYS). Every other
+trapped syscall goes to `kill(getpid(), SIGSYS); for (;;) {}`. The handler is installed with
+`SA_SIGINFO | SA_RESTART` only — no `SA_NODEFER`/`SA_RESETHAND` — so SIGSYS stays blocked inside the
+handler, the re-raised signal can never be delivered, and the thread spins. Seen in `/proc/<pid>/status`
+of a hung child: `ShdPnd` and `SigBlk` both carry 0x40000000 (SIGSYS), 0 voluntary / 2470 involuntary
+context switches. The shim also overrides `sigaction` for SIGSYS, so nothing under it can install its own
+SIGSYS handler.
+
+**Consequences:**
+- On this device (Android 17 / SDK 37) `pidfd_open` is NOT trapped, so the shim's one useful path never
+  runs here — it is inert insurance. The ENOSYS path is untested on this hardware.
+- Claude and every child it spawns (bash, node, git, tests started from a Claude shell) inherit the shim.
+  Any of them that hits a blocked syscall now hangs silently instead of dying with a clear signal.
+  How often that happens in practice is unknown; no evidence it has happened yet. The StarNet sidecar
+  started by `start-starnet.sh` does not inherit it.
+- Diagnosing a mystery hang under Claude: check `/proc/<pid>/status` for SIGSYS in both `ShdPnd` and
+  `SigBlk` plus a pure-involuntary context-switch count — that is this shim, not the program.
+
+**Fix, not applied (upstream code, owner decision):** in the fallback path, reset SIGSYS to `SIG_DFL` and
+unblock it before re-raising (or install with `SA_RESETHAND | SA_NODEFER`), so the process dies exactly as
+it would without the shim. Alternative: do not preload the shim on this device. Backup of these notes:
+`STATION_FIELD_NOTES.md.bak-shimhang-20261124`.
+
 ---
 
 ## 11. Higgsfield integration + Refit module extraction (2026-10-25)
