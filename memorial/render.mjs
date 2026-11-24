@@ -32,7 +32,7 @@
  *
  *  5. GENTLE DISSOLVES ONLY. AV Workshop — a real memorial business with 12 published tiers —
  *     uses "soft dissolve" as its default and sells Pan & Zoom as a $10-per-image ADD-ON. Motion
- *     is the upcharge, not the baseline. No fadeblack except where the order asks for an act break.
+ *     is the upcharge, not the baseline. No dip to black except where the order asks for an act break.
  *
  *  6. AUDIO IS NOT REIMPLEMENTED. sidecar/audio-finish.js already does sidechain ducking of a bed
  *     under narration plus loudnorm mastering to AAC 192k, and runs on every video the station
@@ -48,8 +48,11 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+import crypto from 'node:crypto';
+
 import { planFit, fitFilter, frameSize } from './fit.mjs';
 import { renderCard } from './cards.mjs';
+import { joinGraph as buildJoinGraph, totalSeconds } from './join.mjs';
 
 const require = createRequire(import.meta.url);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -66,7 +69,7 @@ export const CARD_HOLD = 5.0;
 
 /* ---------------------------------------------------------------- small helpers */
 
-function run(cmd, args, opts = {}) {
+export function run(cmd, args, opts = {}) {
   return new Promise((resolve) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
     let out = '', err = '';
@@ -83,17 +86,25 @@ export async function ffprobeJson(file) {
   try { return JSON.parse(r.out); } catch { return null; }
 }
 
-async function probeImage(file) {
+/* The size of the picture ffmpeg will actually DECODE, which is not always what ffprobe reports.
+ * A phone photo held upright is commonly stored sideways with EXIF Orientation 6: ffprobe says
+ * 1200x800, the decoder hands the filter graph 800x1200. Taking the crop decision from the probe
+ * treated such a portrait as a landscape and cropped it — the face rule broken by the code that
+ * enforces it (found 2026-11-24). showinfo reports the frame after auto-rotation. */
+export async function probeImage(file) {
+  const r = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-frames:v', '1', '-vf', 'showinfo', '-f', 'null', '-']);
+  const m = r.err.match(/Parsed_showinfo[^\n]*\bs:(\d+)x(\d+)/);
+  if (m) return { w: Number(m[1]), h: Number(m[2]) };
   const j = await ffprobeJson(file);
-  const s = j && j.streams && j.streams.find(x => x.width && x.height);
-  if (!s) throw new Error(`cannot read image dimensions: ${file}`);
-  return { w: Number(s.width), h: Number(s.height) };
+  const st = j && j.streams && j.streams.find(x => x.width && x.height);
+  if (!st) throw new Error(`cannot read image dimensions: ${file}`);
+  return { w: Number(st.width), h: Number(st.height) };
 }
 
 /* A segment counts as already-done only if it decodes to roughly the duration we asked for.
  * A truncated file from a killed render must not be silently accepted — that is the exact class
  * of failure that let a 1,056-byte placeholder ship as a finished video on this station before. */
-async function segmentIsGood(file, wantSec, want) {
+export async function segmentIsGood(file, wantSec, want) {
   if (!fs.existsSync(file)) return false;
   const j = await ffprobeJson(file);
   if (!j || !j.format) return false;
@@ -102,6 +113,23 @@ async function segmentIsGood(file, wantSec, want) {
   if (Number(v.width) !== want.w || Number(v.height) !== want.h) return false;
   const dur = Number(j.format.duration);
   return Number.isFinite(dur) && Math.abs(dur - wantSec) < 0.25;
+}
+
+/* A segment file says nothing about WHAT it was rendered from: same duration, same size, and a
+ * swapped photograph or a corrected verse would be silently reused. Each segment therefore gets
+ * a sidecar recording a fingerprint of everything that went into it, and is reused only when
+ * that still matches. A segment with no sidecar (rendered before 2026-11-24) is re-rendered once. */
+export function fingerprint(parts) {
+  return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 24);
+}
+export function fileStamp(file) {
+  try { const st = fs.statSync(file); return `${st.size}:${Math.round(st.mtimeMs)}`; } catch { return 'missing'; }
+}
+export function segmentMatches(segFile, print) {
+  try { return JSON.parse(fs.readFileSync(segFile + '.json', 'utf8')).print === print; } catch { return false; }
+}
+export async function stampSegment(segFile, print, extra = {}) {
+  await fsp.writeFile(segFile + '.json', JSON.stringify({ print, ...extra }));
 }
 
 const MOTIONS = ['push', 'pull', 'driftR', 'driftD'];
@@ -125,6 +153,17 @@ function motionExpr(kind, frames) {
 
 /* ---------------------------------------------------------------- order -> plan */
 
+/* An act break is opt-in per order entry: `"actBreak": true` on a photo or a card makes the
+ * transition INTO that entry dip through black (xfade fadeblack) instead of the default
+ * dissolve. It must be a real boolean — a typo such as "yes" fails the order loudly instead of
+ * rendering a film that silently ignores it. On the first item it does nothing: no transition
+ * leads into it. */
+function actBreakOf(entry, where) {
+  if (entry.actBreak == null) return false;
+  if (typeof entry.actBreak !== 'boolean') throw new Error(`buildPlan: ${where}.actBreak must be true or false`);
+  return entry.actBreak;
+}
+
 export function buildPlan(order, opts = {}) {
   if (!order || typeof order !== 'object') throw new Error('buildPlan: order must be an object');
   if (!order.orderId) throw new Error('buildPlan: order.orderId is required');
@@ -142,8 +181,17 @@ export function buildPlan(order, opts = {}) {
   const close = cards.filter(c => c.at === 'close');
   const mid = cards.filter(c => Number.isFinite(c.after))
     .slice().sort((a, b) => a.after - b.after);
+  /* A card that names no position, or one that no photo count can ever reach, used to vanish
+   * from the film without a word. A verse the family asked for must not be droppable by a typo. */
+  cards.forEach((c, i) => {
+    const placed = c.at === 'open' || c.at === 'close' || Number.isFinite(c.after);
+    if (!placed) throw new Error(`buildPlan: cards[${i}] needs "at": "open" | "close" or "after": <photo count>`);
+    if (Number.isFinite(c.after) && !(Number.isInteger(c.after) && c.after >= 1 && c.after <= photos.length)) {
+      throw new Error(`buildPlan: cards[${i}].after is ${c.after} — must be a whole number from 1 to ${photos.length} (the photo it follows)`);
+    }
+  });
 
-  for (const c of open) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath' });
+  for (const c of open) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath', actBreak: actBreakOf(c, `cards[${cards.indexOf(c)}]`) });
 
   let placed = 0;
   for (let i = 0; i < photos.length; i++) {
@@ -156,20 +204,20 @@ export function buildPlan(order, opts = {}) {
       hold: Number(p.hold ?? order.hold ?? DEFAULT_HOLD),
       motion: p.motion && p.motion !== 'auto' ? p.motion : MOTIONS[placed % MOTIONS.length],
       fit: p.fit || 'auto',
+      actBreak: actBreakOf(p, `photos[${i}]`),
     });
     placed++;
     for (const c of mid) {
-      if (c.after === placed) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath' });
+      if (c.after === placed) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath', actBreak: actBreakOf(c, `cards[${cards.indexOf(c)}]`) });
     }
   }
 
-  for (const c of close) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath' });
+  for (const c of close) items.push({ kind: 'card', card: c, hold: Number(c.hold ?? CARD_HOLD), motion: 'breath', actBreak: actBreakOf(c, `cards[${cards.indexOf(c)}]`) });
 
-  const totalRaw = items.reduce((a, it) => a + it.hold, 0);
-  const total = totalRaw - xfade * Math.max(0, items.length - 1);
-  if (total <= 0) throw new Error('buildPlan: crossfade longer than the content');
-
-  return { orderId: order.orderId, w, h, fps: FPS, xfade, theme, subject, items, totalSec: total };
+  const plan = { orderId: order.orderId, w, h, fps: FPS, xfade, theme, subject, items, totalSec: 0 };
+  plan.totalSec = totalSeconds(plan);
+  if (plan.totalSec <= 0) throw new Error('buildPlan: crossfade longer than the content');
+  return plan;
 }
 
 /* ---------------------------------------------------------------- pass 1: segments */
@@ -177,8 +225,15 @@ export function buildPlan(order, opts = {}) {
 async function renderSegment(plan, item, index, dirs, log) {
   const segFile = path.join(dirs.work, `seg-${String(index).padStart(3, '0')}.mp4`);
   const want = { w: plan.w, h: plan.h };
+  const srcPath = item.kind === 'photo' ? (path.isAbsolute(item.file) ? item.file : path.join(dirs.base, item.file)) : null;
+  const print = fingerprint({
+    v: 1, w: plan.w, h: plan.h, fps: plan.fps, over: OVERSAMPLE, hold: item.hold, motion: item.motion,
+    ...(item.kind === 'card'
+      ? { card: item.card, subject: plan.subject, theme: plan.theme }
+      : { src: path.resolve(srcPath), stamp: fileStamp(srcPath), fit: item.fit }),
+  });
 
-  if (await segmentIsGood(segFile, item.hold, want)) {
+  if (!dirs.force && segmentMatches(segFile, print) && await segmentIsGood(segFile, item.hold, want)) {
     log(`  [${index + 1}/${plan.items.length}] reuse ${path.basename(segFile)}`);
     return { segFile, reused: true, item };
   }
@@ -228,42 +283,45 @@ async function renderSegment(plan, item, index, dirs, log) {
   if (!(await segmentIsGood(segFile, item.hold, want))) {
     throw new Error(`segment ${index} rendered but failed its own check: ${segFile}`);
   }
+  await stampSegment(segFile, print);
   return { segFile, reused: false, item, fit: fitInfo };
 }
 
 /* ---------------------------------------------------------------- pass 2: assembly */
 
-async function assemble(plan, segs, dirs, log, force = false) {
+/* The join's filter graph is a pure function (join.mjs) so the transition choice is testable
+ * without ffmpeg. The transition INTO item i is a symmetric dip to black when that item asks for
+ * an act break, otherwise the default dissolve. */
+export function joinGraph(plan, n = plan.items.length) {
+  return buildJoinGraph(plan, n);
+}
+
+export async function assemble(plan, segs, dirs, log, force = false, encode = null) {
   const out = path.join(dirs.work, 'silent.mp4');
+  const graph = joinGraph(plan, segs.length);
+  const graphFile = path.join(dirs.work, '.graph-assemble.txt');
 
   /* Joining 35 segments is the expensive pass. If a good join already exists and no segment is
    * newer than it, reuse it — otherwise fixing something downstream (audio, packaging) costs a
-   * full re-render every time. */
+   * full re-render every time.
+   * The transitions are a join input that no segment file reflects, so the join is reused only
+   * if it was built from this exact graph — otherwise an order edited to add an act break would
+   * silently keep its old all-dissolve join. .graph-assemble.txt records the graph the existing
+   * join was built from; an unchanged order still reuses its join exactly as before. */
   if (!force && await segmentIsGood(out, plan.totalSec, { w: plan.w, h: plan.h })) {
     const joinedAt = fs.statSync(out).mtimeMs;
     const stale = segs.some(s => fs.existsSync(s.segFile) && fs.statSync(s.segFile).mtimeMs > joinedAt);
-    if (!stale) { log(`  reuse existing join (${plan.totalSec.toFixed(1)}s)`); return out; }
-    log('  a segment is newer than the join — rebuilding');
+    const sameGraph = fs.existsSync(graphFile) && fs.readFileSync(graphFile, 'utf8') === graph;
+    if (!stale && sameGraph) { log(`  reuse existing join (${plan.totalSec.toFixed(1)}s)`); return out; }
+    log(stale ? '  a segment is newer than the join — rebuilding' : '  the join graph changed — rebuilding');
   }
 
   const inputs = [];
   for (const s of segs) inputs.push('-i', s.segFile);
 
-  const chain = [];
-  let prev = '0:v';
-  let offset = 0;
-  for (let i = 1; i < segs.length; i++) {
-    offset += plan.items[i - 1].hold - plan.xfade;
-    const tag = `x${i}`;
-    const tr = plan.items[i].actBreak ? 'fadeblack' : 'fade';
-    chain.push(`[${prev}][${i}:v]xfade=transition=${tr}:duration=${plan.xfade}:offset=${offset.toFixed(3)}[${tag}]`);
-    prev = tag;
-  }
-  const graph = chain.length
-    ? chain.join(';') + `;[${prev}]format=yuv420p,setsar=1[vo]`
-    : `[0:v]format=yuv420p,setsar=1[vo]`;
-
-  const graphFile = path.join(dirs.work, '.graph-assemble.txt');
+  /* The old join no longer matches what is being built. Remove it first, so a rebuild that fails
+   * or is killed part-way can never leave it behind to be reused against the new graph. */
+  await fsp.rm(out, { force: true });
   await fsp.writeFile(graphFile, graph);
 
   log(`  joining ${segs.length} segments → ${plan.totalSec.toFixed(1)}s`);
@@ -271,7 +329,7 @@ async function assemble(plan, segs, dirs, log, force = false) {
     '-hide_banner', '-nostats', '-y', ...inputs,
     '-filter_complex_script', graphFile,
     '-map', '[vo]',
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '19',
+    ...(encode || ['-c:v', 'libx264', '-preset', 'medium', '-crf', '19']),
     '-r', String(plan.fps), '-t', plan.totalSec.toFixed(3),
     '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out,
   ]);
@@ -284,7 +342,7 @@ async function assemble(plan, segs, dirs, log, force = false) {
 
 /* ---------------------------------------------------------------- pass 3: audio */
 
-async function addAudio(order, silentPath, finalPath, dirs, log) {
+export async function addAudio(order, silentPath, finalPath, dirs, log) {
   const music = order.music && order.music.file;
   if (!music) {
     log('  no music in order — delivering silent');
@@ -331,14 +389,24 @@ export function dirsFor(order, baseDir) {
   const root = order.outputRoot
     ? (path.isAbsolute(order.outputRoot) ? order.outputRoot : path.join(base, order.outputRoot))
     : path.join(os.homedir(), '.local', 'share', 'StarNet', 'workspaces', 'memorial', order.orderId);
-  return { base, root, work: path.join(root, 'work'), out: path.join(root, 'out') };
+  return { base, root, work: path.join(root, 'work'), out: path.join(root, 'out'), force: false };
 }
 
 export async function renderOrder(order, opts = {}) {
+  /* "style": "gallery" selects the layout engine (gallery.mjs). Orders without it render
+   * exactly as they always have. Imported lazily: gallery.mjs imports this module. */
+  if (order && order.style === 'gallery') {
+    const { renderGallery } = await import('./gallery.mjs');
+    return renderGallery(order, opts);
+  }
+  if (order && order.style != null && order.style !== 'classic') {
+    throw new Error(`renderOrder: unknown style '${order.style}' (use "classic" or "gallery")`);
+  }
   const log = opts.log || (() => {});
   const t0 = Date.now();
   const plan = buildPlan(order, opts);
   const dirs = dirsFor(order, opts.baseDir);
+  dirs.force = !!opts.force;
   await fsp.mkdir(dirs.work, { recursive: true });
   await fsp.mkdir(dirs.out, { recursive: true });
 
@@ -352,7 +420,7 @@ export async function renderOrder(order, opts = {}) {
     if (s.fit) fits.push({ file: plan.items[i].file, ...s.fit });
   }
 
-  const silent = await assemble(plan, segs, dirs, log);
+  const silent = await assemble(plan, segs, dirs, log, dirs.force);
   const finalPath = path.join(dirs.out, `${plan.orderId}.mp4`);
   const audio = await addAudio(order, silent, finalPath, dirs, log);
 

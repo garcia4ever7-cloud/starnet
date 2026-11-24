@@ -1,0 +1,25 @@
+{
+  "orderId": "gallery-demo",
+  "engine": "memorial",
+  "style": "gallery",
+  "theme": "warm",
+  "outputRoot": "gallery-demo/render",
+  "subject": { "name": "Ricardo Alvarez", "born": "1952-03-14", "died": "2026-09-30" },
+  "music": { "track": "bach-prelude-c" },
+  "facesReviewed": true,
+  "recap": true,
+  "photos": [
+    { "file": "gallery-demo/in/01-1978-porch.jpg", "caption": "The porch on Maple Street, 1978" },
+    { "file": "gallery-demo/in/04-2006-backyard-grill.jpg" },
+    { "file": "gallery-demo/in/02-1981-wedding.jpg", "caption": "Married Elena, June 1981" },
+    { "file": "gallery-demo/in/03-1991-beach-family.jpg" },
+    { "file": "gallery-demo/in/05-2023-grandkids.jpg", "caption": "Christmas with the grandchildren" }
+  ],
+  "cards": [
+    { "at": "open", "type": "title" },
+    { "after": 2, "type": "chapter", "title": "Family", "subtitle": "1981 – 2023" },
+    { "after": 5, "type": "verse", "ref": "Psalm 23:1-2", "translation": "KJV",
+      "text": "The LORD is my shepherd; I shall not want. He maketh me to lie down in green pastures: he leadeth me beside the still waters." },
+    { "at": "close", "type": "closing", "line": "Forever in our hearts" }
+  ]
+}

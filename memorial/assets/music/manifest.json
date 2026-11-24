@@ -1,0 +1,167 @@
+{
+  "retrieved": "2026-11-24",
+  "note": "Engine copies are AAC 256k/48k transcodes of the originals recorded in LICENSES.md. tier cc0 = worldwide public-domain dedication; tier us-gov = public domain in the United States as a federal work, not a worldwide waiver. Not legal advice.",
+  "default": "goldberg-aria",
+  "tracks": [
+    {
+      "slug": "goldberg-aria",
+      "file": "goldberg-aria.m4a",
+      "title": "Goldberg Variations, BWV 988 — Aria",
+      "composer": "J. S. Bach",
+      "performer": "Kimiko Ishizaka (Open Goldberg Variations)",
+      "licence": "CC0-1.0",
+      "tier": "cc0",
+      "mood": "solo piano; slow, dignified",
+      "attribution": null,
+      "durationSec": 299.52,
+      "sha256": "089336307378eca858765c1cbc3cb720b76e16597527ca639c9b46b68e6557d2",
+      "original": {
+        "file": "01_bach_goldberg_aria_ishizaka.flac",
+        "sha256": "ea6b2443f39a017ca9ca7306287a02c0e6df078c711b0a5dbe33adcb2784d89f",
+        "bytes": 81564398,
+        "url": "https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%2001%20Aria.flac"
+      },
+      "sourcePage": "https://archive.org/details/OpenGoldbergVariations"
+    },
+    {
+      "slug": "bach-prelude-c",
+      "file": "bach-prelude-c.m4a",
+      "title": "Well-Tempered Clavier I — Prelude No. 1 in C, BWV 846",
+      "composer": "J. S. Bach",
+      "performer": "Kimiko Ishizaka (Open Well-Tempered Clavier)",
+      "licence": "CC0-1.0",
+      "tier": "cc0",
+      "mood": "solo piano; calm, hopeful",
+      "attribution": "J. S. Bach, Well-Tempered Clavier Book 1, performed by Kimiko Ishizaka",
+      "durationSec": 162.92,
+      "sha256": "ada1ab7b2dbdba18f76fb0af4c55b7e0ed8d10ab89802175fcb98cc465dfaa89",
+      "original": {
+        "file": "02_bach_wtc1_prelude01_cmajor_ishizaka.flac",
+        "sha256": "72322c98973c0d29585600b58c2a39e187050c4068007b7f345f61f90040746a",
+        "bytes": 41438408,
+        "url": "https://archive.org/download/bach-well-tempered-clavier-book-1/Kimiko%20Ishizaka%20-%20Bach-%20Well-Tempered%20Clavier%2C%20Book%201%20-%2001%20Prelude%20No.%201%20in%20C%20major%2C%20BWV%20846.flac"
+      },
+      "sourcePage": "https://archive.org/details/bach-well-tempered-clavier-book-1"
+    },
+    {
+      "slug": "bach-prelude-eflat-minor",
+      "file": "bach-prelude-eflat-minor.m4a",
+      "title": "Well-Tempered Clavier I — Prelude No. 8 in E-flat minor, BWV 853",
+      "composer": "J. S. Bach",
+      "performer": "Kimiko Ishizaka (Open Well-Tempered Clavier)",
+      "licence": "CC0-1.0",
+      "tier": "cc0",
+      "mood": "solo piano; grave, sorrowful",
+      "attribution": "J. S. Bach, Well-Tempered Clavier Book 1, performed by Kimiko Ishizaka",
+      "durationSec": 238.15,
+      "sha256": "2de155ba4cf62d9612c4751b93e7bbdf6d9edbe3595ca1b9adb1cd9518b7c857",
+      "original": {
+        "file": "03_bach_wtc1_prelude08_eflatminor_ishizaka.flac",
+        "sha256": "fb168b0f3cdb4ab171543dab45eadc03864bebc76a258b88c1af84d73022f2c0",
+        "bytes": 61577604,
+        "url": "https://archive.org/download/bach-well-tempered-clavier-book-1/Kimiko%20Ishizaka%20-%20Bach-%20Well-Tempered%20Clavier%2C%20Book%201%20-%2015%20Prelude%20No.%208%20in%20E-flat%20minor%2C%20BWV%20853.flac"
+      },
+      "sourcePage": "https://archive.org/details/bach-well-tempered-clavier-book-1"
+    },
+    {
+      "slug": "chopin-nocturne",
+      "file": "chopin-nocturne.m4a",
+      "title": "Nocturne in E-flat, Op. 9 No. 2",
+      "composer": "F. Chopin",
+      "performer": "Musopen recording",
+      "licence": "CC0-1.0",
+      "tier": "cc0",
+      "mood": "solo piano; warm, tender",
+      "attribution": null,
+      "durationSec": 276.61,
+      "sha256": "97e94430aff6a8863df59d47b5b9997fc734402f949a727c8dc9f6a1fb6f92a5",
+      "original": {
+        "file": "04_chopin_nocturne_op9no2_musopen.m4a",
+        "sha256": "b61184e736924631a46ae07e2702f5f2f56a299d9213d434f0505ef5b635880e",
+        "bytes": 41479738,
+        "url": "https://archive.org/download/musopen-chopin/Nocturne%20Op.%209%20no.%202%20in%20E%20flat%20major.m4a"
+      },
+      "sourcePage": "https://archive.org/details/musopen-chopin"
+    },
+    {
+      "slug": "amazing-grace",
+      "file": "amazing-grace.m4a",
+      "title": "Amazing Grace (instrumental)",
+      "composer": "Traditional",
+      "performer": "U.S. Air Force Strolling Strings",
+      "licence": "PD-USGov",
+      "tier": "us-gov",
+      "mood": "strings; the hymn",
+      "attribution": null,
+      "durationSec": 125.02,
+      "sha256": "4c41ca0841c9fbd194438a2c2b0f09ac2e42a18663821935e880dcd4a719797c",
+      "original": {
+        "file": "05_amazing_grace_usaf_strolling_strings.mp3",
+        "sha256": "c8db581ec11d48f5586023910e283e0784840325c66d6665e7bab8af0e518dfe",
+        "bytes": 6691494,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/34/Amazing_Grace_%282004%29_-_Strolling_Strings_-_United_States_Air_Force_Band.mp3"
+      },
+      "sourcePage": "https://commons.wikimedia.org/wiki/File:Amazing_Grace_(2004)_-_Strolling_Strings_-_United_States_Air_Force_Band.mp3"
+    },
+    {
+      "slug": "nearer-my-god",
+      "file": "nearer-my-god.m4a",
+      "title": "Nearer, My God, to Thee (instrumental)",
+      "composer": "L. Mason",
+      "performer": "U.S. Air Force Concert Band",
+      "licence": "PD-USGov",
+      "tier": "us-gov",
+      "mood": "concert band; the hymn",
+      "attribution": null,
+      "durationSec": 144.43,
+      "sha256": "08c8a9fcde9de0b5c663f243d0f3f958a6911e6d3a614e0fcb9ced14b2f44b1e",
+      "original": {
+        "file": "06_nearer_my_god_to_thee_usaf_concert_band.mp3",
+        "sha256": "27b99da378f21d92717a8dae6880ce5f828eccde9a054dfd10c2e5e1f1b2618a",
+        "bytes": 3538991,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/e6/Nearer_My_God_to_Thee_-_Concert_Band_-_United_States_Air_Force_Band.mp3"
+      },
+      "sourcePage": "https://commons.wikimedia.org/wiki/File:Nearer_My_God_to_Thee_-_Concert_Band_-_United_States_Air_Force_Band.mp3"
+    },
+    {
+      "slug": "goin-home",
+      "file": "goin-home.m4a",
+      "title": "Goin' Home (Largo from Symphony No. 9)",
+      "composer": "A. Dvořák",
+      "performer": "U.S. Air Force Concert Band",
+      "licence": "PD-USGov",
+      "tier": "us-gov",
+      "mood": "concert band; a funeral standard",
+      "attribution": null,
+      "durationSec": 186.93,
+      "sha256": "878df5b40105326097c8bc1152ca6fa6e1c5b9f97b57f5bd38b5bf062a2643d3",
+      "original": {
+        "file": "07_goin_home_dvorak_largo_usaf_concert_band.mp3",
+        "sha256": "789e0c77b7053568bb05ad4bbff532020f5fa2d0b31c8ba14bac52ede41e0d81",
+        "bytes": 7919025,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Goin%27_Home_-_Concert_Band_-_United_States_Air_Force_Band.mp3"
+      },
+      "sourcePage": "https://commons.wikimedia.org/wiki/File:Goin'_Home_-_Concert_Band_-_United_States_Air_Force_Band.mp3"
+    },
+    {
+      "slug": "air-on-g",
+      "file": "air-on-g.m4a",
+      "title": "Air (Orchestral Suite No. 3, BWV 1068)",
+      "composer": "J. S. Bach",
+      "performer": "U.S. Air Force Strings",
+      "licence": "PD-USGov",
+      "tier": "us-gov",
+      "mood": "strings; a funeral standard",
+      "attribution": null,
+      "durationSec": 183.3,
+      "sha256": "3e402928a1ae06a23f253cbbb7caa8a6ffe89d880fad75959ace490cca649da0",
+      "original": {
+        "file": "08_bach_air_on_g_string_usaf_strings.mp3",
+        "sha256": "139e7a43fc39a5502b58a49b0002f96d37875be3794d2f6938ef59c1f35af1cd",
+        "bytes": 7539726,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Air_-_Air_Force_Strings_-_United_States_Air_Force_Band.mp3"
+      },
+      "sourcePage": "https://commons.wikimedia.org/wiki/File:Air_-_Air_Force_Strings_-_United_States_Air_Force_Band.mp3"
+    }
+  ]
+}

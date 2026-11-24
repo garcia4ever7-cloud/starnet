@@ -238,6 +238,9 @@ website/**/*.bak
 # Regenerate with: node memorial/examples/make-demo-assets.mjs && node memorial/cli.mjs
 memorial/**/render/
 memorial/examples/*/
+# memorial music library AUDIO (50 MB) — the manifest, licences and fetch script are tracked;
+# the audio is rebuilt, checksum-verified, by: node memorial/assets/music/fetch.mjs
+memorial/assets/music/*.m4a
 
 # The repo installs with npm (package-lock.json is the tracked lockfile). A stray pnpm install
 # on 2026-10-30 left these behind and suppressed native builds via allowBuilds:false, which broke

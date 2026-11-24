@@ -30,6 +30,11 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createCanvas } from '@napi-rs/canvas';
 
+/* `node memorial/jitter-check.mjs gallery` runs the same comparison through the gallery engine
+ * (a full-bleed scene, zoom about the frame centre). The edge sits at 30% of the width there,
+ * because a centred edge does not move under a centred zoom. */
+const GALLERY = process.argv[2] === 'gallery';
+const EDGE = GALLERY ? 0.30 : 0.50;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-jitter-'));
 const IN = path.join(TMP, 'in');
 fs.mkdirSync(IN, { recursive: true });
@@ -39,12 +44,17 @@ fs.mkdirSync(IN, { recursive: true });
   const W = 3000, H = 1688;
   const c = createCanvas(W, H), x = c.getContext('2d');
   x.fillStyle = '#1e1e1e'; x.fillRect(0, 0, W, H);
-  x.fillStyle = '#e6e6e6'; x.fillRect(W / 2, 0, W / 2, H);
+  x.fillStyle = '#e6e6e6'; x.fillRect(W * EDGE, 0, W * (1 - EDGE), H);
   x.filter = 'blur(1px)'; x.drawImage(c, 0, 0);
   fs.writeFileSync(path.join(IN, 'chart.png'), c.toBuffer('image/png'));
 }
 
-const order = {
+const order = GALLERY ? {
+  orderId: 'jitter', style: 'gallery', hold: 5.0, xfade: 0.5, outputRoot: './out', music: 'none',
+  subject: { name: 'J' },
+  photos: [{ file: 'in/chart.png', layout: 'full', faces: [], motion: 'push' }],
+  cards: [],
+} : {
   orderId: 'jitter', aspect: '16:9', hold: 5.0, xfade: 0.5, outputRoot: './out',
   subject: { name: 'J' },
   photos: [{ file: 'in/chart.png', motion: 'driftR', fit: 'crop' }],
@@ -69,7 +79,10 @@ function measure(video) {
     if (!px || px.length < 16) continue;
     let s = 0, m = 0, acc = 0;
     for (let i = 0; i < px.length - 1; i++) {
-      const g = Math.abs(px[i + 1] - px[i]);
+      let g = Math.abs(px[i + 1] - px[i]);
+      /* Gallery full-bleed scenes carry a vignette: a faint gradient across the whole row that
+       * would drag the centroid about. Only the edge itself counts there. */
+      if (GALLERY && g < 8) g = 0;
       s += g; acc += i * g; if (g > m) m = g;
     }
     if (m < 30 || s === 0) continue;
