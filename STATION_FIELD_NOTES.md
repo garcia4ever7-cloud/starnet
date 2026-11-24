@@ -596,10 +596,47 @@ once**. That is what "none of the launchers work" meant; the launchers themselve
   supposed to cost nothing.
 - **OmniRoute is already locked down** (`~/.omniroute/.env`: `OMNIROUTE_SERVER_HOST=127.0.0.1`,
   `REQUIRE_API_KEY=true`, set 2026-10-18). Default install binds `0.0.0.0` keyless — never undo this.
-- **`$PREFIX/bin/claude` (2.1.220, patched) and `~/.local/bin/claude` (symlink → 2.1.310, unpatched)
-  both exist.** `$PREFIX/bin` wins on PATH, so 2.1.220 is what actually runs. The newer binaries in
-  `versions/` were auto-downloaded and have **not** been through the patchelf/DNS/shim treatment —
-  do not "upgrade" by repointing the wrapper at them without re-running the installer.
+- **~~`$PREFIX/bin` wins on PATH, so 2.1.220 is what actually runs.~~ CORRECTED 2026-11-24 — wrong
+  twice over.** `~/.local/bin` is FIRST on PATH, and the self-updater re-points
+  `~/.local/bin/claude` at each raw download in `versions/` — it did so on 2026-11-24 ~07:34 UTC with
+  `autoUpdates:false` in BOTH `~/.claude.json` and `~/.claude/settings.json` (`[Likely]` the updater
+  ignores that key here; a manual `claude update` is not ruled out). **Fixed 2026-11-24:**
+  `env.DISABLE_AUTOUPDATER="1"` added to `~/.claude/settings.json` (backup
+  `settings.json.bak-disable-autoupdater-20261124`). Read in the 2.1.331 code: the updater checks
+  `process.env.DISABLE_AUTOUPDATER` (and `DISABLE_UPDATES`) before the `autoUpdates` key, and settings
+  `env` counts; verified it reaches tool shells live. To upgrade on purpose later, nothing needs
+  re-enabling — the manual procedure below never used the updater. That
+  shadowed the wrapper with an unpatched 2.1.331 whose interpreter `/lib/ld-linux-aarch64.so.1`
+  doesn't exist on Android → `claude` dies with "No such file or directory". Runs now: **2.1.331**.
+- **Upgrade procedure (done and verified live 2026-11-24, 2.1.330 → 2.1.331):**
+  1. Verify the updater's file against the signed manifest (same as the installer):
+     `downloads.claude.ai/claude-code-releases/<ver>/manifest.json` + `.sig`, key fingerprint
+     `31DDDE24…1A7ECACE`, compare `.platforms["linux-arm64"].checksum` to `sha256sum versions/<ver>`.
+     With the updater disabled nothing lands in `versions/` — download it yourself first:
+     `curl -fL https://downloads.claude.ai/claude-code-releases/<ver>/linux-arm64/claude -o <scratch>/claude-<ver>`
+     (installer's own URL) and checksum THAT file. Latest version: `curl -fsS .../claude-code-releases/latest` (returned `2.1.331`, probed 2026-11-24).
+  2. Copy it OUTSIDE `versions/` (updater-managed, it prunes) to
+     `~/.local/share/claude-termux/versions/<ver>`, then
+     `env -u LD_PRELOAD -u LD_LIBRARY_PATH glibc-runner $PREFIX/glibc/bin/patchelf --set-interpreter $PREFIX/glibc/lib/ld-linux-aarch64.so.1 <copy>`.
+     The installer's DNS perl patch is **not needed** — 2.1.330 and 2.1.331 both run unpatched for DNS
+     (the wrapper's fd 3/4 opens are harmless).
+  3. Test with a COPY of the wrapper whose `exec` line points at the new binary: `--version`, then a
+     live `claude -p --model claude-haiku-5-5 --allowedTools Bash -- '<cmd writing a probe file>'`
+     with `CLAUDECODE` etc. unset. Read the probe file yourself; `grep -c termux-syscall-shim
+     /proc/$$/maps` > 0 proves the shim reached the tool shell.
+  4. Back up `$PREFIX/bin/claude`, edit only its `exec` line, and `rm ~/.local/bin/claude` (record
+     where it pointed first). Re-run step 3 through plain `claude`.
+  Backups: `$PREFIX/bin/claude.bak-pre-2.1.331-20261124`; rollback binary is
+  `versions/2.1.330-candidate/package/claude` (inside the pruned dir — may not survive).
+  Rollback (safe copy, outside the pruned dir, added 2026-11-24): `cp -p ~/.local/share/claude-termux/claude.wrapper-rollback-2.1.330 $PREFIX/bin/claude`
+  — execs `~/.local/share/claude-termux/versions/2.1.330` (byte-identical to the 2.1.330-candidate binary, verified `cmp` + `--version`).
+  **Do NOT just re-run `~/claude-code-termux/install-claude-code-termux.sh`** (even with
+  `VERSION=<new>`): its wrapper template exports `LD_PRELOAD` unconditionally and puts both the shim
+  and the binary inside `versions/` — it would silently undo the 2026-10-24 wrapper hardening and the
+  2026-11-24 shim relocation. Use the 4 steps above.
+- **Fable 5.2 is gated by account usage credits, not client version** — 2.1.330 already contains the
+  `claude-fable-5-2` id; `/model` answers "Visit https://clau.de/usage-credits … Once they're
+  available, run /model to switch to Fable 5.2." Upgrading does not unlock it.
 
 ### Verified 2026-10-24 (all three, end to end, real tool call in each)
 
