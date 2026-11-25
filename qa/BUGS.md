@@ -4,7 +4,7 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**17** open (open+claimed) of 226 total — 1 P0 · 3 P1 · 13 P2
+**16** open (open+claimed) of 226 total — 1 P0 · 2 P1 · 13 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
@@ -132,7 +132,6 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P0 | fixed | sessions | [An attachment-bearing user turn is dropped from the durable transcript and the PREVIOUS turn is written in its place — the string-only scan at index.js:11299 fa](bugs/e7dcb889-an-attachment-bearing-user-turn-is-dropped-from.md) | sweep/sessions | 6afeb9ee |
 | P0 | fixed | skills | [skill.view's hydrate-then-bump stores the RENDERED SKILL.md as the skill's body, so every view→persist cycle re-appends '## Setup' and '## Support Files' — unbo](bugs/c70f8965-skill-view-s-hydrate-then-bump-stores-the-render.md) | sweep/skills | 598ab4a4 |
 | P1 | open | autonomy | [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | sweep/autonomy | — |
-| P1 | open | autonomy | [Studio re-render delivers the previous render's picture (muxFinal reuses a stale video_silent.mp4)](bugs/542f1f12-studio-re-render-delivers-the-previous-render-s.md) | fix/studio-silentcopy | — |
 | P1 | open | providers | [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | fix/http2-retry | — |
 | P1 | fixed | autonomy | [Agent loop pause leaves cancelled iteration running and lease held](bugs/c66e8c39-agent-loop-pause-leaves-cancelled-iteration-runn.md) | agent/seam-audit-0912-b | b5c5cba75 |
 | P1 | fixed | autonomy | [Ambiguous permission and routine acknowledgements report unproven changes](bugs/95d13aaf-ambiguous-permission-and-routine-acknowledgement.md) | agent/systemic-bugs-0919 | 8eb87b0d3 |
@@ -152,6 +151,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P1 | fixed | autonomy | [Routine delivery receipts are overwritten and only recovered at boot](bugs/e0a49891-routine-delivery-receipts-are-overwritten-and-on.md) | agent/cron-reliability-0921 | 0f881f44afde73e79de13f0117cf0dd9f2771ff9 |
 | P1 | fixed | autonomy | [Routine follow-up checkbox saves an unusable session origin](bugs/962032ba-routine-follow-up-checkbox-saves-an-unusable-ses.md) | agent/seam-audit-0912-b | b5c5cba75 |
 | P1 | fixed | autonomy | [Stale routine recovery drops its fence before failure persistence](bugs/50741e0d-stale-routine-recovery-drops-its-fence-before-fa.md) | agent/cron-reliability-0921 | 0f881f44afde73e79de13f0117cf0dd9f2771ff9 |
+| P1 | fixed | autonomy | [Studio re-render delivers the previous render's picture (muxFinal reuses a stale video_silent.mp4)](bugs/542f1f12-studio-re-render-delivers-the-previous-render-s.md) | fix/studio-silentcopy | 4fc46d970 |
 | P1 | fixed | autonomy | [Windows computer movement resolves to filesystem Move-Item](bugs/758185bc-windows-computer-movement-resolves-to-filesystem.md) | computer-move-proof-0911 | dd85573b9 |
 | P1 | fixed | channels | [A lost-race consent tap stamps "▸ ✅ Allow once" onto the message before resolveConsent is asked, so a DENIED request keeps a permanent "approved" record](bugs/64563ad9-a-lost-race-consent-tap-stamps-allow-once-onto-t.md) | sweep/channels | 96fe108d |
 | P1 | fixed | channels | [`channel.targets` derives "reachable now" from the adapter handle's existence, so an errored (or still-connecting) channel is reported connected while telegramS](bugs/a199ee3c-channel-targets-derives-reachable-now-from-the-a.md) | sweep/channels | 96fe108d |
@@ -354,7 +354,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | Surface | Open |
 | --- | --- |
 | channels | 1 |
-| autonomy | 5 |
+| autonomy | 4 |
 | providers | 4 |
 | safecell | 1 |
 | sessions | 3 |

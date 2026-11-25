@@ -4,10 +4,10 @@ slug: studio-re-render-delivers-the-previous-render-s
 title: Studio re-render delivers the previous render's picture (muxFinal reuses a stale video_silent.mp4)
 surface: autonomy
 severity: P1
-status: open
+status: fixed
 found: 2026-11-25
 lane: fix/studio-silentcopy
-fix:
+fix: 4fc46d970
 origin: audit
 ---
 
@@ -50,6 +50,12 @@ no `silentCopy`, so the default `<dir>/video_silent.mp4` is reused.
 - Same defect class found and fixed first in the memorial engine (`memorial/render.mjs` `addAudio`,
   commit `8942d5d6c`).
 
+## Verdict
+
+Fixed in `4fc46d970`: `generateVideoWithFallback` sets any pre-existing `video_silent.mp4` aside
+before the audio pass and passes `silentCopy` explicitly. Proven by the BEFORE/AFTER replay and
+the regression above. Live only after the sidecar restarts onto that commit.
+
 ## Siblings
 
 - `memorial/render.mjs` `addAudio` — fixed in `8942d5d6c` (removes the stale copy), covered by
@@ -62,7 +68,3 @@ no `silentCopy`, so the default `<dir>/video_silent.mp4` is reused.
   caller exists today (grep 2026-11-25). Coverage gap, written down: `muxFinal` itself still
   reuses an existing silent copy by design (so a `force` re-master does not stack audio), so any
   FUTURE direct caller must pass a fresh `silentCopy`.
-
-## Verdict
-
-_Filled in when the bug leaves the backlog: what was true, and why it is closed._
