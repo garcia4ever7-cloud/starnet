@@ -309,6 +309,32 @@ function withOrientation(jpeg, orientation) {
       A.eq(await Au.resolveMusic({ music: 'none' }, TMP), [], 'music: "none" is a deliberate silent film');
     }
 
+    /* ---------- 9b. classic engine audio: never the old picture, never a silent narration ---------- */
+    {
+      const R = await import(M('render.mjs'));
+      const white = path.join(TMP, 'white.png'), blue = path.join(TMP, 'blue.png');
+      ff(['-f', 'lavfi', '-i', 'color=c=white:s=640x360', '-frames:v', '1', white]);
+      ff(['-f', 'lavfi', '-i', 'color=c=0x2040a0:s=640x360', '-frames:v', '1', blue]);
+      const lumaAt = (file, t) => {
+        const log = path.join(TMP, 'yavg-c.txt');
+        ff(['-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=${log}`, '-f', 'null', '-']);
+        return Number((fs.readFileSync(log, 'utf8').match(/YAVG=([\d.]+)/) || [])[1]);
+      };
+      const classic = (first, extra = {}) => ({ orderId: 'classic-audio', hold: 2, xfade: 0.5, outputRoot: path.join(TMP, 'classic-audio'),
+        music: { file: bed }, photos: [{ file: first, motion: 'still' }, { file: white, motion: 'still' }], ...extra });
+      const c1 = await R.renderOrder(classic(white), { height: 180, log: () => {} });
+      A.ok(lumaAt(c1.path, 0.5) > 200, 'classic: first render shows the white first photo');
+      const c2 = await R.renderOrder(classic(blue), { height: 180, log: () => {} });
+      const y2 = lumaAt(c2.path, 0.5);
+      A.ok(y2 < 120, `classic: after the first photo is swapped to blue, the DELIVERED film shows blue (luma ${y2}; the stale-copy bug delivered the old white, 235)`);
+      const voice = path.join(TMP, 'voice-c.wav');
+      ff(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=4,volume=0.3', '-ac', '1', '-ar', '48000', voice]);
+      const c3 = await R.renderOrder(classic(blue, { orderId: 'classic-voice', outputRoot: path.join(TMP, 'classic-voice'), music: undefined, narration: { file: voice } }), { height: 180, log: () => {} });
+      const streams = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_streams', c3.path]).toString()).streams;
+      A.eq(c3.audio, 'narration', 'classic: narration with no music is mixed, not skipped');
+      A.ok(streams.some(x => x.codec_type === 'audio'), 'classic: and the film really has sound (it used to be delivered silent)');
+    }
+
     /* ---------- 10. the proof is the film, watermarked ---------- */
     {
       const Pf = await import(M('proof.mjs'));

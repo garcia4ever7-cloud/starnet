@@ -344,13 +344,16 @@ export async function assemble(plan, segs, dirs, log, force = false, encode = nu
 
 export async function addAudio(order, silentPath, finalPath, dirs, log) {
   const music = order.music && order.music.file;
-  if (!music) {
+  const hasVoice = !!(order.narration && order.narration.file);
+  /* A narrated order with no music used to be delivered SILENT: this returned before the voice
+   * was ever looked at (found 2026-11-24). Silence now needs both to be absent. */
+  if (!music && !hasVoice) {
     log('  no music in order — delivering silent');
     await fsp.copyFile(silentPath, finalPath);
     return { audio: 'none' };
   }
-  const bed = path.isAbsolute(music) ? music : path.join(dirs.base, music);
-  if (!fs.existsSync(bed)) throw new Error(`music file not found: ${bed}`);
+  const bed = music ? (path.isAbsolute(music) ? music : path.join(dirs.base, music)) : null;
+  if (bed && !fs.existsSync(bed)) throw new Error(`music file not found: ${bed}`);
 
   /* Reuse the station's own finisher — specifically muxFinal, NOT audioFinish.
    *
@@ -372,14 +375,19 @@ export async function addAudio(order, silentPath, finalPath, dirs, log) {
     : null;
   if (voice && !fs.existsSync(voice)) throw new Error(`narration file not found: ${voice}`);
 
-  const res = af.muxFinal(finalPath, bed, voice, {
-    silentCopy: path.join(dirs.work, 'video_silent.mp4'),
-  });
+  /* muxFinal takes its PICTURE from silentCopy whenever that file already exists. Left from an
+   * earlier render, it put the music under the OLD picture: an order corrected and re-rendered
+   * was delivered uncorrected, and nothing failed, because length and size were unchanged.
+   * Measured 2026-11-24: first photo swapped white → blue, the new join's luma 72, the delivered
+   * film's 235. Removing it first makes muxFinal copy the join we just built. */
+  const silentCopy = path.join(dirs.work, 'video_silent.mp4');
+  await fsp.rm(silentCopy, { force: true });
+  const res = af.muxFinal(finalPath, bed, voice, { silentCopy });
   if (!res || !res.ok) {
     throw new Error(`audio mux failed: ${(res && res.reason) || 'unknown'}`);
   }
-  log(`  audio: ${voice ? 'narration ducked over bed' : 'bed'} + loudnorm, AAC 192k`);
-  return { audio: voice ? 'bed+narration' : 'bed' };
+  log(`  audio: ${voice && bed ? 'narration ducked over bed' : voice ? 'narration' : 'bed'} + loudnorm, AAC 192k`);
+  return { audio: voice && bed ? 'bed+narration' : voice ? 'narration' : 'bed' };
 }
 
 /* ---------------------------------------------------------------- entry point */
