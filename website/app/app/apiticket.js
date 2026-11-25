@@ -13,7 +13,12 @@
   'use strict';
   const DOMAIN = 'starnet-ticket-v1';
   const KINDS = { file: { method: 'GET', ttl: 5 * 60 * 1000 }, studio: { method: 'GET', ttl: 5 * 60 * 1000 }, run: { method: 'GET', ttl: 10 * 60 * 1000 },
-    sse: { method: 'GET', ttl: 2 * 60 * 1000 }, save: { method: 'POST', ttl: 2 * 60 * 1000 } };
+    sse: { method: 'GET', ttl: 2 * 60 * 1000 }, save: { method: 'POST', ttl: 2 * 60 * 1000 },
+    /* Central Outbox retrieval (2026-11-24). The server has verified 'artifact' tickets since the Outbox shipped
+       (sidecar/apitickets.js, scopeArtifact), but this file never minted one: sign() returned /api/artifact URLs
+       bare, a link/<img>/<video> carries no X-StarNet-Token header, and every "open the original" link and image
+       preview in the Outbox was refused 403. Same 5-minute cap as 'file'. */
+    artifact: { method: 'GET', ttl: 5 * 60 * 1000 } };
 
   // ---- SHA-256 / HMAC (FIPS 180-4 / RFC 2104), bytes in, bytes out ----
   const K = new Uint32Array([
@@ -92,6 +97,7 @@
   const scopeFile = (agent, relPath) => 'file\n' + String(agent || 'agent') + '\n' + String(relPath || '');
   const scopeStudio = (projectId, fileName) => 'studio\n' + String(projectId || '') + '\n' + String(fileName || '');
   const scopeRun = (agent, runId) => 'run\n' + String(agent || '') + '\n' + String(runId || '');
+  const scopeArtifact = (agent, id) => 'artifact\n' + String(agent || '') + '\n' + String(id || '');
   const SCOPE_SSE = 'sse\n/api/channels/events', SCOPE_SAVE = 'save\n/api/save';
   function mintWith(key, kind, scope, now, nonce) {
     const k = KINDS[kind];
@@ -118,6 +124,11 @@
     const agent = agentId || 'agent', p = String(relPath || '');
     const t = mint('file', scopeFile(agent, p));
     return base() + '/api/deliverable-preview?agent=' + encodeURIComponent(agent) + '&path=' + encodeURIComponent(p) + (t ? '&ticket=' + encodeURIComponent(t) : '');
+  }
+  function artifactUrl(agentId, id) {
+    const agent = agentId || 'agent', aid = String(id || '');
+    const t = mint('artifact', scopeArtifact(agent, aid));
+    return base() + '/api/artifact?id=' + encodeURIComponent(aid) + '&agent=' + encodeURIComponent(agent) + (t ? '&ticket=' + encodeURIComponent(t) : '');
   }
   function studioUrl(projectId, fileName) {
     const proj = String(projectId || ''), file = String(fileName || '');
@@ -151,6 +162,7 @@
     u.searchParams.delete('token');
     if (u.pathname === '/api/file') return fileUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('path') || '');
     if (u.pathname === '/api/studio-file') return studioUrl(u.searchParams.get('project') || '', u.searchParams.get('file') || '');
+    if (u.pathname === '/api/artifact') return artifactUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('id') || '');
     if (u.pathname === '/api/deliverable-preview') return deliverablePreviewUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('path') || '');
     const m = /^\/workshop-run\/([^/]+)\/([^/]+)\/(.+)$/.exec(u.pathname);
     if (m && m[1] !== '~t') {
@@ -161,8 +173,8 @@
     return base() + u.pathname + u.search;
   }
 
-  const api = { fileUrl, studioUrl, runUrl, deliverablePreviewUrl, sseUrl, saveBeaconUrl, sign, mint,
-    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeStudio, scopeRun, SCOPE_SSE, SCOPE_SAVE, KINDS } };
+  const api = { fileUrl, studioUrl, runUrl, deliverablePreviewUrl, artifactUrl, sseUrl, saveBeaconUrl, sign, mint,
+    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeStudio, scopeRun, scopeArtifact, SCOPE_SSE, SCOPE_SAVE, KINDS } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.ApiTicket = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

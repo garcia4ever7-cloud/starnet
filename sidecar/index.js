@@ -22745,7 +22745,16 @@ async function serveArtifact(req, res) {
   if (!id || id.length > 300 || !/^[A-Za-z0-9_.:@-]+$/.test(id)) return deny(403, 'forbidden');
   if (!/^[A-Za-z0-9_.-]{1,64}$/.test(viewer)) return deny(403, 'forbidden');
 
+  /* VIDEO IS STREAMED (2026-11-24). A <video> element plays and seeks with HTTP Range requests; the buffered
+     path below answers every one of them by reading and hashing the whole file into memory, and it has no
+     Range at all. So a video row — and any file over the whole-file ceiling (a 3–7 minute memorial film is
+     60–120 MB) — goes through openFor(): same access floor, sha256 re-checked before sending. Its one weaker
+     guarantee (an edit made DURING a stream is not caught) is spelled out on openFor in deliverable-manifest.js.
+     Every other file, and every refusal, is answered below exactly as before. */
+  const pre = deliverableManifest.get(viewer, id);
+  if (pre && /^video\//.test(String(pre.mime || ''))) return serveArtifactStream(req, res, viewer, id, deny);
   const got = deliverableManifest.readFor(viewer, id);
+  if (!got.ok && /EFBIG/.test(String(got.error || ''))) return serveArtifactStream(req, res, viewer, id, deny);
   if (!got.ok) {
     const why = String(got.error || '');
     // An unpublished id and a nonexistent id are the SAME answer on purpose — a 404-vs-403 difference would
@@ -22785,6 +22794,64 @@ async function serveArtifact(req, res) {
   res.writeHead(200, headers);
   if (req.method === 'HEAD') return res.end();
   return res.end(got.buf);
+}
+
+/* serveArtifactStream — /api/artifact for a file too large to read whole. Same headers and the same
+   active-content rule as the buffered path, plus HTTP Range so a video can be played and SEEKED without the
+   phone holding 100 MB per request. One `bytes=a-b` range is honoured; anything else gets the whole file. */
+async function serveArtifactStream(req, res, viewer, id, deny) {
+  const got = await deliverableManifest.openFor(viewer, id);
+  if (!got.ok) {
+    const why = String(got.error || '');
+    if (/no deliverable/.test(why)) return deny(404, 'not found');
+    if (/checksum mismatch/.test(why)) return deny(409, 'artifact changed since registration');
+    if (/missing|unreadable/.test(why)) return deny(410, 'artifact no longer available');
+    return deny(403, 'forbidden');
+  }
+  const row = got.row, size = got.size;
+  const closeFd = () => { try { fs.closeSync(got.fd); } catch (_) {} };
+  const active = isActiveDeliverable(String(row.filename || ''));
+  let start = 0, end = size - 1, status = 200;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+  if (m && size > 0 && !(m[1] === '' && m[2] === '')) {
+    if (m[1] === '') { start = Math.max(0, size - Number(m[2])); }
+    else { start = Number(m[1]); if (m[2] !== '') end = Math.min(size - 1, Number(m[2])); }
+    if (!(start <= end && start < size)) {
+      closeFd();
+      res.writeHead(416, { 'Content-Range': 'bytes */' + size, 'Cache-Control': 'no-store' });
+      return res.end();
+    }
+    status = 206;
+  }
+  const headers = {
+    'Content-Type': active ? 'application/octet-stream' : (row.mime || 'application/octet-stream'),
+    'Content-Length': String(end - start + 1),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Disposition': (active ? 'attachment' : 'inline')
+      + '; filename="' + String(row.filename || 'artifact').replace(/[^\w.-]/g, '_') + '"',
+    'X-Artifact-Sha256': String(row.sha256 || ''),
+    'X-Artifact-Version': String(row.version || 1)
+  };
+  if (status === 206) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
+  if (active) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'";
+  let stream = null;
+  try {
+    res.writeHead(status, headers);
+    if (req.method === 'HEAD' || size === 0) { closeFd(); return res.end(); }
+    /* From here the STREAM owns the fd (autoClose): it closes it on end, on error and on destroy. Nothing
+       below may close it again — by then the number can belong to another request's file or socket
+       (independent review, 2026-11-24: the first version closed it a second time in the error handler). */
+    stream = fs.createReadStream(null, { fd: got.fd, start: start, end: end, autoClose: true });
+  } catch (e) {
+    if (!stream) closeFd();
+    try { res.destroy(); } catch (_) {}
+    return;
+  }
+  stream.on('error', () => { try { res.destroy(); } catch (_) {} });
+  res.on('close', () => { if (!stream.destroyed) stream.destroy(); });
+  stream.pipe(res);
 }
 
 /* GET /api/outbox — the Commander-facing central Outbox feed. Metadata only (never bytes): each row carries

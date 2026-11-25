@@ -49,10 +49,23 @@ const { isScratchHelperPath } = require('./deliverable-files.js');
 
 const MANIFEST_FILE = 'manifest.jsonl';
 const MAX_READ_BYTES = 64 * 1024 * 1024;   // a print master is tens of MB; refuse anything absurd
+/* LARGE FILES ARE STREAMED, NEVER LOADED (2026-11-24). A finished memorial film runs 3–7 minutes, about
+   60–120 MB, and the 64 MB whole-file ceiling above refused every one of them: the 68.4 MB four-minute film
+   could neither be listed nor played. Files between MAX_READ_BYTES and MAX_STREAM_BYTES are hashed in
+   chunks at registration and served through openFor() as a stream. Every floor still applies — realpath
+   containment, the leaf-symlink refusal, O_NOFOLLOW, regular-file and size checks on the open fd, and the
+   sha256 comparison against the registered digest. readFor() is unchanged: it still refuses anything over
+   MAX_READ_BYTES, so no consumer that expects a buffer can be handed a 100 MB one. */
+const MAX_STREAM_BYTES = 2 * 1024 * 1024 * 1024;
+const HASH_CHUNK = 1024 * 1024;
+const HEAD_BYTES = 64 * 1024;
 const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.pdf': 'application/pdf', '.svg': 'image/svg+xml',
-  '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.csv': 'text/csv'
+  '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.csv': 'text/csv',
+  /* 2026-11-24: an .mp4 was recorded as application/octet-stream, so /api/artifact served a finished film
+     with a type no browser will play inline — it downloaded instead. TYPE_FOR_MIME already knew mp4. */
+  '.mp4': 'video/mp4', '.m4a': 'audio/mp4'
 };
 
 function extOf(p) {
@@ -206,6 +219,37 @@ function makeDeliverableManifest(deps) {
   const fs = deps.fs, P = deps.path, crypto = deps.crypto;
   const root = deps.root, workspaceRootOf = deps.workspaceRootOf, now = deps.now;
   const maxBytes = Number(deps.maxBytes) > 0 ? Number(deps.maxBytes) : MAX_READ_BYTES;
+  const maxStreamBytes = Number(deps.maxStreamBytes) > 0 ? Number(deps.maxStreamBytes) : MAX_STREAM_BYTES;
+
+  /* Open with O_NOFOLLOW and check the OPEN fd (regular file, within the stream ceiling) — the same rule as
+     readNoFollow, for a file that will be read in pieces rather than at once. Returns { fd, size, st }. */
+  function openNoFollow(abs) {
+    const C = (fs.constants || {});
+    const flags = (typeof C.O_NOFOLLOW === 'number') ? (C.O_RDONLY | C.O_NOFOLLOW) : 'r';
+    const fd = fs.openSync(abs, flags);
+    try {
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) { const e = new Error('not a regular file'); e.code = 'ENOTREGULAR'; throw e; }
+      if (Number(st.size) > maxStreamBytes) { const e = new Error('file exceeds manifest size ceiling'); e.code = 'EFBIG'; throw e; }
+      return { fd, size: Number(st.size), st };
+    } catch (e) { try { fs.closeSync(fd); } catch (_) {} throw e; }
+  }
+  /* sha256 of an open fd, read in fixed chunks from position 0 — memory stays at one chunk whatever the
+     size. Also returns the first HEAD_BYTES, which is all the type and image-header sniffers need. */
+  function hashFd(fd, size) {
+    const h = crypto.createHash('sha256');
+    const chunk = Buffer.allocUnsafe(Math.min(HASH_CHUNK, Math.max(1, size)));
+    let pos = 0, head = Buffer.alloc(0);
+    while (pos < size) {
+      const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, size - pos), pos);
+      if (n <= 0) break;
+      if (head.length < HEAD_BYTES) head = Buffer.concat([head, chunk.subarray(0, Math.min(n, HEAD_BYTES - head.length))]);
+      h.update(chunk.subarray(0, n));
+      pos += n;
+    }
+    if (pos !== size) { const e = new Error('short read'); e.code = 'ESHORT'; throw e; }
+    return { digest: h.digest('hex'), head };
+  }
   const wired = !!(fs && P && crypto && root && typeof workspaceRootOf === 'function' && typeof now === 'function');
 
   const manifestPath = () => P.join(root, MANIFEST_FILE);
@@ -340,19 +384,26 @@ function makeDeliverableManifest(deps) {
       if (isScratchHelperPath(String(rel))) { invalid.push({ path: String(rel), error: 'scratch helper, not a deliverable' }); continue; }
       const r = resolveOwned(ownerAgentId, rel);
       if (!r.ok) { invalid.push({ path: String(rel), error: r.error }); continue; }
-      let buf = null, size = 0;
+      let buf = null, size = 0, digest = '';
       try {
         const st = fs.statSync(r.abs);
         if (!st.isFile()) { invalid.push({ path: String(rel), error: 'not a regular file' }); continue; }
         size = st.size;
-        if (size > maxBytes) { invalid.push({ path: String(rel), error: 'file exceeds manifest size ceiling' }); continue; }
-        buf = readNoFollow(r.abs);                     // readability is proven by actually reading it
+        if (size > maxStreamBytes) { invalid.push({ path: String(rel), error: 'file exceeds manifest size ceiling' }); continue; }
+        if (size > maxBytes) {
+          /* Large: readability is still proven by actually reading every byte, in chunks. */
+          const o = openNoFollow(r.abs);
+          try { const hd = hashFd(o.fd, o.size); digest = hd.digest; buf = hd.head; size = o.size; }
+          finally { try { fs.closeSync(o.fd); } catch (_) {} }
+        } else {
+          buf = readNoFollow(r.abs);                   // readability is proven by actually reading it
+          digest = sha256(buf);
+        }
       } catch (e) {
         invalid.push({ path: String(rel), error: 'unreadable: ' + ((e && e.code) || (e && e.message) || e) });
         continue;
       }
       const meta = imageMeta(buf);
-      const digest = sha256(buf);
       const mime = mimeOf(rel);
       const detected = detectType(buf);
       const artifactId = ownerAgentId + ':' + projectId + ':' + String(rel).replace(/[\\/]/g, '_');
@@ -638,6 +689,89 @@ function makeDeliverableManifest(deps) {
     return { ok: true, row: row, buf: v.buf };
   }
 
+  /* hashFdAsync — the same chunked sha256 as hashFd, but each chunk is read asynchronously, so the event
+     loop runs between chunks. Used on the REQUEST path: an independent review (2026-11-24) pointed out that
+     hashing a 100 MB film synchronously inside a request handler freezes the whole sidecar — every SSE
+     stream and agent run — for seconds. */
+  function hashFdAsync(fd, size) {
+    return new Promise((resolve, reject) => {
+      const h = crypto.createHash('sha256');
+      const chunk = Buffer.allocUnsafe(Math.min(HASH_CHUNK, Math.max(1, size)));
+      let pos = 0;
+      const step = () => {
+        if (pos >= size) return resolve(h.digest('hex'));
+        fs.read(fd, chunk, 0, Math.min(chunk.length, size - pos), pos, (err, n) => {
+          if (err) return reject(err);
+          if (n <= 0) { const e = new Error('short read'); e.code = 'ESHORT'; return reject(e); }
+          h.update(chunk.subarray(0, n)); pos += n; step();
+        });
+      };
+      step();
+    });
+  }
+
+  /* openFor(agentId, id) -> Promise<{ ok, row, fd, size } | { ok:false, error }>
+     THE STREAMING DOOR, for a file too large for readFor() and for video (2026-11-24). The access floor is
+     readFor's: the viewer-scoped get(), resolveOwned() (absolute/'..'/NUL refused, leaf symlink refused,
+     realpath containment on both ends), O_NOFOLLOW, regular-file and ceiling checks on the open fd, and the
+     bytes are re-hashed against the registered sha256 before anything is sent, so a moved, swapped or edited
+     original is refused. The CALLER owns the returned fd and must close it (a read stream with autoClose does).
+
+     ONE GUARANTEE IS WEAKER THAN readFor's, and it is stated rather than hidden: readFor sends exactly the
+     buffer it hashed; a stream re-reads the file after hashing it, so an in-place edit made DURING playback is
+     not detected. Mitigated, not eliminated: the hash is re-proven at every request, and the proof cache below
+     keys on ctime as well as mtime.
+
+     PROOF CACHE: a video player fetches one film as many range requests, and re-hashing 100 MB for each would
+     stall it. A proof is reused for VERIFIED_TTL_MS only while id + inode + size + mtime + ctime are unchanged.
+     ctime is the part a user cannot set (the review showed that mtime alone can be restored with `touch -r`
+     after an in-place, same-size edit, which slipped past the first version of this cache).
+     ctime ALONE IS NOT ENOUGH EITHER, measured 2026-11-24: the kernel stamps file times from a COARSE clock
+     (one tick is several ms), so an edit landing in the same tick as the file's previous change gets an
+     identical ctime and matched the cached proof. So a proof is cached only when the file's ctime is at least
+     CACHE_SETTLE_MS older than the moment of the proof. Any edit after that proof then lands in a later tick,
+     gets a newer ctime, and misses the cache. A file changed within the last second is simply re-hashed. */
+  const verifiedCache = new Map();
+  const VERIFIED_TTL_MS = 10 * 60 * 1000;
+  const CACHE_SETTLE_MS = 1000;
+  async function openFor(agentId, id) {
+    if (!wired) return { ok: false, error: 'deliverable manifest not wired' };
+    const row = get(agentId, id);
+    if (!row) return { ok: false, error: 'no deliverable "' + String(id) + '" is published to ' + safeId(agentId, '?') };
+    const r = resolveOwned(row.owner, row.path);
+    if (!r.ok) return { ok: false, error: r.error, row: row };
+    let o;
+    try { o = openNoFollow(r.abs); }
+    catch (e) { return { ok: false, error: 'missing or unreadable: ' + ((e && e.code) || (e && e.message) || e), row: row }; }
+    const key = [row.id, o.st.ino, o.size, Number(o.st.mtimeMs), Number(o.st.ctimeMs)].join('|');
+    const seen = verifiedCache.get(key);
+    if (!(seen && now() - seen < VERIFIED_TTL_MS)) {
+      let digest;
+      try { digest = await hashFdAsync(o.fd, o.size); }
+      catch (e) { try { fs.closeSync(o.fd); } catch (_) {} return { ok: false, error: 'missing or unreadable: ' + ((e && e.code) || e), row: row }; }
+      if (row.sha256 && digest !== row.sha256) {
+        try { fs.closeSync(o.fd); } catch (_) {}
+        return { ok: false, error: 'checksum mismatch — the file changed after it was registered', row: row };
+      }
+      /* Real wall time on purpose: ctime is stamped by the kernel's clock, not by the injected `now`. */
+      if (Number(o.st.ctimeMs) < Date.now() - CACHE_SETTLE_MS) {
+        if (verifiedCache.size > 256) verifiedCache.clear();
+        verifiedCache.set(key, now());
+      }
+    }
+    return { ok: true, row: row, fd: o.fd, size: o.size };
+  }
+
+  /* verifyFor(agentId, id) -> Promise<{ ok, row, bytes } | { ok:false, error }> — openFor's full proof without
+     handing anyone an fd. For a consumer that needs to know a large file is present and unchanged but will
+     never read its bytes (an agent's outbox_read on a film). */
+  async function verifyFor(agentId, id) {
+    const o = await openFor(agentId, id);
+    if (!o.ok) return o;
+    try { fs.closeSync(o.fd); } catch (_) {}
+    return { ok: true, row: o.row, bytes: o.size };
+  }
+
   /* resolvedPathFor(agentId, id) -> { ok, abs, row } | { ok:false, error }
      THE VERIFIED PATH, WITHOUT READING THE BYTES (2026-11-11). readFor() is the byte-returning door and it
      loads the whole file — correct for a text deliverable an agent will quote, wasteful and pointless for a
@@ -674,9 +808,9 @@ function makeDeliverableManifest(deps) {
     catch (e) { failNote('deliverableManifest.absolutePathOf', e); return ''; }
   }
 
-  return { register, list, get, readFor, verify, versions, patch, absolutePathOf, resolvedPathFor,
+  return { register, list, get, readFor, openFor, verifyFor, verify, versions, patch, absolutePathOf, resolvedPathFor,
            setVerification, setQc, setApproval, lifecycleOf, legacyNeedingReview, _manifestPath: manifestPath };
 }
 
 module.exports = { makeDeliverableManifest, imageMeta, mimeOf, detectType, lifecycleOf,
-                   MANIFEST_FILE, COMPLETION, VERIFICATION, QC, APPROVAL, LIFECYCLE };
+                   MANIFEST_FILE, MAX_READ_BYTES, MAX_STREAM_BYTES, COMPLETION, VERIFICATION, QC, APPROVAL, LIFECYCLE };

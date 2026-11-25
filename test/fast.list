@@ -994,6 +994,7 @@ test/deliverable-manifest.test.js
 test/source-hygiene-ratchet.test.js
 test/outbox-studio-bridge.test.js
 test/outbox-route.test.js
+test/outbox-large-artifact.test.js
 test/outbox-tools.test.js
 test/registry-producedfiles.test.js
 test/outbox-ui.test.js

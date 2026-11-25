@@ -13,6 +13,7 @@
  *   node memorial/cli.mjs qc     <order.json>     re-run the quality gate on a finished film
  *   node memorial/cli.mjs proof  <order.json>     watermarked copy for the family's approval
  *   node memorial/cli.mjs tv     <order.json> [--seconds 12] [--start 0]
+ *   node memorial/cli.mjs outbox <order.json> send the film (+ proof, TV clip) to the StarNet Outbox
  *   node memorial/cli.mjs music                   the licensed library
  *   node memorial/cli.mjs status | orders | exceptions
  *   node memorial/cli.mjs raise --id X --kind blocked --what "..." --why "..." [--severity high]
@@ -239,6 +240,43 @@ async function cmdTv() {
   console.log(`${out}\n${still}`);
 }
 
+/* The finished film into the StarNet Outbox. Refuses a film that has not passed the gate: the
+ * Outbox is where the owner decides what goes to a family, so nothing unverified is put there. */
+async function cmdOutbox() {
+  const { order, baseDir } = loadOrder(argv[1]);
+  const film = filmPath(order, baseDir);
+  if (!fs.existsSync(film)) die(`no finished film at ${film} — render it first`);
+  const c = await checkFilm(order, baseDir, film);
+  if (!c.ok) die(`the film does not pass its checks (${c.failed.join(', ')}) — not sent to the Outbox`);
+  const out = dirsFor(order, baseDir).out;
+  const files = [{ file: film }];
+  for (const extra of ['proof.mp4', 'tv.mp4', 'storyboard.jpg']) {
+    const f = path.join(out, `${order.orderId}.${extra}`);
+    if (fs.existsSync(f)) files.push({ file: f });
+  }
+  const warn = c.q.warnings.length ? `, ${c.q.warnings.length} warning(s): ${c.q.warnings.join(', ')}` : '';
+  const summary = `${c.q.checks.filter(x => x.ok).length}/${c.q.checks.length} checks pass${warn}`;
+  const { sendToOutbox } = await import('./outbox.mjs');
+  /* Shared with `agent` only: NIGHT4CHRIST is the Commander, so this is the owner's own Outbox. */
+  const r = await sendToOutbox(files, { orderId: order.orderId, shareWith: ['agent'], qcSummary: summary });
+  for (const row of r.rows) console.log(`  ${row.deduped ? 'already there' : 'added       '}  ${row.filename.padEnd(44)} v${row.version}  ${row.kind}  verification: ${row.verification}`);
+  for (const i of r.invalid) console.log(`  REFUSED  ${i.path}: ${i.error}`);
+  console.log(`\nOutbox folder: ${r.folder}`);
+  /* The film itself refused is a failure, not a footnote. Known cause: a sidecar older than the
+   * 2026-11-24 streaming change caps manifest files at 64 MB (deliverable-manifest.js MAX_READ_BYTES).
+   * Since that change (live 2026-11-25) files up to 2 GB register and stream with Range support.
+   * The proof copy is small and still goes in. */
+  const filmName = path.basename(film);
+  if (r.invalid.some(i => path.basename(i.path) === filmName)) {
+    console.log(`\nTHE FILM ITSELF WAS NOT ADDED (${(fs.statSync(film).size / 1048576).toFixed(1)} MB). This StarNet holds files up to 64 MB — is it running the 2026-11-24 streaming change?`);
+    console.log(fs.existsSync(path.join(out, `${order.orderId}.proof.mp4`))
+      ? 'The watermarked proof was added instead, so it can be watched there.'
+      : `Run  node memorial/cli.mjs proof ${argv[1]}  and send again to put a watchable copy in the Outbox.`);
+    process.exit(1);
+  }
+  console.log('Open StarNet → Outbox. QC and approval are left for you.');
+}
+
 async function cmdMusic() {
   const { library, MUSIC_DIR } = await import('./audio.mjs');
   const lib = library();
@@ -324,14 +362,14 @@ function cmdResolve() {
 
 const TABLE = {
   new: cmdNew, faces: cmdFaces, plan: cmdPlan, render: cmdRender, verify: cmdVerify, qc: cmdQc,
-  proof: cmdProof, tv: cmdTv, music: cmdMusic, status: cmdStatus,
+  proof: cmdProof, tv: cmdTv, outbox: cmdOutbox, music: cmdMusic, status: cmdStatus,
   orders: cmdOrders, exceptions: cmdExceptions, raise: cmdRaise, resolve: cmdResolve,
 };
 
 (async () => {
   const fn = TABLE[cmd];
   if (!fn) {
-    console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(3, 19).map(l => l.replace(/^ \* ?/, '')).join('\n'));
+    console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(3, 20).map(l => l.replace(/^ \* ?/, '')).join('\n'));
     process.exit(cmd ? 2 : 0);
   }
   await fn();

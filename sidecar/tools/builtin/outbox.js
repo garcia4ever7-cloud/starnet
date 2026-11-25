@@ -106,6 +106,21 @@
         let got;
         try { got = manifest.readFor(me, id); }
         catch (e) { return { content: 'Could not read that deliverable: ' + ((e && e.message) || e), summary: 'error' }; }
+        /* A FILE OVER THE WHOLE-FILE CEILING IS NOT MISSING (2026-11-24). Since large files (a 3–7 minute
+           memorial film is 60–120 MB) can be registered and streamed, readFor's refusal of them must not reach
+           an agent as "missing or unreadable" — a reviewer would record a present, checksum-matched film as
+           absent. verifyFor() runs the same floor and the same sha256 proof without loading the bytes. */
+        if (!got.ok && /EFBIG/.test(String(got.error || '')) && typeof manifest.verifyFor === 'function') {
+          let v;
+          try { v = await manifest.verifyFor(me, id); } catch (e) { v = { ok: false, error: (e && e.message) || String(e) }; }
+          if (v.ok) {
+            return { content: JSON.stringify(Object.assign({}, describe(v.row), {
+              note: 'Large binary deliverable (' + v.bytes + ' bytes) — verified present and checksum-matched just now. '
+                + 'Facts only: you have NOT seen or heard its contents, so do not describe them in any verdict.'
+            })), summary: v.row.filename };
+          }
+          got = { ok: false, error: v.error };
+        }
         if (!got.ok) {
           // Say WHY in the agent's own terms, so it neither retries blindly nor invents a path to go around it.
           return { content: 'That deliverable is not available to you: ' + String(got.error || 'unknown reason')

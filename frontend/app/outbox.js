@@ -38,6 +38,17 @@
   // short allowlist rather than "anything image/*", because image/svg+xml is the scriptable image type.
   const PREVIEWABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1 };
   const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+  /* A video is PLAYED in place (2026-11-24). Without this a finished memorial film was only a link, which a
+     phone browser downloads. The server streams video with Range support. Two rules, both from an independent
+     review of the first version:
+       - NOTHING loads until the owner presses Play. The server re-hashes a film before serving it, so a list of
+         films each preloading would hash all of them on every render.
+       - the link is signed AT PLAY TIME and re-signed if playback errors. An artifact ticket lives 5 minutes; a
+         link signed at render time had often expired before Play, and a 3–7 minute film outlives it anyway.
+     Only a row whose bytes the host has proven (verification 'passed') and that is not rejected, failed or
+     missing gets a player — never a player that points at a refusal. */
+  const VIDEO_PREVIEW = { 'video/mp4': 1 };
+  const NOT_PLAYABLE = { REJECTED: 1, FAILED: 1, MISSING: 1 };
 
   // One pill per AXIS. 'off' = neutral/not-yet, 'warn' = needs a human, 'good' = genuinely passed,
   // 'bad' = refused. The lifecycle pill is derived server-side and shown alongside, never instead.
@@ -63,6 +74,31 @@
     // The server builds row.retrieve as /api/artifact?id=…&agent=…; the ticket is appended client-side because
     // a link/tab navigation cannot attach the X-StarNet-Token header (see sidecar/apitickets.js).
     return apiBase() + signed(String(row && row.retrieve || ''));
+  }
+
+  /* Replace the Play button with a <video> whose src is signed NOW. If the ticket lapses mid-film (5 minutes),
+     the element errors on its next range request: re-sign and resume where it was, a few times at most. */
+  function startVideo(btn) {
+    const raw = btn.getAttribute('data-retrieve') || '';
+    if (!raw || typeof document === 'undefined') return;
+    const v = document.createElement('video');
+    v.className = 'obx-preview';
+    v.controls = true; v.preload = 'auto'; v.setAttribute('playsinline', '');
+    let retries = 0;
+    v.addEventListener('error', () => {
+      if (retries >= 3) return;
+      retries++;
+      const at = v.currentTime || 0;
+      v.src = apiBase() + signed(raw);
+      v.addEventListener('loadedmetadata', function resume() {
+        v.removeEventListener('loadedmetadata', resume);
+        try { v.currentTime = at; } catch (_) {}
+        const p = v.play(); if (p && p.catch) p.catch(() => {});
+      });
+    });
+    v.src = apiBase() + signed(raw);
+    btn.parentNode.replaceChild(v, btn);
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
   }
 
   function rowHtml(row) {
@@ -102,6 +138,10 @@
     if (r.approvalDetail) html += '<p class="obx-note">Commander: ' + esc(r.approvalDetail) + '</p>';
 
     if (canPreview) html += '<img class="obx-preview" loading="lazy" alt="' + esc(r.file || 'preview') + '" src="' + esc(href) + '">';
+    else if (VIDEO_PREVIEW[String(r.mime)] && r.verification === 'passed' && !NOT_PLAYABLE[life]) {
+      html += '<div class="obx-player"><button type="button" class="obx-play" data-retrieve="' + esc(String(r.retrieve || ''))
+        + '">▶ Play ' + esc(r.filename || 'video') + '</button></div>';
+    }
 
     // Provenance + the EXACT original location. Displayed, explicitly not an access mechanism.
     html += '<details class="obx-prov"><summary>Provenance &amp; original location</summary>'
@@ -305,6 +345,8 @@
       armed = null;
     }
     body.addEventListener('click', async (ev) => {
+      const play = ev.target && ev.target.closest ? ev.target.closest('.obx-play') : null;
+      if (play) { startVideo(play); return; }
       const el = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
       if (!el) { disarm(); return; }
       const id = el.getAttribute('data-id');

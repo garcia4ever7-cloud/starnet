@@ -25,6 +25,7 @@ node memorial/cli.mjs plan   <order.json>    # storyboard + placement audit, in 
 node memorial/cli.mjs render <order.json>    # renders, verifies, runs the quality gate   [--force]
 node memorial/cli.mjs proof  <order.json>    # 960x540 watermarked copy for the family's approval
 node memorial/cli.mjs tv     <order.json>    # the film on a television in a room (12 s clip + still)
+node memorial/cli.mjs outbox <order.json>    # film + proof + TV clip + storyboard into the StarNet Outbox (NIGHT4CHRIST)
 
 node memorial/cli.mjs qc     <order.json>    # re-run the gate on a finished film
 node memorial/cli.mjs music                  # the licensed music library
@@ -171,6 +172,7 @@ Every choice below was forced by a measurement taken on this device, not by pref
 | `audio.mjs` | Music library, fit-to-length bed, two-pass mastering. |
 | `qc.mjs` | The quality gate. |
 | `proof.mjs` | Face sheet, storyboard, watermarked proof, TV preview. |
+| `outbox.mjs` | Puts a finished film into the StarNet Outbox through the sidecar's own `deliverable-manifest.js` (register + video-verify), with no restart. QC and approval stay with the owner. Films over 64 MB need the 2026-11-24 streaming change in the sidecar to be listed and played. |
 | `fit.mjs` | Classic. Pure. Decides crop vs pad per photo and emits the ffmpeg fragment. |
 | `cards.mjs` | Classic. Title / verse / closing cards as PNGs. |
 | `render.mjs` | Classic pipeline, and the shared machinery (segment cache, assembly) gallery reuses. |
@@ -201,7 +203,7 @@ node memorial/jitter-check.mjs        # renders twice (1x vs 8x) and compares â€
 
 The tests run standalone with no sidecar and no network. All five are registered in
 `test/fast.list` (`memorial-fit` and `memorial-business` since `93b2dd11c`; the other three added
-2026-11-24, uncommitted). The live halves need ffmpeg and print SKIP without it.
+2026-11-24, commit `e5d06d426`). The live halves need ffmpeg and print SKIP without it.
 
 ### A note on the jitter test, because I got it wrong first
 
