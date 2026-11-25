@@ -398,6 +398,11 @@ const Harness = (() => {
     if (p === 'custom' && !getKey(p)) return false;        // a keyless custom endpoint must not manufacture a key row
     if (DESKTOP) return !!(_configuredByProvider[p] || (p === 'openrouter' && _configured));
     if (!!readScoped(LS.key, p)) return true;              // a real key is stored in this browser
+    // THE SIDECAR'S OWN CREDENTIAL COUNTS (mirrors configured() above). A key pasted into ~/.config/starnet/env
+    // (the supported way to key an unattended station) is invisible to localStorage-only reads, which made the
+    // Commander UI claim "no OPENAI key" even while live POST /api/run calls succeeded. Report presence as a
+    // boolean only — never the value (truthful-telemetry law).
+    if (!!_configuredByProvider[p]) return true;
     // DEV seed: the host may hold a server-side runtime key for the seeded provider. It is not a given —
     // a seeded station with no key at all still boots in DEV mode, and ASSUMING the key existed made the
     // settings row render "● KEY SAVED" over nothing (an agent live-verifying a change reads that badge as
@@ -736,7 +741,10 @@ const Harness = (() => {
     const model = getModel(), provider = getProv(), key = getKey(provider), reasoningEffort = getReasoningEffort(provider);
     // Codex authenticates by an OAuth token (server-side); the desktop build keeps the key in the
     // sidecar's env (keychain). Neither needs a key sent from here.
-    if (providerNeedsKey(provider) && !DESKTOP && !DEVMODE && !key) throw new Error('no API key set');
+    // A key stored server-side (~/.config/starnet/env, reported via GET /api/providers →
+    // _configuredByProvider) also counts — the Commander's unattended station keys live there, not in the
+    // browser. Requiring a duplicate localStorage key makes configured providers fail at send time.
+    if (providerNeedsKey(provider) && !DESKTOP && !DEVMODE && !key && !_configuredByProvider[provider]) throw new Error('no API key set');
     if (!model) throw new Error('no model selected');
 
     let res;
