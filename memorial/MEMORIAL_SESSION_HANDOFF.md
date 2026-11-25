@@ -392,7 +392,7 @@ artifact / deliverable / ticket step, so `test:http` was not run; full `test:fas
     the new join's luma 72, the delivered film's 235. `render.mjs` `addAudio` now removes that copy
     first; after the fix the delivered film reads 72. Regression in `memorial-gallery` §9b.
     Gallery already removed it (its narration path) and was not affected.
-    **Sibling in StarNet itself — [Verified, fixed 2026-11-25, uncommitted, NOT LIVE until a restart]:**
+    **Sibling in StarNet itself — [Verified, fixed 2026-11-25 in `4fc46d970`; LIVE since the owner's restart at 16:48:05 PST, sidecar PID 5766 — loaded at boot, code path not yet exercised by a real render]:**
     `sidecar/video-providers.js` `generateVideoWithFallback` called `audioFinish` with no `silentCopy`,
     so a re-render into a studio project folder (`~/outbox/<projectId>/`) muxed the PREVIOUS
     render's picture. Replayed at $0 (local-ffmpeg + mocked fal): before, delivered mean RGB

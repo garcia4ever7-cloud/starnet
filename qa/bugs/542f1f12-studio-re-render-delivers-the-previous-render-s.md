@@ -54,7 +54,7 @@ no `silentCopy`, so the default `<dir>/video_silent.mp4` is reused.
 
 Fixed in `4fc46d970`: `generateVideoWithFallback` sets any pre-existing `video_silent.mp4` aside
 before the audio pass and passes `silentCopy` explicitly. Proven by the BEFORE/AFTER replay and
-the regression above. Live only after the sidecar restarts onto that commit.
+the regression above. Live since 2026-11-24 16:48:05 PST (sidecar PID 5766 booted after the fix was written; file sha256 = commit). Not yet exercised by a real studio render.
 
 ## Siblings
 
