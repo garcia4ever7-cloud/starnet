@@ -257,9 +257,23 @@ async function generateVideoWithFallback(opts) {
     let audio = null;
     if (o.audio !== false) {
       try {
+        /* A NEW video was just renamed onto destPath. muxFinal (audio-finish.js) takes its PICTURE
+           from <dir>/video_silent.mp4 whenever that file already exists, so a silent copy left by an
+           earlier render of this project was muxed in place of the new one: a re-render shipped the
+           previous picture and every check still passed (2026-11-25, replayed: delivered mean RGB
+           [0,0,253] = the old blue clip, not the new render). Any silent copy here now predates this
+           video, so it is SET ASIDE, never deleted — it may be the only surviving copy of a paid clip.
+           If it cannot be moved, the audio pass is skipped: a correct silent video beats a wrong one. */
+        const silentCopy = path.join(path.dirname(destPath), 'video_silent.mp4');
+        if (fs.existsSync(silentCopy)) {
+          const aside = path.join(path.dirname(destPath),
+            'video_silent.superseded-' + new Date().toISOString().replace(/[:.]/g, '-') + '.mp4');
+          fs.renameSync(silentCopy, aside);
+        }
         const { audioFinish } = require('./audio-finish.js');
         audio = await audioFinish({
           videoPath: destPath,
+          silentCopy,
           script: o.script,
           sfxPrompt: o.sfxPrompt,
           voice: o.voice,

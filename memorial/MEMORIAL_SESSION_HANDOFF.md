@@ -392,13 +392,14 @@ artifact / deliverable / ticket step, so `test:http` was not run; full `test:fas
     the new join's luma 72, the delivered film's 235. `render.mjs` `addAudio` now removes that copy
     first; after the fix the delivered film reads 72. Regression in `memorial-gallery` §9b.
     Gallery already removed it (its narration path) and was not affected.
-    **Possible sibling in StarNet itself — [Code inspection], not reproduced, not fixed:**
-    `sidecar/video-providers.js` calls `audioFinish({ videoPath: destPath, … })` with no
-    `silentCopy`, so `muxFinal` defaults to `<dir of destPath>/video_silent.mp4` and reuses it if
-    it exists. If two studio videos are ever written into the same directory, the second could be
-    delivered with the first one's picture. Whether that happens depends on how `destPath` is
-    chosen, which was not traced. It is sidecar code, so a fix needs the owner's yes and a restart.
-    Per the bug protocol it needs a record and a regression in `test/`.
+    **Sibling in StarNet itself — [Verified, fixed 2026-11-25, uncommitted, NOT LIVE until a restart]:**
+    `sidecar/video-providers.js` `generateVideoWithFallback` called `audioFinish` with no `silentCopy`,
+    so a re-render into a studio project folder (`~/outbox/<projectId>/`) muxed the PREVIOUS
+    render's picture. Replayed at $0 (local-ffmpeg + mocked fal): before, delivered mean RGB
+    `[0,0,253]` = the old clip; after, `[125,127,127]` = the new render. The stale copy is now set
+    aside as `video_silent.superseded-<time>.mp4` (never deleted: it may be a paid clip). 4 of 6
+    live studio projects already hold such a copy. Regression: `test/video-providers.test.js`
+    (59 OK; 4 FAIL against the old file). Record: `qa/bugs/542f1f12-*.md` (status open until committed).
 14. **[Verified, fixed after the commit] Classic voice-only orders were delivered silent** (#12's
     code-inspection finding). `addAudio` now mixes narration alone when there is no music;
     regression in `memorial-gallery` §9b.

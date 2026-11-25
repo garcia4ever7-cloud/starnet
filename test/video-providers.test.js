@@ -309,6 +309,50 @@ function klingFetch(opts) {
     A.eq(allowed.provider, 'higgsfield', 'via the previously-gated provider');
   }
 
+  {
+    /* A RE-RENDER must deliver the NEW picture (2026-11-25). muxFinal takes its picture from
+       <dir>/video_silent.mp4 when that file exists; one left by an earlier render of the same
+       project used to be muxed in place of the new video, and every check still passed.
+       $0: local-ffmpeg + fal mocked with a fake key and a locally made bed. */
+    const meanRGB = f => {
+      const b = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-ss', '1', '-i', f, '-frames:v', '1',
+        '-vf', 'scale=8:8', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+      const m = [0, 0, 0]; for (let i = 0; i < b.length; i += 3) { m[0] += b[i]; m[1] += b[i + 1]; m[2] += b[i + 2]; }
+      return m.map(v => v / (b.length / 3));
+    };
+    const bed = path.join(TMP, 'bed.mp3');
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=440:d=6', '-c:a', 'libmp3lame', bed], { stdio: 'ignore' });
+    const falMock = async (url) => {
+      if (/fal\.run/.test(String(url))) return jsonRes(200, { audio: { url: 'mock://bed' } });
+      if (url === 'mock://bed') return binRes(fs.readFileSync(bed));
+      throw new Error('unexpected network: ' + url);
+    };
+    const render = d => VP.generateVideoWithFallback({ prompt: 'a re-render', duration: '3', aspect_ratio: '9:16',
+      providers: ['local-ffmpeg'], destPath: d, env: { FAL_KEY: 'test-not-real' }, fetch: falMock });
+
+    // 1. Re-render over a stale silent copy (solid blue = the previous render's picture).
+    const d = dest('rerender'), dir = path.dirname(d);
+    fs.mkdirSync(dir, { recursive: true });
+    const stale = path.join(dir, 'video_silent.mp4');
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=960x1696:d=3:r=15',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', stale], { stdio: 'ignore' });
+    const staleBytes = fs.readFileSync(stale);
+    const out = await render(d);
+    A.ok(out.ok && out.audio && out.audio.ok, 're-render with a stale silent copy succeeds with sound: ' + JSON.stringify(out.audio && out.audio.reason));
+    const rgb = meanRGB(d);
+    A.ok(rgb[2] - rgb[0] < 60, 'the delivered video carries the NEW picture, not the stale blue one (mean RGB ' + rgb.map(Math.round) + ')');
+    const asides = fs.readdirSync(dir).filter(f => /^video_silent\.superseded-.*\.mp4$/.test(f));
+    A.eq(asides.length, 1, 'the stale silent copy is set aside exactly once, never deleted');
+    A.ok(asides.length === 1 && fs.readFileSync(path.join(dir, asides[0])).equals(staleBytes), 'and the set-aside copy is byte-identical to the previous render');
+    A.ok(!fs.readFileSync(stale).equals(staleBytes), 'video_silent.mp4 now holds the new render');
+
+    // 2. First render in a clean folder: nothing to set aside.
+    const d2 = dest('firstrender');
+    const out2 = await render(d2);
+    A.ok(out2.ok && out2.audio && out2.audio.ok, 'a first render still gets sound');
+    A.eq(fs.readdirSync(path.dirname(d2)).filter(f => /superseded/.test(f)).length, 0, 'a first render sets nothing aside');
+  }
+
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
   A.report('video-providers');
 })();
