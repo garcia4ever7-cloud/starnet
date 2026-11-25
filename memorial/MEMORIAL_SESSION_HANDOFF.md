@@ -1,7 +1,8 @@
 # Memorial engine — session handoff
 
-Last updated 2026-11-25 (after the owner's StarNet restart: live Outbox streaming verified, §3d;
-commits `8942d5d6c` + the Outbox commit, §1). Previous update: 2026-11-24, session ea68579f.
+Last updated 2026-11-25, end of session (all commits pushed to the station branch, §1; studio fix
+live; orphan test sidecars cleaned up; test-runner fix tried and reverted, §1). Previous update:
+2026-11-24, session ea68579f.
 **Read this before touching `memorial/`.** Permanent rules: root `CLAUDE.md`. Architecture, order
 spec and operator workflow: `memorial/README.md`. This file holds what changes between sessions.
 Labels: **[Verified]** = seen in a live run this session (real output numbers);
@@ -32,19 +33,35 @@ Labels: **[Verified]** = seen in a live run this session (real output numbers);
 
 ## 1. Where things stand
 
-- **Three commits on `feat/harness-backend`, none pushed:**
-  1. `e5d06d426` (2026-11-24): the 46 memorial engine files + 3 lines each in `test/fast.list`, `.gitignore`.
-  2. `8942d5d6c` (2026-11-25, owner's "Both, in two commits"): §4 #13–#14 and the text-layer speedup —
-     `memorial/gallery.mjs`, `memorial/render.mjs`, `test/memorial-gallery.test.js`.
-  3. The Outbox streaming commit (2026-11-25, same approval, made after the live check in §3d): the
-     StarNet Outbox change (§3b–§3c), `memorial/cli.mjs` + `memorial/outbox.mjs`, `memorial/README.md`,
-     this file. Its hash is in `git log`; it was made after this text was written.
-  **Left uncommitted on purpose:** `website/app/app/harness.js` (pure mirror catch-up of the unrelated
-  commit `8e18e7441`, brought in by `npm run sync:website`; owner decides, §6) and every non-memorial
-  file the tree already had (`CLAUDE.md`, `STATION_FIELD_NOTES.md`, `sidecar/cron-orchestrator.js`, …).
-  Commits, pushes and StarNet restarts each need their own yes (standing rule).
-- **StarNet was restarted by the owner on 2026-11-25** (launcher PID 13264, sidecar PID 13296) and
-  is running the streaming code — verified, §3d.
+- **Commits on `feat/harness-backend`, pushed through `ac84b52a2`** to `origin/feat/harness-backend-station-20261124`
+  (the newest, `3a0e74936`, is local only — see below). Verified by `git ls-remote` + per-file blob compare.
+  | Commit | What |
+  |---|---|
+  | `e5d06d426` | gallery engine (46 memorial files) |
+  | `8942d5d6c` | classic stale-picture + voice-only fixes, text-layer speedup |
+  | `9e4db1d88` | StarNet Outbox streaming/Play + `memorial/cli.mjs outbox` + `memorial/outbox.mjs` |
+  | `4fc46d970` | studio sibling fix: `sidecar/video-providers.js` sets a stale `video_silent.mp4` aside (§4 #13) |
+  | `2bfa70adc`, `bc6234672` | bug record `542f1f12` marked fixed; "fix is live" docs |
+  | `ac84b52a2` | `website/app/app/harness.js` mirror catch-up of `8e18e7441` |
+  | `3a0e74936` | bug record `2c50b150` (test sidecar orphans) — **committed, NOT pushed** (owner said "don't push") |
+  The GitHub repo is **public**: every push publishes. The local branch tracks `-20261122`, so always push
+  with an explicit `HEAD:refs/heads/feat/harness-backend-station-20261124`. Never push `feat/harness-backend`
+  (diverged: 85 local / 5,382 remote). Uncommitted non-memorial files (`CLAUDE.md`, `STATION_FIELD_NOTES.md`,
+  `sidecar/cron-orchestrator.js`) were in the tree before this work and are not ours.
+- **StarNet** was restarted by the owner twice on 2026-11-25; now launcher **5722**, sidecar **5766**
+  (booted 16:48:05 PST, after the studio fix was written). Health ok, `.spend-pending/` empty.
+- **Two orphan test sidecars (PIDs 10757, 10883) — STOPPED** with the owner's yes. They were left by an
+  interrupted 2026-11-22 `test:http` run, ran 55 h with parent PID 1, held the real `KLING_API_KEY`
+  (fingerprint = station's) and answered a fixture token that is public in the repo. Their folders and 29
+  more leftover test folders in `$PREFIX/tmp` were deleted. Record: `qa/bugs/2c50b150-*.md` (P1, open).
+- **Test-runner fix for `2c50b150` — written, proven, then REVERTED at the owner's request.** It stripped
+  `*_KEY/*_TOKEN/*_SECRET/*_PASSWORD` from step env (`stepEnv` in `scripts/run-test-list.mjs`) and preloaded a
+  guard making a test sidecar exit when its parent dies. Replay: old runner → sidecar kept running with
+  fake keys, ppid 1; new runner → no keys, gone in 8 s. 23-assertion test; fast + 6 HTTP steps green.
+  Restored to HEAD; backups `scripts/run-test-list.mjs.bak-20261125-orphan-guard`,
+  `test/fast.list.bak-20261125-orphan-guard` = HEAD. Do not re-apply without the owner's yes.
+  Also found (pre-existing, not investigated to the end): HTTP tests leave their `$PREFIX/tmp/starnet-*-http-*`
+  folder even on a PASSING run; a manual `rmSync` afterwards removes it fine.
 - **Spend this session: $0 and 0 Higgsfield credits.** All downloads were free (fonts, face
   cascade, music). Earlier the same day: 26 of a 30-credit Higgsfield authorization (closed).
 - The gallery engine is built and renders verified films end to end (§3). Films reach the
@@ -439,19 +456,20 @@ artifact / deliverable / ticket step, so `test:http` was not run; full `test:fas
 
 ## 6. Not done — needs the owner
 
-1. ~~Commit the post-commit fixes~~ DONE (`8942d5d6c` and the Outbox commit, §1). Still open:
-   **push** — nothing is pushed (the remote diverged; see the git-remote memory note before pushing).
-   Also decide on `website/app/app/harness.js` (mirror catch-up of `8e18e7441`, uncommitted).
-2. ~~Restart StarNet~~ DONE by the owner 2026-11-25; streaming verified live (§3d). Still open:
-   **open the Outbox in a browser, reload, press ▶ Play on `gallery-long.mp4`** and watch the films.
-3. **Agent integration** (README "held for Phase D"): a `memorial_render` tool under capId
-   `studio` and a `noAgent` cron tick. Outbox registration is DONE via `cli.mjs outbox`.
-4. **Listen** to the eight tracks and choose the shop's default (`manifest.json` → `default`).
-5. **File the stage-1 bug record** — needs a `--surface` choice (`qa/bugs` has no memorial surface):
+1. **Push `3a0e74936`** (bug record only) when wanted — fast-forward to the station branch.
+2. **Watch the films**: reload StarNet → Outbox → ▶ Play (`gallery-long.mp4` first). Streaming is proven by
+   signed-URL fetches (§3d); no real browser has played one.
+3. **Studio fix, first real exercise**: the next studio re-render (spends Kling/Higgsfield credits).
+4. **Test-runner leak `2c50b150`**: fix was reverted; decide whether to re-apply it (above) or another way.
+5. **Agent integration** (README "held for Phase D"): a `memorial_render` tool under capId `studio` and a
+   `noAgent` cron tick. Outbox registration is DONE via `cli.mjs outbox`.
+6. **Listen** to the eight tracks and choose the shop's default (`manifest.json` → `default`).
+7. **File the stage-1 bug record** — needs a `--surface` choice (`qa/bugs` has no memorial surface):
    `node scripts/qa/bugs.mjs --new --title "Memorial act break never fades to black (actBreak dropped by buildPlan; join cache ignores transitions)" --surface <choose> --severity P2 --lane fix/memorial-actbreak`
-6. **Private photo copies**: keep or delete `~/memorial-prototype-20261124/render-real/` and
-   `~/memorial-research/real/` (renders of the owner's personal photos).
-7. Product decisions: price tiers, revision policy (research found "one round, 48 h" is the
+8. **Private photo copies**: keep or delete `~/memorial-prototype-20261124/render-real/` and
+   `~/memorial-research/real/` (renders of the owner's personal photos — never commit or publish).
+9. **Remote divergence**: reconcile `feat/harness-backend` with the station branch, or keep side branches.
+10. Product decisions: price tiers, revision policy (research found "one round, 48 h" is the
    published norm), whether an unreviewed-faces film may ever ship.
 
 ## 7. Scratch outside the repo
