@@ -1,29 +1,35 @@
-# StarNet handoff — read this first (updated 2026-11-26 04:50 PST)
+# StarNet handoff — read this first (updated 2026-11-26 05:20 PST)
 
-Phone station (Termux). Repo `~/starnet` is PUBLIC. Live data: `~/.local/share/StarNet/workspaces/`.
+Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — do not push until the owner decides. Live data: `~/.local/share/StarNet/workspaces/`.
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
 
-## Current state (checked live 04:29, read-only)
+## Current state (checked live 04:29, re-checked 05:00, read-only)
 - Sidecar 29630 (health ok, app 200), OmniRoute 29422/29443. Started by the Termux:Boot test reboot at 00:33 PST.
 - Cron healthy, not halted. Production ARMED (2026-11-21, unattributed). `.spend-pending/` empty.
 - Routines ON (next run): SCOUT daily 09:00 · Etsy pipeline chain 03:00 (11-27) · HARVEST Tue 10:00 (12-01) ·
   Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
-- Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5577.
+- Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5577 (05:00).
 - **Models (04:42): all 10 agents on `anthropic/claude-fable-5-2`** (was: NIGHT4CHRIST empty, 7× openai gpt-5,
   PUBLISHER gemini-3.5-flash, SCOUT gemini-flash-lite). Backups `agent.{save,roster}.json.bak-20261126-044208-models`;
   undo `node scripts/station-models.mjs revert`. Details and the measured model limits: CLAUDE.md item 1.
+  Re-checked 05:00: Fable on all 10 in save, roster and `GET /api/runtime/agent`.
+- Spend estimate at Fable (CLAUDE.md item 2): ~$5/day as routines stand, ~$7/day if the three pins move [Guessing,
+  ~70% cache hits] — BUT the per-run caps ($0.25; chain $0.50) were set for cheap models and will likely stop Fable runs
+  first (decision 1). The $25/day rail is the outer limit.
 - Git: branch `feat/harness-backend`, pushed to `origin/feat/harness-backend-station-20261124`. Always push explicitly
   to that branch (`git push origin HEAD:refs/heads/feat/harness-backend-station-20261124`); never force; never push
-  `origin/feat/harness-backend` (it diverged, 5,382 remote-only commits).
+  `origin/feat/harness-backend` (it diverged, 5,382 remote-only commits). Remote tip `2acc52622` (05:00, 0/0).
+  The 05:20 docs-fix commit is LOCAL ONLY (owner: repo is public, don't push).
 
-## Done today (2026-11-26)
+## Done today (2026-11-26, PST)
 1. 00:33: Termux:Boot crash recovery tested — reboot brought StarNet up on its own.
 2. Read-only dossier audit (blockers: SCOUT ask-before-scraping, NIGHT4CHRIST NIV reels, status words never set).
-3. 04:17: the owner's 18-part dossier bundle installed for all 10 agents — docs only, both files, rev 5574 → 5575,
+3. Diagnosis of the 03:00 chain failure (below).
+4. 04:17: the owner's 18-part dossier bundle installed for all 10 agents — docs only, both files, rev 5574 → 5575,
    full-roster POST. Backups (workspaces dir, never commit): `agent.save.json.bak-20261126-041644` (1,088,103 B),
    `agent.roster.json.bak-20261126-041644` (150,760 B), `webdesigner/styles.bak-20261126-041644/`.
    Bundle text + dry-run/apply scripts kept privately at `~/.local/share/StarNet/dossier-install-20261126/`.
-4. Style library: `webdesigner/styles/index.md` rewritten (2 styles: soft-watercolor-sunrise active,
+5. Style library: `webdesigner/styles/index.md` rewritten (2 styles: soft-watercolor-sunrise active,
    gothic-blackletter-faith trial). Existing style files untouched.
 6. 04:42: all 10 agents moved to claude-fable-5-2 (rev 5576).
 7. 04:46: three owner-approved fixes (rev 5577): QC_EDITOR context gets the shared Etsy-rules block (copied from
@@ -32,7 +38,11 @@ Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIE
    Backups: `agent.{save,roster}.json.bak-20261126-044623-fixes`, `cron.jobs.json.bak-20261126-044623-harvest-kjv`,
    `webdesigner/styles/{gothic-blackletter-faith,index}.md.bak-20261126-044623`. Verified field by field: only
    `qceditor.docs.context`, `webdesigner.docs.manual`, their roster prompts and the HARVEST prompt changed.
-5. Diagnosis of the 03:00 chain failure (below). Docs refreshed; commits `8557798db`, `95370d285`, `eb9e67100` pushed.
+8. Pushed to `feat/harness-backend-station-20261124` (6 commits): `8557798db` Apify 3-per-run cap and `95370d285`
+   field notes (both committed 11-25 22:02, pushed 04:32), `eb9e67100` dossier install + chain diagnosis,
+   `5ec382504` handoff.md added, `7fe7bd3d1` Fable move, `2acc52622` the 3 fixes (tip).
+9. 05:00 read-only re-check (all PASS) and 05:20 docs correction (CLAUDE.md, field notes, this file, etsy-rules
+   skill, Claude memory, starmem pins) — committed locally, NOT pushed. Backups `*.bak-20261126-docs`.
 
 ## Verify results
 - 04:17 and again 04:24: 10/10 PASS — new identity line in roster prompt and save docs; Etsy/Studio rule blocks fully
@@ -45,17 +55,27 @@ QC_EDITOR (openai gpt-5) hit `provider_stream timeout` ×4 plus every fallback �
 Cron counted the run failed and re-ran the whole chain at 03:20 / 03:28 / 03:32 (gemini rate_limit, OpenRouter
 timeouts). Providers answer normally since. Cause [Likely]: transient provider/network failure, not configuration.
 
-## Open owner decisions
-1. Routine model pins (chain lead gemini-3-flash-preview; SCOUT and HARVEST gemini-flash-lite-latest) — proposed
-   claude-fable-5-2; needs a yes. Top up OpenRouter ($6.32 left) — it carries the fallback chain. Check the
-   Anthropic balance in its console (not readable by API).
-2. ~~Gothic vs wordless master~~ and 3. ~~QC_EDITOR Etsy block~~ — fixed 04:46 (see Done #7).
-4. `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
-5. 8 of 10 agents on approvalMode `full` ("AUTHORITY — FULL POWER" block).
-6. ~~HARVEST routine "KJV/NIV"~~ — fixed 04:46.
-7. Publish "Verses for Hard Days" by hand; 137 Outbox items pending; never publish the NIV set-of-3.
-8. Money: ledger lifetime $139.67 vs $60 ceiling. Security: jail `shell.exec`, 45 gitleaks findings, delete the
-   Kling-key settings backup in `~/.claude/`.
+## Open owner decisions (05:20)
+1. **Per-run spend caps (NEW).** `maxCostUsd`: SCOUT, HARVEST and the three 11-30 routines $0.25; chain $0.50 — set
+   for cheap models. On Fable (~100× gemini-flash-lite) the 11-30 routines likely cost ~$0.20–0.70 and stop on the cap
+   [Likely]; the chain's Fable workers may hit $0.50 [Guessing; worker spend vs chain cap not checked]. Raise caps or
+   keep cheaper models.
+2. **Routine model pins:** chain 03:00 lead gemini-3-flash-preview; SCOUT 09:00 and HARVEST Tue 10:00
+   gemini-flash-lite-latest. Proposed claude-fable-5-2 — needs a yes (and decision 1 first).
+3. **OpenRouter $6.32 of $45** (re-read 05:00) — it carries the fallback chain (haiku-5.5, gemini-3-flash-preview,
+   gpt-5-mini). Top up or not.
+4. **Anthropic balance:** all 10 agents now depend on it; not readable by API — check the console.
+5. **approvalMode `full` on 8 of 10** ("AUTHORITY — FULL POWER" block); only PRODUCER and COPYWRITER are `ask`.
+6. **Garbled owner-profile lines** (Commander dossier, `doc.dossier`, in every agent's prompt): garbled `cd_14`
+   ("…allows when I so . so do it"), `cd_28` ("…what to work on nextI…"), `cd_12` ("i want to talk to commander");
+   NIV lines `cd_15`, `cd_20`, `cd_21` contradict KJV-only; `cd_4` "ask me before making changes" fights unattended work.
+7. **Repo is public** (GitHub API 05:00) — make it private? 45 gitleaks findings to review either way. Nothing is
+   pushed until this is decided.
+8. **Kling key backup** `~/.claude/settings.json.bak-20261125-pre-kling-removal` (mode 600) still holds the key — delete.
+9. `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
+10. Publish "Verses for Hard Days" by hand; 137 Outbox items pending; never publish the NIV set-of-3.
+11. Money: ledger lifetime $139.67 vs $60 ceiling. Security: jail `shell.exec`.
+12. Production ARMED since 2026-11-21, unattributed — confirm that is intended.
 
 ## Traps
 - On the OpenAI wire (chat/completions) gpt-6.x cannot call tools and gpt-5.4/5.5 only with reasoning off; do not
@@ -70,9 +90,11 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
 - `scripts/git-push-safe.mjs` misreports direction; trust `git rev-list --left-right --count`.
 
 ## Exact next steps
+0. Decide the caps (decision 1) before 11-27 03:00 if the chain should finish on Fable workers.
 1. Reload the StarNet tab. Confirm the Commander shows claude-fable-5-2 (no "no model selected").
 2. After 09:20: read SCOUT's 09:00 run in `runs.jsonl` (first run on the new dossier + live Apify cap).
 3. After 11-27 03:30: read the chain run (first on Fable workers); QC_EDITOR should answer "VERDICT: PASS/CHANGES";
-   check `usd` per run against the estimate.
-4. 11-30 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable) — check they succeed.
+   check `usd` per run against the $0.50 cap — a budget stop means decision 1.
+4. 11-30 (Mon) 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable), $0.25 cap each — check
+   for budget stops. 12-01 (Tue) 10:00: HARVEST (gemini-flash-lite pin).
 5. Work the owner decisions above only with a yes.

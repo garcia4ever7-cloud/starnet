@@ -2437,12 +2437,15 @@ Replay of the real 8-call sequence: old code 8 reached Apify, new code 3. `test/
 still has the old modules until it is restarted.**~~ [Stale as of 2026-11-26: committed `8557798db` (not pushed) and
 LIVE since the 22:18 PST restart — see the next section.]
 
-## 2026-11-26 — evening: Apify per-run cap live, clean restart, SCOUT's budget cause, a skill fix, Termux:Boot prepared
+## 2026-11-25 — evening: Apify per-run cap live, clean restart, SCOUT's budget cause, a skill fix, Termux:Boot prepared
 
-All read live; no spend. Commands and the owner's to-do list: CLAUDE.md ("Where we left off", cheat sheet, "2026-11-26 evening").
+[2026-11-26 05:20 PST: date corrected — first headed "2026-11-26" (the UTC date); on the phone it was 11-25 ~22:45 PST.
+**Termux:Boot is now ACTIVE and tested** (test reboot 2026-11-26 00:33 PST passed) — see the 00:47 section below.]
 
-- **Apify per-run cap is LIVE.** Committed `8557798db` (code, test, bug record) and `95370d285` (these notes), not
-  pushed. Loaded by the 22:18 PST restart: sidecar 17906 started 22:18:44, after `hostquota.js` (09:29:50).
+All read live; no spend. Commands and the owner's to-do list: CLAUDE.md ("Where we left off", cheat sheet, "2026-11-25 evening").
+
+- **Apify per-run cap is LIVE.** Committed `8557798db` (code, test, bug record) and `95370d285` (these notes), ~~not
+  pushed~~ pushed 2026-11-26 04:32 PST. Loaded by the 22:18 PST restart: sidecar 17906 started 22:18:44, after `hostquota.js` (09:29:50).
   `hostquota-run-cap` 42 OK, `headless-dispatch` 102 OK; `test:fast` one step at a time: 1,007 green / 12 red, the same
   12 known reds; the gate run itself stopped at step 304 (`ledger-reconcile`, intermittent `2ba9cd3e`).
 - **Restart trap.** A 22:03 PST relaunch from a Claude Code Bash call gave the sidecar Claude's environment:
@@ -2465,8 +2468,8 @@ All read live; no spend. Commands and the owner's to-do list: CLAUDE.md ("Where 
 - **The backup chain is NOT empty:** 3 OpenRouter slugs (haiku-5.5 » gemini-3-flash-preview » gpt-5-mini), `saved:true`.
 - **Anthropic direct balance:** last recorded "too low" (§21, 11-04); not re-probed — unknown.
 - **`sidecar/cron-orchestrator.js` is still uncommitted** (studio stage prompt; live since 11-22).
-- **Termux:Boot prepared, not active.** Termux is the F-Droid build (`TERMUX_APP__APK_RELEASE=F_DROID`, 0.119.0-beta.2),
-  so Termux:Boot must come from F-Droid; it is not installed. `~/.termux/boot/start-starnet`: wake lock → 30 s →
+- ~~**Termux:Boot prepared, not active.**~~ [SUPERSEDED 2026-11-26 00:33 PST: installed, active, test reboot passed.] Termux is the F-Droid build (`TERMUX_APP__APK_RELEASE=F_DROID`, 0.119.0-beta.2),
+  so Termux:Boot must come from F-Droid; ~~it is not installed~~ (installed 2026-11-26). `~/.termux/boot/start-starnet`: wake lock → 30 s →
   network wait ≤90 s → skip if a launcher runs → `bash ~/starnet-up.sh`; log `~/.local/state/starnet/boot.log`. The
   old `10-starnet.sh` (started the launcher with no receipt check) is at `~/.termux/10-starnet.sh.bak-20261126`.
 - **Money (ledger):** lifetime $139.67 (October $115.66, November $24.01); NIGHT4CHRIST $110.83 (79%, 44 budget
@@ -2496,7 +2499,7 @@ Read-only check after the test reboot; nothing restarted, no paid runs.
   boot reconcile (5 disabled routines skipped) and the Node `localStorage` ExperimentalWarning — no errors. Every line is
   written twice (launcher `tee -a` + the log redirect) — cosmetic, pre-existing. OmniRoute boot log clean (started in
   14.7 s).
-- **Date correction:** the section above headed "2026-11-26 — evening" was written 2026-11-25 ~22:45 PST (the 22:18
+- **Date correction:** the section above (first headed "2026-11-26 — evening", now corrected) was written 2026-11-25 ~22:45 PST (the 22:18
   restart and `~/.termux/boot/start-starnet`, 11-25 22:43, predate this reboot).
 
 ## 2026-11-26 04:30 PST — agent dossiers installed and verified; 03:00 chain failed on provider timeouts
@@ -2528,7 +2531,8 @@ There is no GET route that returns roster prompt text (`/api/runtime/agent` give
 prompt checks read `agent.roster.json`, which the sidecar writes on every accepted push.
 
 **Style library.** `webdesigner/styles/` has 2 styles. `index.md` rewritten from the bundle; STYLE-2 filled from
-`gothic-blackletter-faith.md` (status "trial" is inferred — the file has none), STYLE-3/4 rows deleted. The existing
+`gothic-blackletter-faith.md` (~~status "trial" is inferred — the file has none~~ [SUPERSEDED 04:46: the file now
+has `status: trial` and `lettering: in-art`]), STYLE-3/4 rows deleted. The existing
 `soft-watercolor-sunrise.md` (4,412 B) was kept; the bundle's version was not installed. Open: gothic puts lettering in
 the art, but DESIGNER's manual now says "one wordless master image". [RESOLVED 04:46: see the next section.]
 
@@ -2541,7 +2545,8 @@ gpt-5-mini (all timeouts), and 6 of 7 `image_analyze` calls failed at ~55 s → 
 answered normally at 04:29 (OpenRouter 200, OpenAI 401, Gemini 403 unauthenticated, all < 2 s). Cause [Likely]:
 transient provider/network streaming failure, not configuration.
 
-**NIGHT4CHRIST has no model.** Save `doc.agent.model` = `""`, roster `model: null`, provider `openai` → the app shows
+~~**NIGHT4CHRIST has no model.**~~ [SUPERSEDED 2026-11-26 04:42 PST: all 10 agents, NIGHT4CHRIST included, run
+`anthropic/claude-fable-5-2` (rev 5576, now 5577), so the three 11-30 routines run on Fable. Kept below as history.] Save `doc.agent.model` = `""`, roster `model: null`, provider `openai` → the app shows
 "no model selected for OPENAI". It last ran gpt-5 on 11-25 15:22. The chain pins its own model, but the three
 11-30 09:00 routines (Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan) show `null/null` in
 `/api/cron` and will use the agent's own (empty) model. Owner decision; proposal in CLAUDE.md "Where we left off".
@@ -2564,3 +2569,18 @@ transient provider/network streaming failure, not configuration.
 - Same recipe as the dossier install (splice roster `system` from the current docs, rev +1, full-roster POST).
   Verified field by field against `*.bak-20261126-044623-*`: only the two docs, their two roster prompts and the one
   routine prompt changed; integrity CONSISTENT; all 10 agents `anthropic/claude-fable-5-2` in both files and live API.
+
+## 2026-11-26 05:20 PST — read-only re-check; docs corrected; per-run caps vs Fable
+
+- **Live 05:00 (read-only):** health ok, app 200, sidecar 29630; integrity CONSISTENT; `_saveRevision` 5577; all 10
+  agents `anthropic/claude-fable-5-2` in save, roster and `GET /api/runtime/agent` (no query string — `?id=` 404s);
+  `.spend-pending/` empty; git tip `2acc52622` = remote, only `sidecar/cron-orchestrator.js` modified; production ARMED;
+  OpenRouter $6.32 of $45 (`GET /api/v1/credits`); GitHub reports the repo **public**.
+- **New risk: routine `maxCostUsd` caps predate Fable.** SCOUT, HARVEST and the three 11-30 routines $0.25; chain $0.50.
+  Fable is ~100× gemini-flash-lite per token; the 11-30 routines' last cheap runs cost $0.002–0.007, so ~$0.20–0.70 on
+  Fable — [Likely] budget stops. Whether the chain cap counts its workers' spend was not checked. Owner decision.
+- **Commander dossier (`doc.dossier` in `agent.save.json`, injected into every agent's prompt) has bad lines:** garbled
+  `cd_14`, `cd_28`, `cd_12`; NIV lines `cd_15`, `cd_20`, `cd_21` contradict KJV-only; `cd_4` "ask me before making
+  changes" fights unattended work. Not edited — owner decision (edit in the app's dossier panel, one tab).
+- **Date trap:** sessions on 11-25 evening wrote "2026-11-26" (the UTC date). Fixed in CLAUDE.md and the 11-25 evening
+  section here. Commits `27d9397fe`/`b7c04e867`/`3210676cb` are 11-25 19:10 PST; `8557798db`/`95370d285` 11-25 22:02 PST.

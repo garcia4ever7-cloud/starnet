@@ -2,7 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Where we left off — 2026-11-26, 04:30 PST (checked live, read-only)
+## Where we left off — 2026-11-26, 05:15 PST (re-checked live 05:00, read-only)
+
+**Live 05:00 PST:** sidecar 29630 up (health ok, app 200), integrity CONSISTENT, `_saveRevision` **5577**, **all 10 agents
+`anthropic/claude-fable-5-2`** in save, roster and `GET /api/runtime/agent`; `.spend-pending/` empty; git tip **`2acc52622`**
+= `origin/feat/harness-backend-station-20261124` (0/0), only `sidecar/cron-orchestrator.js` modified. Six commits went
+up on 11-25/26: `8557798db` `95370d285` (11-25 22:02, pushed 11-26 04:32), `eb9e67100` `5ec382504` `7fe7bd3d1` `2acc52622`.
+The newest docs-fix commit (11-26 ~05:20) is **local only — not pushed** (owner: the repo is public).
+**Start at `handoff.md`.** The text below is the 04:30 write-up, kept for its detail.
 
 **New agent dossiers are INSTALLED and verified (2026-11-26 04:17 PST).** All 10 agents (NIGHT4CHRIST, SCOUT,
 DESIGNER, QC_EDITOR, PUBLISHER, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER) got new identity/purpose/context/
@@ -10,7 +17,7 @@ manual text from the owner's 18-part bundle: shared `## Etsy team rules` / `## S
 approval from `agent/etsy-creative-brief.md`, owner-only list, Apify 3/run 8/day, done-tests and reply line. Written by
 hand to BOTH files: `agent.save.json` `_saveRevision` 5574 → **5575**, stamp `1795695438440`, plus a full-roster
 `POST /api/roster` (accepted, count 10). Only the four doc sections changed. Models, providers, approvalMode, skills,
-routines, foundation/personality/AUTHORITY/FORK text are untouched. Re-verified 04:24: 10/10 PASS, integrity CONSISTENT.
+routines, foundation/personality/AUTHORITY/FORK text were untouched by that install [models changed later, 04:42 — item 1 below]. Re-verified 04:24: 10/10 PASS, integrity CONSISTENT.
 Prompts shrank (DESIGNER 36,160 → 9,286 chars; NIGHT4CHRIST 26,134 → 12,148); the Studio four grew (~8.1–8.5k) because
 each carries the full Studio rules. Method and recipe: newest section of `STATION_FIELD_NOTES.md`.
 Backups (workspaces dir, never commit): `agent.save.json.bak-20261126-041644` (1,088,103 B),
@@ -31,7 +38,7 @@ timeouts; last error 03:34). Providers answer normally since. No sidecar log lin
 **Station now:** sidecar 29630, OmniRoute 29422/29443, health ok, app 200, cron healthy, production ARMED
 (2026-11-21, unattributed), 0 pending receipts. Routines ON: SCOUT daily 09:00; chain 03:00 (next 11-27);
 HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
-**Git:** this wrap-up commit plus `8557798db` + `95370d285` pushed to `feat/harness-backend-station-20261124`;
+**Git:** 6 commits pushed to `feat/harness-backend-station-20261124`, tip `2acc52622` (verified 05:00 by `git ls-remote`);
 `sidecar/cron-orchestrator.js` still uncommitted (owner decision).
 
 **Waiting on the owner:**
@@ -54,6 +61,12 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
    one provider; the Anthropic balance is not readable by API (check the console); the station fallback chain
    (haiku-5.5, gemini-3-flash-preview, gpt-5-mini) runs on OpenRouter, which has **$6.32 left of $45** — top up.
    Gemini 3.8 Flash was not tested or used (Fable outranks it).
+2b. **NEW 05:00 — per-run spend caps were set for cheap models.** `GET /api/cron` `maxCostUsd`: SCOUT, HARVEST and the
+   three 11-30 routines **$0.25**, the 03:00 chain **$0.50**. Fable costs ~100× gemini-flash-lite per token. The 11-30
+   routines' last runs cost $0.002–0.007 on the cheap model, so on Fable they would come to roughly $0.20–0.70 and
+   [Likely] stop on their cap; the chain's Fable workers (DESIGNER's gpt-5 kit run alone was $0.12) [Guessing] may hit
+   $0.50 — whether the chain cap counts worker spend was not checked. Raise the caps or keep cheaper models: owner decision.
+   The ~$5–7/day estimate above ignores these caps.
 3. ~~Style conflict (gothic vs wordless master)~~ and 4. ~~QC_EDITOR has no Etsy-rules block~~ — both FIXED. **Three fixes applied 04:46 PST (owner-approved), rev 5577:** QC_EDITOR context now starts with the shared Etsy-rules block (copied from SCOUT); DESIGNER manual step 2 has the "lettering: in-art" exception; `gothic-blackletter-faith.md` now has `status: trial` + `lettering: in-art (exception to wordless master)`; HARVEST routine says "KJV scripture wall art" (no NIV). Backups `agent.{save,roster}.json.bak-20261126-044623-fixes`, `cron.jobs.json.bak-20261126-044623-harvest-kjv`, `webdesigner/styles/{gothic-blackletter-faith,index}.md.bak-20261126-044623`.
 5. Look at SCOUT's 11-26 09:00 run (first run on the new dossier + live Apify cap) and the 11-27 03:00 chain.
 6. Decide on `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
@@ -175,7 +188,7 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 - **Ten agents exist** (live roster, 2026-11-24): NIGHT4CHRIST (`agent`, Commander), SCOUT (research), DESIGNER (`webdesigner`, product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), and the studio crew STORYWRITER, DIRECTOR, PRODUCER, QC_EDITOR (`qceditor`), COPYWRITER. The GPT-4o Independent Reviewer (`gpt4o_reviewer`) is **designed but not in the roster** — see its section below.
 - **approvalMode — historical snapshot 2026-11-24, not current state** (live source: `agent.roster.json` / `node scripts/agent-config-integrity.mjs`): `full` on 8 — agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor; `ask` on 2 — producer, copywriter. Only `'full'` and `'ask'` exist; anything else normalizes to `ask`. **An `ask` agent in a cron run never stalls** — an ungranted consent-gated call is denied immediately (`sidecar/permissions.js`, `SILENCE`); unattended capability for `ask` agents comes from routine `unattendedGrants` and the Workshop grant, not from waiting. Full Access allows before even the hardline floor (`permissions.js` `full-power`), and answering "Full access" on any permission card permanently flips that agent to `full` (`persistAgentFullAccess`) — that is how modes drift without a doc trail. Older docs saying SCOUT/DESIGNER/PUBLISHER are `ask` (`STATION_FIELD_NOTES.md` §1, §16 table) are stale.
-- **Agent dossiers (2026-11-26, revision 5575):** every agent's four docs were replaced by the owner's bundle — shared Etsy/Studio rule blocks, KJV only, the creative brief is standing approval, owner-only list, Apify 3 per run / 8 per day. To change them again use the app's dossier editor in ONE tab, or the hand recipe in the newest `STATION_FIELD_NOTES.md` section (both files, revision +1, full-roster POST, then reload tabs).
+- **Agent dossiers (2026-11-26, revision 5575; live revision now 5577 after the 04:42 model move and 04:46 fixes):** every agent's four docs were replaced by the owner's bundle — shared Etsy/Studio rule blocks, KJV only, the creative brief is standing approval, owner-only list, Apify 3 per run / 8 per day. To change them again use the app's dossier editor in ONE tab, or the hand recipe in the newest `STATION_FIELD_NOTES.md` section (both files, revision +1, full-roster POST, then reload tabs).
 - **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval. The same applies to commits, paid generation (Higgsfield MCP credits are the owner's Plus wallet), and StarNet/OmniRoute restarts: each needs the owner's explicit yes for that action, and one approval does not carry over to the next.
 - **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and never run `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. Inspect a file before editing it, leave unrelated working-tree changes exactly as found (never fold them into your own edit), and ask before expanding scope beyond what the owner approved. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room. Verified by one real cron run: the `skill.view` error is gone.
@@ -224,7 +237,7 @@ The deliverable store, `agent.save.json`, skills and notebooks are all read at b
 - **Fall through to another provider ONLY on exhausted credit, never on a broken request** — otherwise a bug in provider A quietly starts spending on provider B and the real error is never seen. Kling `code 1102` / HTTP 402 means empty wallet; `1201` means your request is wrong.
 - **Preflight cost where the API offers it** (Higgsfield `get_cost: true` returns credits and submits nothing). Cheapest known real video: Higgsfield `seedance_2_0_mini`, 720p/5s/9:16, **5 credits**; 480p/4s is 2.
 - **Higgsfield has two wallets.** The MCP tools spend the owner's Plus credits; the platform REST API (`platform.higgsfield.ai`, what StarNet uses) does **not** — its usage appears in no balance or ledger visible here. Treat REST usage as spend of unknown size against an account this station cannot read.
-- **~~The direct Anthropic account has no balance.~~ ~~CORRECTED 2026-10-27 — it is funded and works.~~** [Stale as of 2026-11-26: `STATION_FIELD_NOTES.md` §21 (2026-11-04) later recorded "credit balance too low", and nothing has probed it since (a probe spends) — treat the balance as unknown. No agent is on `anthropic` now.] The 2026-10-27 check: probed with a real 1-token call to `claude-haiku-5-5`: HTTP 200, `stop_reason: max_tokens`, usage recorded. A full NIGHT4CHRIST run on its roster model `claude-sonnet-5-5` also completed (`reason=done`). So `anthropic` is a usable provider again — but **mind the price**: that one-word run cost **$0.098**, because the station's system prompt + memory recall dominate the input, not the reply. OpenRouter remains the cheaper lane (balance was $5.93 of $35 on 2026-10-27; check `GET https://openrouter.ai/api/v1/credits`). The studio pipeline still reads `STUDIO_PROVIDER` / `STUDIO_MODEL`.
+- **~~The direct Anthropic account has no balance.~~ ~~CORRECTED 2026-10-27 — it is funded and works.~~** [Stale as of 2026-11-26: `STATION_FIELD_NOTES.md` §21 (2026-11-04) later recorded "credit balance too low", and nothing has probed it since (a probe spends) — treat the balance as unknown.] [2026-11-26 04:42: **all 10 agents are on `anthropic/claude-fable-5-2`** (direct Anthropic). The 04:3x Fable/Opus test calls succeeded, so the account had credit then [Likely]; the balance is still not readable by API — check the console. Every agent now depends on this one wallet.] The 2026-10-27 check: probed with a real 1-token call to `claude-haiku-5-5`: HTTP 200, `stop_reason: max_tokens`, usage recorded. A full NIGHT4CHRIST run on its roster model `claude-sonnet-5-5` also completed (`reason=done`). So `anthropic` is a usable provider again — but **mind the price**: that one-word run cost **$0.098**, because the station's system prompt + memory recall dominate the input, not the reply. OpenRouter remains the cheaper lane (balance was $5.93 of $35 on 2026-10-27; check `GET https://openrouter.ai/api/v1/credits`). The studio pipeline still reads `STUDIO_PROVIDER` / `STUDIO_MODEL`.
 - **OpenRouter cannot generate video at all** — 0 of 466 models output video.
 
 ## OmniRoute — routing rules (condensed from `STATION_FIELD_NOTES.md` §14/§14a)
@@ -259,7 +272,7 @@ Gotcha: `billing`/`auth`/`rate_limit` carry `shouldFallback: false` but `shouldR
 
 `reason=done` is NOT proof a model works — that is the documented failure where a model writes tool syntax as prose and the harness runs nothing. A candidate is only acceptable if a real `POST /api/run` against a real agent emits **both `agent.tool_call` and `agent.tool_result`**. The run stream is NDJSON of `{name, payload}` — not `{type, ...}`.
 
-**⚠️ Routing drift — check live state, not this file.** The live roster (2026-11-20) has all agents on `codex`/`openai`/`gemini` providers — NOT the `anthropic` primaries this section describes — ~~and `GET /api/fallback/chain` returned `{"chain":[],"saved":true}` (an empty chain was persisted and beats the env default).~~ [Stale as of 2026-11-26: the live chain is 3 OpenRouter slugs — `anthropic/claude-haiku-5.5` » `google/gemini-3-flash-preview` » `openai/gpt-5-mini`, `saved:true`; roster re-checked: openai gpt-5 ×8, gemini ×2. Because the primaries are not openrouter, the chain acts as a cross-provider fallback: SCOUT's scheduled runs moved to haiku whenever Gemini refused — see "2026-11-26 evening".] **Before any session that touches spend or providers, check `node scripts/station-models.mjs list` and `GET /api/fallback/chain`.** This is the fourth recorded instance of model routing drifting out from under the written design.
+**⚠️ Routing drift — check live state, not this file.** The live roster (2026-11-20) has all agents on `codex`/`openai`/`gemini` providers — NOT the `anthropic` primaries this section describes — ~~and `GET /api/fallback/chain` returned `{"chain":[],"saved":true}` (an empty chain was persisted and beats the env default).~~ [Stale as of 2026-11-26: the live chain is 3 OpenRouter slugs — `anthropic/claude-haiku-5.5` » `google/gemini-3-flash-preview` » `openai/gpt-5-mini`, `saved:true`; roster then: openai gpt-5 ×8, gemini ×2 — **superseded 2026-11-26 04:42: all 10 agents on `anthropic/claude-fable-5-2`**, so the primaries ARE `anthropic` again, as this section designs; routine pins (chain lead gemini-3-flash-preview, SCOUT/HARVEST gemini-flash-lite-latest) still override for those runs. Because the primaries are not openrouter, the chain acts as a cross-provider fallback: SCOUT's scheduled runs moved to haiku whenever Gemini refused — see "2026-11-25 evening".] **Before any session that touches spend or providers, check `node scripts/station-models.mjs list` and `GET /api/fallback/chain`.** This is the fourth recorded instance of model routing drifting out from under the written design.
 
 ## GPT-4o Independent Reviewer — reviewer restrictions (2026-11-18)
 
@@ -328,7 +341,7 @@ cd ~ && setsid nohup bash ~/start-starnet.sh >> ~/.local/state/starnet/launcher.
 ```
 
 From the owner's own Termux tab that line is clean. **When Claude Code runs a restart (only with the owner's yes) it
-must use a clean environment** — on 2026-11-26 a relaunch from Claude's shell passed its `LD_PRELOAD` shim and
+must use a clean environment** — on 2026-11-25 (22:03 PST) a relaunch from Claude's shell passed its `LD_PRELOAD` shim and
 `CLAUDE_*` session variables into the sidecar. Count `.spend-pending` first, stop the launcher and then its sidecar by
 exact PID, wait for the port to close, then:
 
@@ -399,13 +412,13 @@ may reply 200 but change nothing.
 
 ```bash
 npm run test:fast    # The merge gate — 1,019 steps (can stop at step 304: qa/bugs/2ba9cd3e is INTERMITTENT on this
-                     # device; step by step 2026-11-26: 1,007 green / 12 red, all pre-existing — handoff §1b/§1c)
+                     # device; step by step 2026-11-25: 1,007 green / 12 red, all pre-existing — handoff §1b/§1c)
 npm run test:http    # Live sidecar HTTP/E2E suite (run whenever you touch routes, streaming,
                      # persistence, providers, tools, schedules, or channels)
 npm test             # test:fast + test:http
 ```
 
-**Test harness rules (learned 2026-11-25, `qa/bugs/2c50b150`, `qa/bugs/7e750ab7` — fixes ~~UNCOMMITTED~~ committed + pushed in `27d9397fe` on 2026-11-26, see
+**Test harness rules (learned 2026-11-25, `qa/bugs/2c50b150`, `qa/bugs/7e750ab7` — fixes ~~UNCOMMITTED~~ committed + pushed in `27d9397fe` on 2026-11-25 19:10 PST, see
 `memorial/MEMORIAL_SESSION_HANDOFF.md` §1a):**
 - **Run tests with credentials stripped** — tests copy `process.env` into the sidecars they spawn, and a test
   sidecar that outlives its test keeps whatever keys you had:
@@ -472,7 +485,7 @@ The Knight video they describe was a **fake placeholder** (1,056 bytes). Trust `
 
 ## Production arm/disarm state (current)
 
-Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. **Production is ARMED** as of `2026-11-21T08:32:28.502Z` (`{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`), verified live via `GET /api/production/status`; re-checked 2026-11-26 22:45 PST — still armed, file unchanged. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
+Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. **Production is ARMED** as of `2026-11-21T08:32:28.502Z` (`{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`), verified live via `GET /api/production/status`; re-checked 2026-11-25 22:45 PST and again 2026-11-26 05:00 PST — still armed, file unchanged. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
 
 Historical: on `2026-11-20T07:03:24.171Z` production was DISARMED (`by":"unattributed"`), then re-armed on `2026-11-21T08:32:28.502Z`. The 2026-11-20 DISARMED record is a historical snapshot, not current state — the live file wins.
 
@@ -493,7 +506,7 @@ All dated session history (2026-10-26 through 2026-11-17) has been moved to `doc
 ### Live platform fix not yet reflected above
 - `sidecar/workspace-owner.js` — Android/Termux stale-lock recovery: when `process.kill(pid, 0)` returns `EPERM`/`EACCES` (permission-blocked, not a liveness answer), `defaultPidAlive` falls back to `fs.accessSync('/proc/<pid>', F_OK)`; ENOENT there proves the holder is dead and the stale lock is reclaimable. This fixed a `WORKSPACE_BUSY` exit-73 that held a dead PID 14644 claim forever. Committed in `ad1c83fea` (corrected 2026-11-26: this line used to say "uncommitted"; `git log -- sidecar/workspace-owner.js` and the HEAD source show the EPERM/EACCES → `/proc` fallback).
 
-### Session d2ab07f3 (2026-11-25 evening) — COMMITTED + PUSHED 2026-11-26 (`27d9397fe`)
+### Session d2ab07f3 (2026-11-25 evening) — COMMITTED + PUSHED 2026-11-25 19:10 PST (`27d9397fe`)
 Full inventory, evidence and backups: `memorial/MEMORIAL_SESSION_HANDOFF.md` §1a. In short: ~83 test files +
 `test/helpers/{tmp-tracker,sidecar-fixture}.js` + `qa/bugs/{2c50b150,7e750ab7}` + `qa/BUGS.md` — committed in
 `27d9397fe` after a full step-by-step `test:fast` (1,007 green / 12 red, all pre-existing) and pushed to
@@ -506,24 +519,25 @@ Full inventory, evidence and backups: `memorial/MEMORIAL_SESSION_HANDOFF.md` §1
 - **Kling has never produced or billed anything** with this key (its own task/cost API: 0 tasks, no resource
   packs; every StarNet attempt refused "Account balance not enough").
 
-### Session 085a8b6e (2026-11-25/26) — COMMITTED + PUSHED 2026-11-26 (`27d9397fe`, `b7c04e867`, `3210676cb`)
+### Session 085a8b6e (2026-11-25) — COMMITTED + PUSHED 2026-11-25 19:10 PST (`27d9397fe`, `b7c04e867`, `3210676cb`)
 Start at `memorial/MEMORIAL_SESSION_HANDOFF.md` §1c, then §1b. Memorial: opt-in `"theme": "dawn"` (4 owner-chosen
 watercolour backgrounds — StarNet's own AI art), per-card `"background"`, light chapter/verse cards, portrait card
 with the photo on its own rising layer; tests 120/120. Demo film is in Central Outbox **and** WORK → DELIVERABLES
 (the owner looks there — put films in both). Also: runner credential scrub (`scripts/run-test-list.mjs` `stepEnv`),
 bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_FIELD_NOTES.md` §3).
-**Still uncommitted (other sessions' work, deliberately left out):** [2026-11-26 22:00 PST: the Apify cap files, its test, its `fast.list` line, the `f050e860` record and `qa/BUGS.md` rows, and the field-notes SCOUT section are now committed in `8557798db` + `95370d285` (pushed 2026-11-26 04:32); only `sidecar/cron-orchestrator.js` and the untracked files remain.] the Apify per-run cap (`sidecar/hostquota.js`,
+**Still uncommitted (other sessions' work, deliberately left out):** [2026-11-25 22:00 PST: the Apify cap files, its test, its `fast.list` line, the `f050e860` record and `qa/BUGS.md` rows, and the field-notes SCOUT section are now committed in `8557798db` + `95370d285` (pushed 2026-11-26 04:32); only `sidecar/cron-orchestrator.js` and the untracked files remain.] the Apify per-run cap (`sidecar/hostquota.js`,
 `mcp/translate.js`, `tools/builtin/web.js`, `test/hostquota-run-cap.test.js`, its `test/fast.list` line, `qa/bugs/f050e860`
 + its `qa/BUGS.md` rows, the SCOUT section of the field notes), `sidecar/cron-orchestrator.js`, `sidecar/index.js`, and
-untracked files (`chat*`, assessment notes and others). **Fixed 2026-11-26 (owner's request):** `test/fast.list` had named
+untracked files (`chat*`, assessment notes and others). **Fixed 2026-11-25 19:16 PST (`3166726ba`, owner's request):** `test/fast.list` had named
 `test/domain-task-workspace-file.test.js` and `test/etsy-preflight.test.js` since `003d25c0d` (2026-11-18) but neither was
 committed, so `test-list-runner` failed on a clean checkout. Both are now committed, with `scripts/etsy-preflight.mjs` and
 `scripts/etsy-dryrun.mjs`, which the Etsy test imports; verified on a clean checkout (55 + 225 + 12 assertions OK).
 
-### 2026-11-26 evening — what changed (all checked live; nothing pushed)
+### 2026-11-25 evening — what changed (all checked live; pushed later, 2026-11-26 04:32 PST)
+[Date corrected 2026-11-26: this section and the dates above marked 11-25 were first written as "2026-11-26" — the UTC date; on the phone (PST) it was still 11-25.]
 - **Apify per-run cap LIVE.** `sidecar/hostquota.js` refuses a 4th billable Apify call in one run (counted per
   host-minted runId; a refusal does not spend the team's daily 8). Committed `8557798db`, field notes `95370d285`;
-  NOT pushed. Loaded by the 22:18 PST restart (sidecar start time later than the file). Tests: `hostquota-run-cap`
+  ~~NOT pushed~~ pushed 2026-11-26 04:32 PST. Loaded by the 22:18 PST restart (sidecar start time later than the file). Tests: `hostquota-run-cap`
   42 OK, `headless-dispatch` 102 OK; full `test:fast` step by step 1,007 green / 12 red — the same 12 known reds.
 - **Clean restart.** A 22:03 PST relaunch from Claude Code's shell leaked the shim + `CLAUDE_*` vars into StarNet; the
   22:18 relaunch used the `env -i` recipe above (cheat sheet) and was verified clean (launcher 17889, sidecar 17906).
