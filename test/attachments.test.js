@@ -116,8 +116,10 @@ const PNG_URL = 'data:image/png;base64,' + PNG_B64;
     A.ok(rm.ok, 'remove ok');
     A.eq((await attachments.removeAttachment('agent', 'secrets/passwd')).ok, false, 'refuse to remove a non-attachment path');
 
-    A.report('attachments.test');
   } finally {
     try { await fsp.rm(ROOT, { recursive: true, force: true }); } catch (_) {}
   }
+  // report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+  // on every run (qa/bugs/2c50b150).
+  A.report('attachments.test');
 })().catch(e => { console.log('FAIL: attachments.test threw -- ' + (e && e.stack || e)); process.exit(1); });

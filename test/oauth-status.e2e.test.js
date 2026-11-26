@@ -13,6 +13,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -49,7 +50,7 @@ function seedTokens(ws, id, envelope) {
 }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-oauthstat-ws-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-oauthstat-ws-')));
   const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1' };
 
   // ===== boot 1: a persisted DEAD marker for BOTH providers =====

@@ -22,6 +22,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -136,7 +137,7 @@ const QUIET = { SKYNET_THREAD_MINE: '0', SKYNET_SKILL_REVIEW: '0', SKYNET_SKILL_
         'WHY: you keep digging into the nvidia earnings call'   // cites the real evidence -> grounded
       ].join('\n')
     });
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-')));
     seedScoutState(ws);   // no interests file: the histogram starts COLD — warmth must be EARNED live
     const { child, port } = await boot(8930 + (process.pid % 25), Object.assign({ SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, QUIET), 20);
     const B = 'http://' + HOST + ':' + port;
@@ -203,7 +204,7 @@ const QUIET = { SKYNET_THREAD_MINE: '0', SKYNET_SKILL_REVIEW: '0', SKYNET_SKILL_
         'WHY: because commanders love cheerful dashboards every sunrise'   // ungroundable: cites nothing real
       ].join('\n')
     });
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-')));
     seedScoutState(ws);
     // WARM is pre-seeded here (boot 1 already proved warmth is earned live) so the mint attempt fires at all;
     // lastPassAt:0 leaves the extraction pass free to fire too — both failure arms exercise in one boot.
@@ -248,7 +249,7 @@ const QUIET = { SKYNET_THREAD_MINE: '0', SKYNET_SKILL_REVIEW: '0', SKYNET_SKILL_
       recipe: 'NONE',
       prospect: 'NAME: Should Never Be Asked\nEMOJI: ✦\nTAGLINE: the llm pass must not fire\nPURPOSE: n/a\nMANUAL: n/a\nKIT: dish\nSKILLS:\nWHY: n/a'
     });
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-scout-e2e-')));
     // recipe shelf FULL + cadence earned -> the attempt routes to 'prospect'; prospect shelf empty.
     const stagedRecipes = [0, 1, 2].map(i => ({
       id: 'seed-r' + i, kind: 'recipe', why: 'seed', fingerprint: 'seed recipe fp ' + i, at: Date.now() - 3600000,

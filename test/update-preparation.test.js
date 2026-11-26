@@ -65,7 +65,6 @@ const { makeUpdatePreparation } = require('../sidecar/update-preparation.js');
     A.eq(aborted, 1, 'live runs were actually aborted');
     A.eq(forced.receipt.liveRuns, 0, 'forced receipt is still quiescent, never best-effort');
 
-    A.report('update-preparation.test');
   } finally {
     try {
       const dir = path.join(sandbox, 'update-snapshots');
@@ -75,4 +74,7 @@ const { makeUpdatePreparation } = require('../sidecar/update-preparation.js');
     } catch (_) {}
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
+  // report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+  // on every run (qa/bugs/2c50b150).
+  A.report('update-preparation.test');
 })().catch(e => { console.error(e); process.exit(1); });

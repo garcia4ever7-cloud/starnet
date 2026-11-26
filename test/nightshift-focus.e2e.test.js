@@ -15,6 +15,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -52,7 +57,7 @@ const PATCH = [
 function git(repo, args) { return execFileSync('git', ['-C', repo].concat(args), { encoding: 'utf8' }).trim(); }
 
 function makeRepo() {
-  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-repo-')));
+  const repo = fs.realpathSync(track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-repo-'))));
   git(repo, ['init', '-q']);
   git(repo, ['config', 'user.email', 't@t.local']); git(repo, ['config', 'user.name', 'T']);
   git(repo, ['config', 'commit.gpgsign', 'false']); git(repo, ['config', 'core.autocrlf', 'false']);
@@ -145,9 +150,9 @@ async function stop(child) {
 (async () => {
   const mock = await startMock();
   const repo = makeRepo();
-  const unblessed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-unblessed-')));
-  const revoked = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-revoked-')));
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-ws-'));
+  const unblessed = fs.realpathSync(track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-unblessed-'))));
+  const revoked = fs.realpathSync(track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-revoked-'))));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-ns5b-ws-')));
   // PRE-BLESS the repo: seed the durable allowlist (path:<repo>) + the known-projects metadata (fresh lastTouchedAt).
   const now = Date.now();
   fs.writeFileSync(path.join(ws, 'permissions.allow.json'), JSON.stringify({ allow: ['path:' + repo], meta: { ['path:' + repo]: { grantedAt: now } } }));

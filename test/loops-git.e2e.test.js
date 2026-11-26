@@ -21,6 +21,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -98,7 +103,7 @@ async function until(B, headers, pred, label, ms) {
 }
 
 function makeRepo() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-loopgit-')));
+  const root = fs.realpathSync(track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-loopgit-'))));
   fs.writeFileSync(path.join(root, 'README.md'), '# scratch\n');
   fs.mkdirSync(path.join(root, 'src'));
   fs.writeFileSync(path.join(root, 'src', 'app.js'), '// base\n');
@@ -132,7 +137,7 @@ function makeRepo() {
   };
   const mock = await startMock(box);
 
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-loopgitws-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-loopgitws-')));
   const env = {
     SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base,
     SKYNET_OPENROUTER_KEY: 'sk-or-v1-git-fake', SKYNET_DEFAULT_MODEL: 'test/model',
@@ -285,7 +290,7 @@ function makeRepo() {
        pass's green reads as TRUSTED. Tampering would only have to survive one settlement to become invisible,
        which is precisely the hole S2 exists to close. loopTrustSurface moves the baseline from the index to
        the loop's own baseCommit. This proves it, across a REAL commit made by the harvest itself. */
-    const repo2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-looptamper-')));
+    const repo2 = fs.realpathSync(track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-looptamper-'))));
     const git2 = (args) => execFileSync('git', ['-C', repo2].concat(args), { stdio: 'pipe' }).toString();
     fs.mkdirSync(path.join(repo2, 'test'));
     fs.writeFileSync(path.join(repo2, 'test', 'thing.test.js'), '// a real test file\n');

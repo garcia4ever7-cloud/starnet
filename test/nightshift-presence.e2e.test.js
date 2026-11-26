@@ -14,6 +14,7 @@
      · once the threshold elapses AFTER the run, away flips true again (the night shift still works). */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -79,7 +80,7 @@ function kill(child) { return new Promise(r => { try { child.on('exit', () => r(
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nspresence-ws-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nspresence-ws-')));
   const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_NIGHTSHIFT_AWAY_MS: String(AWAY_MS) };
   const { child, port } = await boot(8960 + (process.pid % 25), env, 20);
   const B = 'http://' + HOST + ':' + port;

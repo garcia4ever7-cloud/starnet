@@ -7,6 +7,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -70,7 +71,7 @@ async function drainNdjson(res) { await res.text(); }   // consume the Run Now s
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-autonomy-ledger-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-autonomy-ledger-')));
   const env = {
     SKYNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: mock.base,

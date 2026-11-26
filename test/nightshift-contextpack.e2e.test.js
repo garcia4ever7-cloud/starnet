@@ -15,6 +15,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -143,7 +148,7 @@ function seedLogs(ws, now) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nscp-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nscp-e2e-')));
   const now = Date.now();
   seedLogs(ws, now);
   const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_OPENROUTER_BASE: mock.base, SKYNET_OPENROUTER_KEY: 'sk-or-v1-nscp-fake', SKYNET_DEFAULT_MODEL: 'test/model' };
@@ -192,7 +197,7 @@ function seedLogs(ws, now) {
 
     // ===== COLD BOOT — a brand-new workspace: no dossier, no runs, no chats. The night-shift status must report a
     //        pre-spend readiness stand-down (binding:'readiness') with beatsUsedToday 0 — NO leash spent. =====
-    const ws2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nscp-cold-'));
+    const ws2 = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nscp-cold-')));
     const boot2 = await boot(port + 1, Object.assign({}, env, { SKYNET_WORKSPACES: ws2 }), 20);
     const B2 = 'http://' + HOST + ':' + boot2.port;
     try {

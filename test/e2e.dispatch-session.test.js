@@ -17,6 +17,11 @@
    NOT in test:fast (a child-process boot test shouldn't gate other agents' merges); run via `npm run test:http`. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -154,7 +159,7 @@ async function drive(B, token, prompt) {
 
 async function run(label, dispatchArgs, sessions, body) {
   const mock = await startMockOpenRouter(dispatchArgs);
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-dispatch-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-dispatch-')));
   const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_FULL_ACCESS: '1' };
   const { child, port } = await boot(8940 + (process.pid % 40), env, 20);
   const B = 'http://' + HOST + ':' + port;

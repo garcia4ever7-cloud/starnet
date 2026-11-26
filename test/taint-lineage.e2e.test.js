@@ -10,6 +10,10 @@
    NOT in test:fast (child-process boot); listed in test/http.list. */
 'use strict';
 const A = require('./_assert.js');
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const { SidecarFixture } = require('./helpers/sidecar-fixture.js');
 const WORKER_MARK = 'WORKER_SYS_MARKER_TAINT';

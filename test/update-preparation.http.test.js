@@ -77,7 +77,6 @@ async function call(base, route, method, body) {
     A.eq(cancelled.body && cancelled.body.frozen, false, 'native install failure can explicitly unfreeze');
     const after = await call(base, '/api/activity', 'POST', { at: Date.now() });
     A.ok(after.status !== 423, 'normal mutation routing resumes after cancel');
-    A.report('update-preparation.http.test');
   } finally {
     try { child.kill('SIGKILL'); } catch (_) {}
     await new Promise(resolve => { if (child.exitCode != null || child.signalCode != null) resolve(); else child.once('exit', resolve); });
@@ -85,4 +84,7 @@ async function call(base, route, method, body) {
     try { for (const name of fs.existsSync(snapshots) ? fs.readdirSync(snapshots) : []) fs.chmodSync(path.join(snapshots, name), 0o666); } catch (_) {}
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
+  // report() calls process.exit(), so it must run AFTER the finally above — inside the try it skipped the
+  // cleanup and every run, passing or failing, orphaned a sidecar holding the caller's env (qa/bugs/2c50b150).
+  A.report('update-preparation.http.test');
 })().catch(e => { console.error(e); process.exit(1); });

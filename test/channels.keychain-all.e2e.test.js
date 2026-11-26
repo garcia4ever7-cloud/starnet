@@ -18,6 +18,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -63,8 +64,8 @@ function baseRecords(withTokens) {
 }
 
 async function withSidecar(label, portBase, secrets, extraEnv, fn) {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-keychain-all-' + label + '-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-keychain-all-home-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-keychain-all-' + label + '-')));
+  const home = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-keychain-all-home-')));
   fs.mkdirSync(path.join(ws, 'channels'), { recursive: true });
   const file = path.join(ws, 'channels', 'secrets.json');
   fs.writeFileSync(file, JSON.stringify(secrets));

@@ -138,7 +138,6 @@ function station(name, updatedAt, marker) {
     A.eq(after.lineage.onboardingAllowed, true, 'onboarding is allowed — the user is no longer stranded');
     A.eq(fs.readFileSync(path.join(legacyA, 'agent.save.json')).equals(legacyABytes), true, 'legacy A remains byte-exact after START FRESH');
     A.eq(fs.readFileSync(path.join(legacyB, 'agent.save.json')).equals(legacyBBytes), true, 'legacy B remains byte-exact after START FRESH');
-    A.report('workspace-lineage.http.test');
   } finally {
     if (child) {
       try { child.kill('SIGKILL'); } catch (_) {}
@@ -146,4 +145,7 @@ function station(name, updatedAt, marker) {
     }
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
+  // report() calls process.exit(), so it must run AFTER the finally above — inside the try it skipped the
+  // cleanup and every run, passing or failing, orphaned a sidecar holding the caller's env (qa/bugs/2c50b150).
+  A.report('workspace-lineage.http.test');
 })().catch(e => { console.error(e); process.exit(1); });

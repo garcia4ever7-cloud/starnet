@@ -109,11 +109,18 @@ function waitExit(child, timeoutMs) {
     c.child.kill('SIGKILL');
     await waitExit(c.child, 5000);
 
-    A.report('workspace-owner.e2e.test');
   } finally {
     for (const child of processes) {
       try { if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL'); } catch (_) {}
     }
     fs.rmSync(root, { recursive: true, force: true });
+    // The sidecar elects recovery ownership OUTSIDE its workspace (sidecar/workspace-recovery.js,
+    // `<basename>.recovery-owner.json` in the parent dir) and never deletes its generations, so remove them here.
+    for (const suffix of ['.recovery-owner.json', '.recovery-owner.json.generations']) {
+      fs.rmSync(root + suffix, { recursive: true, force: true });
+    }
   }
+  // report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+  // on every run (qa/bugs/2c50b150).
+  A.report('workspace-owner.e2e.test');
 })().catch(e => { console.error(e); process.exit(1); });

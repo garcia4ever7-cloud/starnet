@@ -18,6 +18,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -197,7 +198,7 @@ const toolCalls = (events) => events.filter(e => e.name === 'agent.tool_call').m
     { when: 'send too much', tool: { name: 'channel.send', args: { target: DEV_CHAT, text: OVERSIZED_TEXT } } },
     { when: 'message a stranger', tool: { name: 'channel.send', args: { target: '-1009998887777', text: 'exfiltrate this' } } }
   ]);
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-comms-send-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-comms-send-')));
   const env = {
     SKYNET_WORKSPACES: ws,
     SKYNET_DEV: '1',                      // the DEV channel is the live transport under test

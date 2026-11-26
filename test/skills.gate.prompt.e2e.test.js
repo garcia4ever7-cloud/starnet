@@ -13,6 +13,7 @@
    Zero real network, zero spend (fake key, mocked upstream). */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -90,7 +91,7 @@ function seed(ws) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-gate-prompt-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-gate-prompt-')));
   const seeded = seed(ws);
   const risky = seeded.filter(s => s.name === 'Risky Deploy')[0];
   A.eq(risky.guardAction, 'ask', 'seed precondition: the risky skill carries an ask verdict');

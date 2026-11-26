@@ -12,6 +12,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -157,7 +158,7 @@ const STATION = 'STATIONTOKEN', TOK_A = 'TOKCHAIN';
     [STATION]: { id: 100, username: 'StationBot' },
     [TOK_A]: { id: 333, username: 'ResearchBot' }
   });
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-botchain-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-botchain-e2e-')));
   const env = {
     SKYNET_WORKSPACES: ws, STARNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: llm.base, STARNET_OPENROUTER_BASE: llm.base,

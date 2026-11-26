@@ -5,6 +5,7 @@
    deltas, a reconciled agent.cost, and exactly one agent.run.end{reason:'done'} — no real key, no network. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -139,7 +140,7 @@ function boot(port, env, attemptsLeft) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-e2e-')));
   const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_STREAM_KA_MS: '40' };   // fast heartbeat so the KA test observes it in ms, not 20s
   const { child, port } = await boot(8840 + (process.pid % 50), env, 20);
   const B = 'http://' + HOST + ':' + port;

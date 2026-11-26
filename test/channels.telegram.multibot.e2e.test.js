@@ -8,6 +8,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -159,7 +160,7 @@ const STATION = 'STATIONTOKEN', TOK_A = 'TOKAAA', TOK_B = 'TOKBBB';
     [TOK_A]: { id: 111, username: 'NovaBot' },
     [TOK_B]: { id: 222, username: 'ScoutBot' }
   });
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-multibot-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-multibot-e2e-')));
   const env = {
     SKYNET_WORKSPACES: ws, STARNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: llm.base, STARNET_OPENROUTER_BASE: llm.base,
@@ -324,7 +325,7 @@ const STATION = 'STATIONTOKEN', TOK_A = 'TOKAAA', TOK_B = 'TOKBBB';
     A.ok(backup.telegramBots && backup.telegramBots['111'] && backup.telegramBots['111'].token === TOK_A, 'forget preserves the unrelated bot record in the recovery backup');
 
     // ---- 9. desktop restart: a token-free agent-bot record resolves from the per-bot keychain env payload ----
-    const ws2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-keychain-restart-'));
+    const ws2 = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-tg-keychain-restart-')));
     let child2 = null;
     try {
       fs.mkdirSync(path.join(ws2, 'channels'), { recursive: true });

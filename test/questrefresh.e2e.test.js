@@ -21,6 +21,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -123,7 +124,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       'CONTRACT: attest',
       'WHY: your active goal names publish episode 3 as the next step'
     ].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-wait-restart-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-wait-restart-')));
     seedEvidence(ws);
     seedAutonomy(ws, 'wait');
     const questFile = path.join(ws, '_station.quests.json');
@@ -174,7 +175,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
 
   // Direct Commander life-action reporting, durable pauses, and restart reconciliation through real routes.
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-life-quest-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-life-quest-')));
     seedEvidence(ws); seedAutonomy(ws, 'wait');
     let child = null;
     try {
@@ -217,7 +218,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       if (delayed) await new Promise(resolve => { release = resolve; });
       return ['NORTH_STAR: Grow the channel', 'QUEST: Focused episode action ' + (++replyIndex), 'DESC: Publish the next episode.', 'CONTRACT: attest', 'WHY: the active channel goal needs an episode'].join('\n');
     });
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-focus-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-focus-')));
     seedEvidence(ws); seedAutonomy(ws, 'wait');
     let child = null;
     try {
@@ -279,7 +280,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       'CONTRACT: prop dish',
       'WHY: growing the youtube channel needs recurring guest research'
     ].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     seedEvidence(ws);   // NO _station.questrefresh.json: a never-cycled state is due at the boot look
     seedAutonomy(ws);
     const { child, port } = await boot(8985 + (process.pid % 10), Object.assign({ SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, CRED, QUIET), 20);
@@ -343,7 +344,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       'CONTRACT: attest',
       'WHY: hustle culture demands relentless morning routines'   // ungroundable: cites nothing real
     ].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     seedEvidence(ws);
     seedAutonomy(ws);
     const { child, port } = await boot(8995 + (process.pid % 10), Object.assign({ SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, CRED, QUIET), 20);
@@ -369,7 +370,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
   /* ================= BOOT 3 — the cold-save guard (no evidence → no model call, honest skip) ================= */
   {
     const mock = await startMock('NORTH_STAR: should never be requested');
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     // NO dossier, NO goal, NO activity: the due boot-look cycle must SKIP before spending the model call.
     seedAutonomy(ws);
     const { child, port } = await boot(9005 + (process.pid % 10), Object.assign({ SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, CRED, QUIET), 20);
@@ -394,7 +395,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
   {
     // the model must NEVER be called: if it were, this reply would mint. The skip happens before the call.
     const mock = await startMock(['NORTH_STAR: should never be requested', 'QUEST: Should never mint', 'CONTRACT: attest', 'WHY: grow the youtube channel'].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     seedEvidence(ws);   // full evidence — proving the skip is the SLATE-FULL guard, not the cold-save guard
     seedAutonomy(ws);
     // seed the store already at the cap: 3 OPEN station-wide (agentId:null) generated quests.
@@ -431,7 +432,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       'CONTRACT: attest',
       'WHY: growing the youtube channel needs a planned series'
     ].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     // dossier ONLY — NO goal file, so the north star comes from INFERENCE (the propose-and-confirm path).
     seedAutonomy(ws);
     fs.mkdirSync(ws, { recursive: true });
@@ -505,7 +506,7 @@ const CRED = { SKYNET_OPENROUTER_KEY: 'sk-or-v1-questrefresh-fake', SKYNET_DEFAU
       'CONTRACT: prop dish',
       'WHY: growing the youtube channel needs recurring guest research'
     ].join('\n'));
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-qrefresh-e2e-')));
     seedEvidence(ws);
     seedAutonomy(ws);
     // the CROSS-ENGINE decline: "Publish episode 3" is a DECLINED thread (a different engine's store). The quest

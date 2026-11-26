@@ -6,6 +6,7 @@
    system message NAMING the failing check — then ended honestly `incomplete` when the model still did nothing. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -58,7 +59,7 @@ function boot(port, env, attemptsLeft) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-accept-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-accept-e2e-')));
   const { child, port } = await boot(9210 + (process.pid % 50), { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, 20);
   const B = 'http://' + HOST + ':' + port;
   try {

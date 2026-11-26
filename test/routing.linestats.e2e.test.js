@@ -15,6 +15,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -119,8 +124,8 @@ function twoStagePlan() {
     { when: 'first job', text: 'stage one findings' },
     { when: 'second job', text: 'stage one findings: KABOOM' }             // hands the writer a turn the mock fails
   ]);
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-linestats-'));
-  const hermes = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-linestats-hermes-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-linestats-')));
+  const hermes = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-linestats-hermes-')));
   const env = {
     SKYNET_WORKSPACES: ws, STARNET_WORKSPACES: ws, HERMES_HOME: hermes,
     STARNET_DEV: '', SKYNET_DEV: '',

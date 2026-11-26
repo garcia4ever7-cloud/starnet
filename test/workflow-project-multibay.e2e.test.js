@@ -6,6 +6,10 @@
    line.agents, which lists writer under line A only: the entry stage ran in project A and the hop refused with
    "The workflow changed". Real sidecar, real tools, real files; the model is a local simulated provider. */
 const assert = require('node:assert/strict');
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');

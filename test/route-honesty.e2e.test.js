@@ -8,6 +8,7 @@
    Zero network, zero model spend. Registered in test/http.list (child-process boot tests don't gate test:fast). */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -53,7 +54,7 @@ function exited(child, ms) {
 }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-')));
   // CORRUPT fixtures (no .bak → unrecoverable): the exact "torn store" shape the old routes rendered as 200 + [].
   fs.writeFileSync(path.join(ws, 'agent.notebook.json'), '{"notes": [ this is not json');
   fs.writeFileSync(path.join(ws, 'agent.declined.json'), 'not json either');
@@ -112,7 +113,7 @@ function exited(child, ms) {
     child = null;
 
     // ---- 3. the test-only opt-out keeps the process alive but still degrades health ----
-    const b2 = await boot(b.port + 1, fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-keep-')), 6, { STARNET_UNCAUGHT_KEEP_SERVING: '1' });
+    const b2 = await boot(b.port + 1, track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-keep-'))), 6, { STARNET_UNCAUGHT_KEEP_SERVING: '1' });
     child = b2.child;
     const B2 = 'http://' + HOST + ':' + b2.port;
     const tok2 = await bootToken(B2, B2);
@@ -132,7 +133,7 @@ function exited(child, ms) {
     // the process stays alive QUIESCED, /api/health answers 503 "degraded: crash-loop: 3 faults in 10m — last: …",
     // the static recovery shell + diagnostics keep serving, and every other route fails closed. The ledger FILE
     // is the restart-survival proof.
-    const wsLoop = fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-loop-'));
+    const wsLoop = track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-loop-')));
     let port3 = b2.port + 1;
     const lifeFault = async (life) => {
       const bl = await boot(port3, wsLoop, 6, { STARNET_UNCAUGHT_EXIT_DELAY_MS: '300' });
@@ -192,7 +193,7 @@ function exited(child, ms) {
     // A LIVE holder (this test process's own PID) owns the workspace, so every acquire is honestly refused. Lives 1+2
     // exit 73 as before; life 3 stays up on the port answering /api/health 503 "degraded: workspace owner unavailable…"
     // and 503 JSON elsewhere — with the owner file UNTOUCHED (no auto-reclaim).
-    const wsOwn = fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-owner-'));
+    const wsOwn = track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-route-honesty-owner-')));
     const ownerFile = path.join(wsOwn, '.starnet-workspace-owner.json');
     const ownerDoc = JSON.stringify({ version: 1, pid: process.pid, nonce: 'test-holder-nonce', startedAt: Date.now(), executable: process.execPath });
     fs.writeFileSync(ownerFile, ownerDoc);

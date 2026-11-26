@@ -4,6 +4,7 @@
    and resolve_status must answer honestly on a machine with no Resolve. No external key, account, or Resolve install. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -81,7 +82,7 @@ const toolNames = req => ((req && req.tools) || []).map(t => (t.function && t.fu
 
 (async () => {
   const provider = await startProvider();
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-resolve-e2e-'));
+  const workspace = track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-resolve-e2e-')));
   fs.mkdirSync(path.join(workspace, 'editor', 'clips'), { recursive: true });
   fs.writeFileSync(path.join(workspace, 'editor', 'clips', 'a.mp4'), 'not really video');   // ffprobe refuses it -> honest note
   const env = { SKYNET_WORKSPACES: workspace, SKYNET_FULL_ACCESS: '1', SKYNET_AUX_BUDGET: '0', STARNET_OPENROUTER_KEY: '', OPENROUTER_API_KEY: '' };

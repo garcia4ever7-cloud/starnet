@@ -20,6 +20,20 @@ export function readSteps(listFile) {
     .filter(line => line && !line.startsWith('#'));
 }
 
+// CREDENTIAL SCRUB (2026-11-25, qa/bugs/2c50b150): steps used to inherit the caller's whole environment, so a
+// shell that had sourced the station env (or a Claude Code session started with a key in its settings) handed
+// real provider keys to every test sidecar — and a leaked test sidecar kept serving them behind a fixture token
+// that is public in this repository. Credential-shaped variables are removed from every step unless the caller
+// sets STARNET_TEST_KEEP_CREDENTIALS=1 on purpose (a deliberate live-key run).
+export const CREDENTIAL_NAME = /^[A-Za-z_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z_0-9]*$/;
+
+export function stepEnv(baseEnv, extra) {
+  const env = Object.assign({}, baseEnv, extra);
+  if (env.STARNET_TEST_KEEP_CREDENTIALS === '1') return env;
+  for (const name of Object.keys(env)) if (CREDENTIAL_NAME.test(name)) delete env[name];
+  return env;
+}
+
 export function runList(options) {
   const opts = options || {};
   const label = opts.label || 'run-test-list';
@@ -47,7 +61,7 @@ export function runList(options) {
     const result = spawnSync(process.execPath, [step], {
       stdio: 'inherit',
       cwd: ROOT,
-      env: Object.assign({}, process.env, hermetic)
+      env: stepEnv(process.env, hermetic)
     });
     try { rmSync(profile, { recursive: true, force: true }); } catch (_) {}
     if (result.status !== 0) {

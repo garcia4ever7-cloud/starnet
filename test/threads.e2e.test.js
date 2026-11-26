@@ -19,6 +19,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -151,7 +156,7 @@ function seedLogs(ws, now) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-threads-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-threads-e2e-')));
   seedLogs(ws, Date.now());
   // SKYNET_AUX_BUDGET='0' disables the aux-spend joint ceiling for this suite: it exercises the thread-mining
   // pass IN ISOLATION alongside reflection+study on ONE tool-heavy run, so all three must fire. Under the default

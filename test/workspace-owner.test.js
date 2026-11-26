@@ -133,7 +133,9 @@ try {
   A.eq(mismatchedClaim.acquire(root).code, 'WORKSPACE_OWNER_UNAVAILABLE', 'owner stamp read-back mismatch is reported');
   A.eq(fs.existsSync(lockfile), false, 'a mismatched owner stamp removes its unaccepted claim');
 
-  A.report('workspace-owner.test');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
+// report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+// on every run (qa/bugs/2c50b150).
+A.report('workspace-owner.test');

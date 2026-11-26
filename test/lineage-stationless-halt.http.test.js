@@ -99,9 +99,11 @@ const INDEX = path.resolve(__dirname, '..', 'sidecar', 'index.js');
     A.eq(second.body.lineage.priorInstallEvidence, false, 'E-STOP bookkeeping from a stationless session is not prior-station evidence');
     A.eq(second.body.lineage.onboardingAllowed, true, 'open-once-close-once still onboards (the stranded-install class)');
     await stop(child); child = null;
-    A.report('lineage-stationless-halt.http.test');
   } finally {
     await stop(child);
     fs.rmSync(sandbox, { recursive: true, force: true });
   }
+  // report() calls process.exit(), so it must run AFTER the finally above — inside the try it skipped the
+  // sandbox removal on every run (qa/bugs/2c50b150).
+  A.report('lineage-stationless-halt.http.test');
 })().catch(e => { console.error(e); process.exit(1); });

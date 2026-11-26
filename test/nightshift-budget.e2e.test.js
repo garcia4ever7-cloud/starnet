@@ -16,6 +16,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -64,7 +65,7 @@ async function armAndStatus(B) {
   // ===== 1. NO runnable provider → a pre-spend 'no-provider' stand-down (the pure gates clear, but no model call
   //         is reachable — declining here spends NO leash) =====
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-noprov-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-noprov-')));
     const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_NIGHTSHIFT_AWAY_MS: '1' };
     let { child, port } = await boot(8940 + (process.pid % 25), env, 20);
     const B = 'http://' + HOST + ':' + port;
@@ -80,7 +81,7 @@ async function armAndStatus(B) {
 
   // ===== 2. a cross-run BUDGET pool is exhausted → a pre-spend 'budget' stand-down that OUTRANKS 'no-provider' =====
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-exhausted-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-exhausted-')));
     // seed the spend ledger with a finished run that blows the governed pools and lands in the trailing-day
     // window (ts ~ now), so budget.check reports the pool blocked at boot. The shipped defaults are now
     // UNGOVERNED (budget-legibility pass 2026-07-23), so the pools under test are pinned via env.
@@ -101,7 +102,7 @@ async function armAndStatus(B) {
 
   // ===== 3. PRECHECK INSPECTION FAILURE -> fail closed, spend nothing, and leave a truthful durable decision =====
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-precheck-fault-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsbudget-precheck-fault-')));
     const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_NIGHTSHIFT_AWAY_MS: '1', SKYNET_NIGHTSHIFT_TICK_MS: '10' };
     let { child, port } = await boot(9020 + (process.pid % 25), env, 20, true);
     const B = 'http://' + HOST + ':' + port;

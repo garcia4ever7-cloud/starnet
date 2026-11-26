@@ -13,6 +13,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -87,7 +88,7 @@ function cyclicPlan() {
 }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-routing-persist-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-routing-persist-')));
   const FILE = path.join(ws, 'routing.plan.json');
   const env = { SKYNET_WORKSPACES: ws };
   const readFile = () => JSON.parse(fs.readFileSync(FILE, 'utf8'));

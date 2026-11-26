@@ -201,7 +201,9 @@ try {
     fs.rmSync(path.dirname(tmpTarget), { recursive: true, force: true });
   }
 
-  A.report('workspace-recovery.test');
 } finally {
   fs.rmSync(home, { recursive: true, force: true });
 }
+// report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+// on every run (qa/bugs/2c50b150).
+A.report('workspace-recovery.test');

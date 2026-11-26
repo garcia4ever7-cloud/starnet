@@ -10,6 +10,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -103,7 +108,7 @@ async function drainNdjson(res) { const reader = res.body.getReader(); const dec
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-session-'));
+  const wsDir = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-session-')));
   const env = {
     SKYNET_WORKSPACES: wsDir,
     SKYNET_OPENROUTER_BASE: mock.base,

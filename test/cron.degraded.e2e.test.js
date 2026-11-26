@@ -9,6 +9,7 @@
    Also: a GET /api/cron on a healthy workspace reports degraded:null + maxConsecutiveFailures. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -56,7 +57,7 @@ async function boot(workspaces, extraEnv) {
 }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-degraded-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-degraded-')));
   const cronPath = path.join(ws, 'cron.jobs.json');
   // a CORRUPT main AND a corrupt .bak: nothing recoverable. The old behavior loaded [] and persisted the wipe.
   fs.writeFileSync(cronPath, '{"version":1,"jobs":[{"id":"rt_lost","name":"Lost routine",', 'utf8');
@@ -130,7 +131,7 @@ async function boot(workspaces, extraEnv) {
 
   // ---- healthy workspace: degraded:null ----
   {
-    const ws2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-healthy-'));
+    const ws2 = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-cron-healthy-')));
     const b2 = await boot(ws2);
     try {
       const tok = await bootToken('http://' + HOST + ':' + b2.port, 'http://' + HOST + ':' + b2.port);

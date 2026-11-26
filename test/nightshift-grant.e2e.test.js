@@ -15,6 +15,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -48,7 +49,7 @@ async function status(B, headers) { return (await fetch(B + '/api/nightshift/sta
 function wsRecord(ws) { try { return JSON.parse(fs.readFileSync(path.join(ws, 'agent.workshop.json'), 'utf8')); } catch (_) { return null; } }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsgrant-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nsgrant-e2e-')));
   const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1' };
   let { child, port } = await boot(8960 + (process.pid % 30), env, 20);
   let B = 'http://' + HOST + ':' + port;

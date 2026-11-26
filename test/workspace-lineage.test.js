@@ -137,7 +137,9 @@ try {
     for (const f of many) A.eq(fs.existsSync(path.join(big.quarantine, f)), true, 'quarantine holds ' + f);
     fs.unlinkSync(path.join(current, '.fresh-start.json'));
   }
-  A.report('workspace-lineage.test');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
+// report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+// on every run (qa/bugs/2c50b150).
+A.report('workspace-lineage.test');

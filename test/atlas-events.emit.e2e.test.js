@@ -13,6 +13,7 @@
    via test:http (a child-process boot test shouldn't gate other agents' merges). */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -134,7 +135,7 @@ async function waitUntil(fn, ms, label) { const deadline = Date.now() + ms; whil
 (async () => {
   const llm = await startMockOpenRouter();
   const tg = await startMockTelegram();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-events-emit-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-events-emit-')));
   const env = {
     SKYNET_WORKSPACES: ws, STARNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: llm.base, STARNET_OPENROUTER_BASE: llm.base,

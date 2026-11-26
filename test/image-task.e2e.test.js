@@ -2,6 +2,7 @@
    All provider/image responses are local mocks; no external key or account is used. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -93,7 +94,7 @@ async function run(base, token, body) {
 
 (async () => {
   const provider = await startProvider();
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-image-task-e2e-'));
+  const workspace = track(fs.mkdtempSync(path.join(os.tmpdir(), 'starnet-image-task-e2e-')));
   const noOpenRouterKey = { STARNET_OPENROUTER_KEY: '', SKYNET_OPENROUTER_KEY: '', OPENROUTER_KEY: '', OPENROUTER_API_KEY: '' };
   const env = Object.assign({}, noOpenRouterKey, {
     SKYNET_WORKSPACES: workspace,

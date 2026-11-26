@@ -8,6 +8,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const crypto = require('crypto');
 const path = require('path');
 const os = require('os');
@@ -50,7 +51,7 @@ function signedHeaders(token, origin, timestamp, nonce, body) {
 }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-webhook-replay-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-webhook-replay-')));
   const env = { SKYNET_WORKSPACES: ws, STARNET_CHANNEL_WEBHOOK_SECRET: SECRET };
   const body = JSON.stringify({ message: { chatId: 'chat-1', text: 'hello station' } });
   const timestamp = String(Date.now());

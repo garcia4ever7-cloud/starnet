@@ -19,6 +19,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -169,7 +170,7 @@ function resultFor(events, callId) {
     { when: 'fire it now', tool: { name: 'routine.manage', args: { action: 'run_now', id: 'Renamed brief' } } },
     { when: 'delete it', tool: { name: 'routine.manage', args: { action: 'remove', id: 'Renamed brief' } } }
   ]);
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-routine-manage-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-routine-manage-')));
   const env = {
     SKYNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: mock.base,

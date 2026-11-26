@@ -1,6 +1,10 @@
 'use strict';
 // Real lead dispatch, worker run, MCP transport, permission cards and external-effect receipt.
 const assert = require('node:assert/strict');
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('node:http');
 const { SidecarFixture } = require('./helpers/sidecar-fixture.js');
 (async () => {

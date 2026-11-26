@@ -12,6 +12,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
@@ -118,7 +119,7 @@ async function waitUntil(fn, ms, label) {
 (async () => {
   const llm = await startMockOpenRouter();
   const tg = await startMockTelegram();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-relay-owner-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-relay-owner-')));
   const home = path.join(ws, 'home');
   fs.mkdirSync(home, { recursive: true });
   const env = {

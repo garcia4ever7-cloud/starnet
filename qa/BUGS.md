@@ -4,7 +4,7 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**17** open (open+claimed) of 227 total — 1 P0 · 3 P1 · 13 P2
+**19** open (open+claimed) of 229 total — 1 P0 · 3 P1 · 15 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
@@ -133,7 +133,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P0 | fixed | skills | [skill.view's hydrate-then-bump stores the RENDERED SKILL.md as the skill's body, so every view→persist cycle re-appends '## Setup' and '## Support Files' — unbo](bugs/c70f8965-skill-view-s-hydrate-then-bump-stores-the-render.md) | sweep/skills | 598ab4a4 |
 | P1 | open | autonomy | [Studio pipeline marks placeholder video as KEPT](bugs/c7abfee9-studio-pipeline-marks-placeholder-video-as-kept.md) | sweep/autonomy | — |
 | P1 | open | providers | [ERR_HTTP2_STREAM_ERROR classifies as unknown, skipping the stream retry ladder](bugs/1184eb8e-err-http2-stream-error-classifies-as-unknown-ski.md) | fix/http2-retry | — |
-| P1 | open | release | [Interrupted test:http run orphans its sidecars, which keep the real provider keys behind a public fixture token](bugs/2c50b150-interrupted-test-http-run-orphans-its-sidecars-w.md) | fix/test-sidecar-orphans | — |
+| P1 | open | release | [Test sidecars outlive their test (report() exits before cleanup; also on interruption) and keep the real provider keys behind a public fixture token](bugs/2c50b150-interrupted-test-http-run-orphans-its-sidecars-w.md) | fix/test-sidecar-orphans | — |
 | P1 | fixed | autonomy | [Agent loop pause leaves cancelled iteration running and lease held](bugs/c66e8c39-agent-loop-pause-leaves-cancelled-iteration-runn.md) | agent/seam-audit-0912-b | b5c5cba75 |
 | P1 | fixed | autonomy | [Ambiguous permission and routine acknowledgements report unproven changes](bugs/95d13aaf-ambiguous-permission-and-routine-acknowledgement.md) | agent/systemic-bugs-0919 | 8eb87b0d3 |
 | P1 | fixed | autonomy | [Autonomy controls claim unconfirmed settings and overwrite server state on reload](bugs/b0349a7c-autonomy-controls-claim-unconfirmed-settings-and.md) | agent/system-polish-0920 | 4a2028759 |
@@ -264,6 +264,8 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P2 | open | providers | [Managed Sonnet request still returns an uncorrelated HTTP 400](bugs/fd9c4b4d-managed-sonnet-400-unresolved.md) | reliability-followup | — |
 | P2 | open | providers | [Ollama run times out with no chat POST observed by reporter](bugs/5274c7b7-ollama-chat-request-not-observed.md) | release-0120-prep-0915 | — |
 | P2 | open | providers | [Ollama task runs finish without reported filesystem tool calls](bugs/678ac951-ollama-task-runs-finish-without-reported-filesys.md) | agent/reliability-audit-0919 | — |
+| P2 | open | release | [38 e2e tests fail: their throwaway test sidecars default to production DISARMED, so mocked metered runs are refused](bugs/7e750ab7-38-e2e-tests-fail-their-throwaway-test-sidecars.md) | fix/e2e-arm-test-sidecars | — |
+| P2 | open | release | [ledger-reconcile --json output is cut off at the pipe buffer (process.exit right after stdout.write), so test:fast halts at step 304](bugs/2ba9cd3e-ledger-reconcile-json-output-is-cut-off-at-the-p.md) | fix/reconcile-json-flush | — |
 | P2 | open | release | [Mac installer reports application unsupported on the computer](bugs/ff3fb4cb-mac-unsupported-installation-uncorrelated.md) | release-0120-prep-0915 | — |
 | P2 | open | release | [Windows Node 24 HTTP test exits with a native libuv assertion after passing](bugs/6e29727c-windows-node-24-http-test-exits-with-a-native-li.md) | reliability-audit-0919 | — |
 | P2 | open | sessions | [Deliverables panel can show the internal screen-capture wrapper as the Commander's request](bugs/bbabad8d-deliverables-panel-can-show-the-internal-screen.md) | fix/deliverables-panel | — |
@@ -363,5 +365,5 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | onboarding | 1 |
 | world | 0 |
 | voice | 0 |
-| release | 3 |
+| release | 5 |
 

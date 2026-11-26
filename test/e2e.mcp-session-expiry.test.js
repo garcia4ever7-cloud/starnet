@@ -11,6 +11,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -157,7 +158,7 @@ function boot(port, env, attemptsLeft) {
 (async () => {
   const mcp = await startSessionMcp();
   const llm = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-mcp-sess-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-mcp-sess-')));
   const env = {
     SKYNET_WORKSPACES: ws, STARNET_WORKSPACES: ws,
     SKYNET_OPENROUTER_BASE: llm.base, STARNET_OPENROUTER_BASE: llm.base,

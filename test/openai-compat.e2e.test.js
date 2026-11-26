@@ -13,6 +13,22 @@
    The upstream LLM is mocked via SKYNET_OPENROUTER_BASE (no real key, no network). Modeled on e2e.run.test.js. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
+
+// SIGTERM and WAIT: a sidecar still shutting down writes its final state into the workspace AFTER the
+// tmp-tracker's exit cleanup, recreating the folder (qa/bugs/2c50b150). Bounded so a stuck child can't hang.
+function stopChild(child) {
+  return new Promise(resolve => {
+    if (!child || child.exitCode != null || child.signalCode != null) return resolve();
+    const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} resolve(); }, 5000);
+    child.once('exit', () => { clearTimeout(t); resolve(); });
+    try { child.kill(); } catch (_) { clearTimeout(t); resolve(); }
+  });
+}
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -93,7 +109,7 @@ async function drain(res) {
 
   // ---- (a) NO key configured -> /v1/* is disabled (403) ----------------------------------------------------
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-v1-nokey-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-v1-nokey-')));
     const { child, port } = await boot(8940 + (process.pid % 40), Object.assign({ SKYNET_WORKSPACES: ws }, baseEnv), 20);
     const B = 'http://' + HOST + ':' + port;
     try {
@@ -107,11 +123,11 @@ async function drain(res) {
       const h = await fetch(B + '/health');
       A.eq(h.status, 200, '(a) /health answers 200 without auth');
       A.eq((await h.json()).status, 'ok', '(a) /health reports ok');
-    } finally { try { child.kill(); } catch (_) {} }
+    } finally { await stopChild(child); }
   }
 
   // ---- keyed sidecar for (b)-(g). max-concurrent 1 so the 429 path is cheap to induce. ---------------------
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-v1-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-v1-')));
   const env = Object.assign({ SKYNET_WORKSPACES: ws, STARNET_API_KEY: KEY, STARNET_V1_MAX_CONCURRENT: '1' }, baseEnv);
   const { child, port } = await boot(8970 + (process.pid % 40), env, 20);
   const B = 'http://' + HOST + ':' + port;
@@ -193,7 +209,7 @@ async function drain(res) {
       try { held.destroy(); } catch (_) {}   // free the in-flight run (client-disconnect interrupts it)
     }
   } finally {
-    try { child.kill(); } catch (_) {}
+    await stopChild(child);
     try { mock.server.close(); } catch (_) {}
   }
   A.report('openai-compat.e2e');

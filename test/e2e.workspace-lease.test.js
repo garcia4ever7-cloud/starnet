@@ -9,6 +9,7 @@
    No real key, no network. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -116,7 +117,7 @@ async function untilReady(check, label) {
 
   // ===== scenario 1: WAIT + FIFO HANDOFF (default 45s lease wait) =====
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'wlease-ws1-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'wlease-ws1-')));
     const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_FULL_ACCESS: '1' };
     const { child, port } = await boot(8700 + (process.pid % 40), env, 25);
     const B = 'http://' + HOST + ':' + port;
@@ -140,7 +141,7 @@ async function untilReady(check, label) {
 
   // ===== scenario 2: BOUNDED TRUTHFUL REFUSAL (250ms lease wait) =====
   {
-    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'wlease-ws2-'));
+    const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'wlease-ws2-')));
     const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_FULL_ACCESS: '1', STARNET_WORKSPACE_LEASE_WAIT_MS: '250' };
     const { child, port } = await boot(8745 + (process.pid % 40), env, 25);
     const B = 'http://' + HOST + ':' + port;

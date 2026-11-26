@@ -6,6 +6,11 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -227,7 +232,7 @@ async function readNdjson(res) {
 (async () => {
   const mcp = await startMockMcp();
   const llm = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-mcp-e2e-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-mcp-e2e-')));
   const env = {
     SKYNET_WORKSPACES: ws,
     STARNET_WORKSPACES: ws,
@@ -633,7 +638,7 @@ async function readNdjson(res) {
 
   // An app-shipped Google client is an environment credential, not user connector state. Prove that using it
   // unlocks direct sign-in but an unrelated durable connector save cannot copy either value onto disk.
-  const envWs = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-google-env-e2e-'));
+  const envWs = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-google-env-e2e-')));
   const envClientId = 'env-client.apps.googleusercontent.com';
   const envClientSecret = 'env-google-client-secret';
   let envChild = null;

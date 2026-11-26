@@ -13,6 +13,7 @@
 'use strict';
 
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -40,7 +41,7 @@ function boot(port, env, attemptsLeft) {
 function kill(child) { return new Promise(r => { try { child.on('exit', () => r()); child.kill(); } catch (_) { r(); } setTimeout(r, 3000); }); }
 
 (async () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nshalt-ws-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-nshalt-ws-')));
   // away threshold 1ms so the pure gates get PAST 'present' and the status binding can truthfully name 'halt'.
   const env = { SKYNET_WORKSPACES: ws, SKYNET_DEV: '1', SKYNET_NIGHTSHIFT_AWAY_MS: '1' };
   let { child, port } = await boot(8990 + (process.pid % 25), env, 20);

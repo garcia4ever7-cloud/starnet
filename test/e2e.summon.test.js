@@ -7,6 +7,7 @@
    NOT in test:fast (a child-process boot test shouldn't gate other agents' merges); run via `npm run test:http`. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const path = require('path');
 const os = require('os');
@@ -73,7 +74,7 @@ function boot(port, env, attemptsLeft) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-summon-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-summon-')));
   // SKYNET_FULL_ACCESS so team.summon's consent gate bypasses (no human in this headless e2e) — exactly the
   // full-auto posture; the APPROVAL-mode prompt path is covered by the consent suites.
   const env = { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base, SKYNET_FULL_ACCESS: '1' };

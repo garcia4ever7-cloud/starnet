@@ -45,6 +45,16 @@ function removeTree(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
 }
 
+// A booted sidecar elects recovery ownership OUTSIDE its workspace (sidecar/workspace-recovery.js:
+// `<basename>.recovery-owner.json` in the parent dir) and never deletes its generations, so removing only
+// the workspace leaves `<workspace>.recovery-owner.json.generations` behind in tmp (qa/bugs/2c50b150).
+function removeWorkspace(dir) {
+  if (!dir) return;
+  removeTree(dir);
+  removeTree(dir + '.recovery-owner.json');
+  removeTree(dir + '.recovery-owner.json.generations');
+}
+
 async function terminate(child, timeoutMs) {
   if (!child || child.exitCode !== null || child.signalCode) return;
   const exited = new Promise(resolve => child.once('exit', resolve));
@@ -204,7 +214,7 @@ class SidecarFixture {
     if (this._disposed) return;
     this._disposed = true;
     await this.stop();
-    removeTree(this.workspace);
+    removeWorkspace(this.workspace);
     removeTree(this.profile);
     active.delete(this);
   }
@@ -216,7 +226,8 @@ process.once('exit', () => {
     if (child && processAlive(child.pid)) {
       try { child.kill(); } catch (_) {}
     }
-    removeTree(fixture.workspace);
+    removeWorkspace(fixture.workspace);
+    removeTree(fixture.profile);
   }
 });
 

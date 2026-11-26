@@ -13,6 +13,10 @@
 'use strict';
 
 const A = require('./_assert.js');
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const http = require('node:http');
 const { SidecarFixture } = require('./helpers/sidecar-fixture.js');
 
@@ -204,11 +208,22 @@ async function until(fixture, predicate, label, timeoutMs) {
     A.eq(pausedLoop.recent[0].outcome, 'cancelled', 'its terminal cancellation checkpoint survives restart');
     A.eq(loopCalls(cancelObjective), pausedCalls, 'the paused restart produces no duplicate provider calls');
 
-    A.report('loops endurance e2e (restart/cancel/resume/idempotency)');
   } finally {
+    const workspace = fixture.workspace;
     await fixture.dispose();
     provider.close();
+    // The sidecar elects recovery ownership OUTSIDE its workspace (sidecar/workspace-recovery.js,
+    // `<basename>.recovery-owner.json` in the parent dir) and never deletes its generations; dispose()
+    // removes only the workspace itself, so remove them here.
+    if (workspace) {
+      for (const suffix of ['.recovery-owner.json', '.recovery-owner.json.generations']) {
+        require('node:fs').rmSync(workspace + suffix, { recursive: true, force: true });
+      }
+    }
   }
+  // report() calls process.exit(), so it runs AFTER the finally above: inside the try it skipped the cleanup
+  // on every run (qa/bugs/2c50b150).
+  A.report('loops endurance e2e (restart/cancel/resume/idempotency)');
 })().catch(error => {
   console.error(error && error.stack || error);
   process.exit(1);

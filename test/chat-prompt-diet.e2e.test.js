@@ -11,6 +11,7 @@
    Zero real network, zero spend. */
 'use strict';
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -75,7 +76,7 @@ function boot(port, env, attemptsLeft) {
 
 (async () => {
   const mock = await startMockOpenRouter();
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-chat-diet-'));
+  const ws = track(fs.mkdtempSync(path.join(os.tmpdir(), 'sk-chat-diet-')));
   const { child, port } = await boot(9040 + (process.pid % 25), { SKYNET_WORKSPACES: ws, SKYNET_OPENROUTER_BASE: mock.base }, 20);
   const B = 'http://' + HOST + ':' + port;
   try {

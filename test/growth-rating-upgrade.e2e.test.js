@@ -1,6 +1,11 @@
 'use strict';
 // Real run -> production resume + XP adapter -> real durable rating endpoint -> process restart.
 const A = require('./_assert.js');
+const { track } = require('./helpers/tmp-tracker.js'); // removes temp workspaces + sidecar siblings at exit (qa/bugs/2c50b150)
+// The sidecars this test spawns run on throwaway temp workspaces with no arm file, so the production gate
+// defaults them to DISARMED and refuses their (mocked, $0) metered runs. Arm ONLY these test sidecars; the
+// product default and the live station are untouched (sidecar/production-gate.js readArmState).
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,7 +17,7 @@ const resume = require('./_rating-resume.js');
 global.Xp = require('../frontend/app/xp.js');
 const {XpStore} = require('../frontend/app/xpstore.js');
 const root = path.resolve(__dirname,'..');
-const workspace = fs.mkdtempSync(path.join(os.tmpdir(),'starnet-rating-upgrade-'));
+const workspace = track(fs.mkdtempSync(path.join(os.tmpdir(),'starnet-rating-upgrade-')));
 let child, base, headers;
 const mock = http.createServer((req,res) => {
   if (req.url.includes('/models')) { res.setHeader('Content-Type','application/json'); return res.end(JSON.stringify({data:[{id:'test/model',context_length:128000,pricing:{prompt:'0',completion:'0'},supported_parameters:['tools']}]})); }
