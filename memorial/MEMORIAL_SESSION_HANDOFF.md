@@ -4,10 +4,10 @@ Last updated 2026-11-26, session 085a8b6e (§1c: "Lord lead the way" dawn theme 
 ONE session, not two). This session: the 4-minute film PLAYED in a real (headless) browser through the
 Outbox Play button (§3e); then, at the owner's request, a long detour fixing the StarNet TEST HARNESS
 (orphan test sidecars holding the real Kling key, temp-folder leaks, 38 e2e tests failing on the production
-gate) — all of it **uncommitted**, full inventory in §1a. Previous update: earlier 2026-11-25 (commits
+gate) — inventory in §1a; **committed 2026-11-26 in `27d9397fe` and pushed** (with §1b/§1c: `b7c04e867`, `3210676cb`). Previous update: earlier 2026-11-25 (commits
 pushed, studio fix live). Before that: 2026-11-24, session ea68579f.
 
-## 1a. START HERE — what session d2ab07f3 left UNCOMMITTED (2026-11-25 evening)
+## 1a. What session d2ab07f3 left uncommitted (2026-11-25 evening) — NOW COMMITTED in `27d9397fe` and PUSHED 2026-11-26
 
 Nothing below is committed or pushed. HEAD is still `a951b8967` on `feat/harness-backend`.
 `git status` shows ~90 changed/new files from this session; `CLAUDE.md`, `STATION_FIELD_NOTES.md` and
@@ -129,7 +129,7 @@ Labels: **[Verified]** = seen in a live run this session (real output numbers);
 **[Code inspection]** = read in source, not reproduced; **[Recommendation]** = proposal only;
 **[Not done]** = deliberately left.
 
-## 1c. "Lord lead the way" title card + dawn theme (2026-11-25, same session, owner-authorised, UNCOMMITTED)
+## 1c. "Lord lead the way" title card + dawn theme (2026-11-25, same session, owner-authorised) — COMMITTED `b7c04e867` + docs `3210676cb`, PUSHED 2026-11-26
 
 Owner supplied 4 watercolour dawns (`~/storage/downloads/lord lead the wY/`, 1024x1536 PNG, origin not recorded) and named
 `17956322123615191295378050759541.png` the title background. Done (backups `*.bak-20261125-lead-the-way`):
@@ -175,6 +175,14 @@ Owner supplied 4 watercolour dawns (`~/storage/downloads/lord lead the wY/`, 102
   lint-determinism, failopen-ratchet, 2× sharp, workspace-probe-errors); no step left a sidecar. Step 304
   (`ledger-reconcile`) was GREEN this time: `2ba9cd3e` is intermittent (record corrected). Per-step results:
   `~/memorial-research/testfast-20261126/results.tsv`.
+- **Committed + pushed [Verified 2026-11-26, owner: "push when done"]:** `27d9397fe` test harness (89 files; `qa/BUGS.md`
+  staged WITHOUT the other session's `f050e860`), `b7c04e867` memorial (10 files incl. the 4 backgrounds — owner chose to
+  publish them), `3210676cb` docs (field notes staged WITHOUT the SCOUT/Apify section). Pushed fast-forward
+  `ac84b52a2..3210676cb` to `feat/harness-backend-station-20261124`; `git ls-remote` tip == local HEAD; all 5 local-only
+  commits are ancestors of the fetched tip; sampled blobs identical. Secret scan of the 102 pushed files against the 11
+  real secret values on this station: 0 hits. Clean worktree checkout of `3210676cb`: qa-bugs-register, qa-bugs,
+  source-text-integrity, memorial-layouts, memorial-gallery (120) all OK; `test-list-runner` fails ONLY on the
+  pre-existing fast.list gap (two never-committed tests since `003d25c0d`), same on the old tip `ac84b52a2`.
 Not done: nobody has watched it with sound or on a TV.
 
 ## 0. Where everything is (quick index)

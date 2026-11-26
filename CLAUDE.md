@@ -414,10 +414,11 @@ All dated session history (2026-10-26 through 2026-11-17) has been moved to `doc
 ### Live platform fix not yet reflected above
 - `sidecar/workspace-owner.js` — Android/Termux stale-lock recovery: when `process.kill(pid, 0)` returns `EPERM`/`EACCES` (permission-blocked, not a liveness answer), `defaultPidAlive` falls back to `fs.accessSync('/proc/<pid>', F_OK)`; ENOENT there proves the holder is dead and the stale lock is reclaimable. This fixed a `WORKSPACE_BUSY` exit-73 that held a dead PID 14644 claim forever. Committed in `ad1c83fea` (corrected 2026-11-26: this line used to say "uncommitted"; `git log -- sidecar/workspace-owner.js` and the HEAD source show the EPERM/EACCES → `/proc` fallback).
 
-### Session d2ab07f3 (2026-11-25 evening) — uncommitted work waiting for the owner
+### Session d2ab07f3 (2026-11-25 evening) — COMMITTED + PUSHED 2026-11-26 (`27d9397fe`)
 Full inventory, evidence and backups: `memorial/MEMORIAL_SESSION_HANDOFF.md` §1a. In short: ~83 test files +
-`test/helpers/{tmp-tracker,sidecar-fixture}.js` + `qa/bugs/{2c50b150,7e750ab7}` + `qa/BUGS.md` changed, NOT
-committed (HEAD `a951b8967`). Run full `npm run test:fast` before any commit; commits need the owner's yes.
+`test/helpers/{tmp-tracker,sidecar-fixture}.js` + `qa/bugs/{2c50b150,7e750ab7}` + `qa/BUGS.md` — committed in
+`27d9397fe` after a full step-by-step `test:fast` (1,007 green / 12 red, all pre-existing) and pushed to
+`feat/harness-backend-station-20261124` (tip verified by `git ls-remote`).
 - **`KLING_API_KEY` is no longer in `~/.claude/settings.json` `env`** (removed 2026-11-25, owner's request) — Claude
   Code sessions no longer inherit it, so tests started from Claude no longer leak it. StarNet still gets it from
   `~/.config/starnet/env`. Backup `~/.claude/settings.json.bak-20261125-pre-kling-removal` still holds the key (mode 600).
@@ -426,9 +427,15 @@ committed (HEAD `a951b8967`). Run full `npm run test:fast` before any commit; co
 - **Kling has never produced or billed anything** with this key (its own task/cost API: 0 tasks, no resource
   packs; every StarNet attempt refused "Account balance not enough").
 
-### Session 085a8b6e (2026-11-25/26) — more uncommitted work, same rules
+### Session 085a8b6e (2026-11-25/26) — COMMITTED + PUSHED 2026-11-26 (`27d9397fe`, `b7c04e867`, `3210676cb`)
 Start at `memorial/MEMORIAL_SESSION_HANDOFF.md` §1c, then §1b. Memorial: opt-in `"theme": "dawn"` (4 owner-chosen
 watercolour backgrounds — StarNet's own AI art), per-card `"background"`, light chapter/verse cards, portrait card
 with the photo on its own rising layer; tests 120/120. Demo film is in Central Outbox **and** WORK → DELIVERABLES
 (the owner looks there — put films in both). Also: runner credential scrub (`scripts/run-test-list.mjs` `stepEnv`),
 bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_FIELD_NOTES.md` §3).
+**Still uncommitted (other sessions' work, deliberately left out):** the Apify per-run cap (`sidecar/hostquota.js`,
+`mcp/translate.js`, `tools/builtin/web.js`, `test/hostquota-run-cap.test.js`, its `test/fast.list` line, `qa/bugs/f050e860`
++ its `qa/BUGS.md` rows, the SCOUT section of the field notes), `sidecar/cron-orchestrator.js`, `sidecar/index.js`, and
+untracked files (Etsy preflight scripts/tests, `chat*`, assessment notes). **Pre-existing gap on the pushed branch:**
+`test/fast.list` names `test/domain-task-workspace-file.test.js` and `test/etsy-preflight.test.js`, never committed
+(since `003d25c0d`, 2026-11-18), so `test-list-runner` fails on a clean checkout.
