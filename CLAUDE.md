@@ -61,7 +61,18 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
    one provider; the Anthropic balance is not readable by API (check the console); the station fallback chain
    (haiku-5.5, gemini-3-flash-preview, gpt-5-mini) runs on OpenRouter, which has **$6.32 left of $45** — top up.
    Gemini 3.8 Flash was not tested or used (Fable outranks it).
-2b. **NEW 05:00 — per-run spend caps were set for cheap models.** `GET /api/cron` `maxCostUsd`: SCOUT, HARVEST and the
+2b. ~~**NEW 05:00 — per-run spend caps were set for cheap models.**~~ **DONE 2026-11-26 ~05:45 PST (owner's yes):** `maxCostUsd` raised via `POST /api/cron/update {id, patch:{maxCostUsd}}`,
+   read back from `GET /api/cron` and `cron.jobs.json`: chain `ebc4f07d` $0.50 → **$2.00**; SCOUT `7b22107c`, HARVEST
+   `d22650c8`, Quality Gate `41a7de48`, Concept Queue `e7fccdb8`, Print Kit `b8c6f80c` $0.25 → **$1.00**. Nothing else
+   changed (field-by-field diff of all 11 routines); OFF routines, models, schedules, grants and the $25/day rail
+   untouched. Backup `cron.jobs.json.bak-20261126-caps`. Undo: the same patch with the old values (0.5 / 0.25).
+   **Does the chain cap count its workers? No** (read in code): a routine cap reaches only the lead run
+   (`callerMaxCostUsd`, lower-only); the lead's `spentUsd` books its own model turns plus media-tool costs
+   (`pendingMediaCosts`), not worker runs. Workers are capped separately by the sidecar env:
+   `STARNET_BUDGET_PER_WORKER=1.00` per worker and `STARNET_BUDGET_WORKER_POOL=2.00` per lead run. Station `perRun` is 0
+   (ungoverned), so the routine cap is the binding per-run limit. Worst case per chain fire ≈ $2 lead + $2 workers =
+   $4; cron's auto-retry (4 fires on 11-26 03:00–03:32) could approach $16 — still under the $25/day rail.
+   Before the change:  `GET /api/cron` `maxCostUsd`: SCOUT, HARVEST and the
    three 11-30 routines **$0.25**, the 03:00 chain **$0.50**. Fable costs ~100× gemini-flash-lite per token. The 11-30
    routines' last runs cost $0.002–0.007 on the cheap model, so on Fable they would come to roughly $0.20–0.70 and
    [Likely] stop on their cap; the chain's Fable workers (DESIGNER's gpt-5 kit run alone was $0.12) [Guessing] may hit

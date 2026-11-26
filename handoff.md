@@ -1,4 +1,4 @@
-# StarNet handoff — read this first (updated 2026-11-26 05:20 PST)
+# StarNet handoff — read this first (updated 2026-11-26 05:45 PST)
 
 Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — do not push until the owner decides. Live data: `~/.local/share/StarNet/workspaces/`.
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
@@ -15,7 +15,8 @@ Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIE
   Re-checked 05:00: Fable on all 10 in save, roster and `GET /api/runtime/agent`.
 - Spend estimate at Fable (CLAUDE.md item 2): ~$5/day as routines stand, ~$7/day if the three pins move [Guessing,
   ~70% cache hits] — BUT the per-run caps ($0.25; chain $0.50) were set for cheap models and will likely stop Fable runs
-  first (decision 1). The $25/day rail is the outer limit.
+  first (decision 1) — **caps raised 05:45: chain $2.00, the other 5 ON routines $1.00** (decision 1 DONE).
+  Workers are capped separately ($1.00 each, $2.00 pool per lead run). The $25/day rail is the outer limit.
 - Git: branch `feat/harness-backend`, pushed to `origin/feat/harness-backend-station-20261124`. Always push explicitly
   to that branch (`git push origin HEAD:refs/heads/feat/harness-backend-station-20261124`); never force; never push
   `origin/feat/harness-backend` (it diverged, 5,382 remote-only commits). Remote tip `2acc52622` (05:00, 0/0).
@@ -56,7 +57,10 @@ Cron counted the run failed and re-ran the whole chain at 03:20 / 03:28 / 03:32 
 timeouts). Providers answer normally since. Cause [Likely]: transient provider/network failure, not configuration.
 
 ## Open owner decisions (05:20)
-1. **Per-run spend caps (NEW).** `maxCostUsd`: SCOUT, HARVEST and the three 11-30 routines $0.25; chain $0.50 — set
+1. ~~**Per-run spend caps.**~~ **DONE 05:45 (owner's yes):** chain `ebc4f07d` $0.50 → $2.00; SCOUT, HARVEST,
+   Quality Gate, Concept Queue, Print Kit $0.25 → $1.00, via `POST /api/cron/update` and read back. Backup
+   `cron.jobs.json.bak-20261126-caps`; undo = same patch with 0.5 / 0.25. The chain cap does NOT count worker spend
+   (workers: env $1.00 each, $2.00 pool per lead run) — CLAUDE.md item 2b. Was: `maxCostUsd`: SCOUT, HARVEST and the three 11-30 routines $0.25; chain $0.50 — set
    for cheap models. On Fable (~100× gemini-flash-lite) the 11-30 routines likely cost ~$0.20–0.70 and stop on the cap
    [Likely]; the chain's Fable workers may hit $0.50 [Guessing; worker spend vs chain cap not checked]. Raise caps or
    keep cheaper models.
@@ -90,11 +94,11 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
 - `scripts/git-push-safe.mjs` misreports direction; trust `git rev-list --left-right --count`.
 
 ## Exact next steps
-0. Decide the caps (decision 1) before 11-27 03:00 if the chain should finish on Fable workers.
+0. ~~Decide the caps~~ done 05:45 (decision 1).
 1. Reload the StarNet tab. Confirm the Commander shows claude-fable-5-2 (no "no model selected").
 2. After 09:20: read SCOUT's 09:00 run in `runs.jsonl` (first run on the new dossier + live Apify cap).
 3. After 11-27 03:30: read the chain run (first on Fable workers); QC_EDITOR should answer "VERDICT: PASS/CHANGES";
-   check `usd` per run against the $0.50 cap — a budget stop means decision 1.
-4. 11-30 (Mon) 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable), $0.25 cap each — check
+   check `usd` per run against the $2.00 lead cap and the $2.00 worker pool.
+4. 11-30 (Mon) 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable), $1.00 cap each — check
    for budget stops. 12-01 (Tue) 10:00: HARVEST (gemini-flash-lite pin).
 5. Work the owner decisions above only with a yes.
