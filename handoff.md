@@ -1,4 +1,4 @@
-# StarNet handoff — read this first (updated 2026-11-26 04:40 PST)
+# StarNet handoff — read this first (updated 2026-11-26 04:50 PST)
 
 Phone station (Termux). Repo `~/starnet` is PUBLIC. Live data: `~/.local/share/StarNet/workspaces/`.
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
@@ -8,7 +8,10 @@ Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIE
 - Cron healthy, not halted. Production ARMED (2026-11-21, unattributed). `.spend-pending/` empty.
 - Routines ON (next run): SCOUT daily 09:00 · Etsy pipeline chain 03:00 (11-27) · HARVEST Tue 10:00 (12-01) ·
   Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
-- Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5575.
+- Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5576.
+- **Models (04:42): all 10 agents on `anthropic/claude-fable-5-2`** (was: NIGHT4CHRIST empty, 7× openai gpt-5,
+  PUBLISHER gemini-3.5-flash, SCOUT gemini-flash-lite). Backups `agent.{save,roster}.json.bak-20261126-044208-models`;
+  undo `node scripts/station-models.mjs revert`. Details and the measured model limits: CLAUDE.md item 1.
 - Git: branch `feat/harness-backend`, pushed to `origin/feat/harness-backend-station-20261124`. Always push explicitly
   to that branch (`git push origin HEAD:refs/heads/feat/harness-backend-station-20261124`); never force; never push
   `origin/feat/harness-backend` (it diverged, 5,382 remote-only commits).
@@ -36,8 +39,9 @@ Cron counted the run failed and re-ran the whole chain at 03:20 / 03:28 / 03:32 
 timeouts). Providers answer normally since. Cause [Likely]: transient provider/network failure, not configuration.
 
 ## Open owner decisions
-1. NIGHT4CHRIST has NO model (app: "no model selected for OPENAI") — breaks chat and the three 11-30 routines.
-   (Being handled 2026-11-26 in the "best models" task — see CLAUDE.md for the outcome.)
+1. Routine model pins (chain lead gemini-3-flash-preview; SCOUT and HARVEST gemini-flash-lite-latest) — proposed
+   claude-fable-5-2; needs a yes. Top up OpenRouter ($6.32 left) — it carries the fallback chain. Check the
+   Anthropic balance in its console (not readable by API).
 2. Gothic style puts lettering in the art vs DESIGNER's "one wordless master image" rule.
 3. QC_EDITOR has no Etsy-rules block (installed as sent).
 4. `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
@@ -48,6 +52,9 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
    Kling-key settings backup in `~/.claude/`.
 
 ## Traps
+- On the OpenAI wire (chat/completions) gpt-6.x cannot call tools and gpt-5.4/5.5 only with reasoning off; do not
+  assign them to tool-using agents. gemini-3.1-pro-preview is 429 (no quota). Without the live price cache
+  (`liveprices.cache.json`) gpt-6.x is priced at the $2.5/$10 fallback, understating spend.
 - `POST /api/cron/run` is Run Now — it spends money. Use `GET /api/cron` to read routines.
 - The browser owns the roster: after any hand edit, the owner must reload StarNet tabs, or an old tab pushes old
   prompts back (save is protected by `_saveRevision`; roster only by timestamp).
@@ -57,8 +64,9 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
 - `scripts/git-push-safe.mjs` misreports direction; trust `git rev-list --left-right --count`.
 
 ## Exact next steps
-1. Reload the StarNet tab. Check NIGHT4CHRIST has a model.
+1. Reload the StarNet tab. Confirm the Commander shows claude-fable-5-2 (no "no model selected").
 2. After 09:20: read SCOUT's 09:00 run in `runs.jsonl` (first run on the new dossier + live Apify cap).
-3. After 11-27 03:30: read the chain run; QC_EDITOR should answer "VERDICT: PASS/CHANGES".
-4. Before 11-30 09:00: confirm the three null/null routines will have a model.
+3. After 11-27 03:30: read the chain run (first on Fable workers); QC_EDITOR should answer "VERDICT: PASS/CHANGES";
+   check `usd` per run against the estimate.
+4. 11-30 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable) — check they succeed.
 5. Work the owner decisions above only with a yes.

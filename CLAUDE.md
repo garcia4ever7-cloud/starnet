@@ -35,13 +35,25 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
 `sidecar/cron-orchestrator.js` still uncommitted (owner decision).
 
 **Waiting on the owner:**
-1. **NIGHT4CHRIST has NO model** (provider `openai`, model empty — the app says "no model selected for OPENAI"). It last
-   ran gpt-5 on 11-25 15:22. This breaks chat AND the three 11-30 09:00 routines, which use the agent's own model
-   (`null/null` in `/api/cron`). The chain is safe (it pins gemini-3-flash-preview). Pick a model in the app.
-2. Model changes proposed 2026-11-26 (none applied): NIGHT4CHRIST → gemini-3-flash-preview (or gpt-5 for chat
-   quality); PUBLISHER gemini-3.5-flash → gemini-3-flash-preview; DIRECTOR/PRODUCER/COPYWRITER gpt-5 → gpt-5-mini; keep
-   SCOUT flash-lite, DESIGNER/QC_EDITOR/STORYWRITER gpt-5. Gemini 3.8 Flash for SCOUT/PUBLISHER: not until a free probe
-   passes (it timed out at 90 s in the OmniRoute probe, `STATION_FIELD_NOTES.md` §18; no row in `prices.js`).
+1. ~~NIGHT4CHRIST has NO model~~ **FIXED 04:42 PST: all 10 agents now run `anthropic/claude-fable-5-2`** (owner asked for
+   the best models, quality first). Set with `scripts/station-models.mjs set all claude-fable-5-2 --provider anthropic`
+   (snapshot `model-snapshots/2026-11-26T12-42-08-449Z__before-set-all.json`, backups
+   `agent.{save,roster}.json.bak-20261126-044208-models` and `.bak-1795696928470`), save rev **5576**, integrity
+   CONSISTENT, script probe OK, plus a 2-turn tool test through the real adapter. reasoningEffort/approvalMode unchanged.
+   Undo: `node scripts/station-models.mjs revert`. **Reload StarNet tabs.** Why Fable, measured 04:3x (total test
+   spend ~$0.04): on this station's OpenAI wire (chat/completions) `gpt-6.2-astra`/`gpt-6.2-sol` cannot call tools at
+   any setting and `gpt-5.4`/`gpt-5.5` only with reasoning off; `gpt-5.2` and `o3` work with tools+vision+reasoning;
+   `gemini-3.1-pro-preview` answers 429 (no quota on this key); `claude-opus-5-5` and `claude-fable-5-2` pass
+   tools+vision and a 2-turn tool exchange. Fable 5.2 = $10/$50 per Mtok (cache read $1).
+2. **Routines still pin cheaper models (routine changes need the owner's yes):** chain 03:00 lead
+   `gemini/gemini-3-flash-preview`; SCOUT 09:00 and HARVEST Tue 10:00 `gemini/gemini-flash-lite-latest`. Proposed:
+   all three → `anthropic/claude-fable-5-2`. The three 11-30 routines pin nothing, so they now use Fable. Workers the
+   chain dispatches (SCOUT, DESIGNER, QC_EDITOR, PUBLISHER) already use their roster model (Fable).
+   Estimated spend at Fable: ~$5/day as routines stand, ~$7/day if the three routines move [Guessing: assumes ~70%
+   cache hits]; a chain retry storm (like 11-26 03:20–03:32) could approach the $25/day rail. Risks: every agent is on
+   one provider; the Anthropic balance is not readable by API (check the console); the station fallback chain
+   (haiku-5.5, gemini-3-flash-preview, gpt-5-mini) runs on OpenRouter, which has **$6.32 left of $45** — top up.
+   Gemini 3.8 Flash was not tested or used (Fable outranks it).
 3. **Style conflict:** gothic-blackletter-faith puts lettering IN the image; DESIGNER's new manual says "one wordless
    master image". Decide which wins for that style (or retire it).
 4. **QC_EDITOR's context has no Etsy-rules block** (installed exactly as sent; it has its own 3 rule lines). Add or keep.
@@ -502,7 +514,7 @@ watercolour backgrounds — StarNet's own AI art), per-card `"background"`, ligh
 with the photo on its own rising layer; tests 120/120. Demo film is in Central Outbox **and** WORK → DELIVERABLES
 (the owner looks there — put films in both). Also: runner credential scrub (`scripts/run-test-list.mjs` `stepEnv`),
 bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_FIELD_NOTES.md` §3).
-**Still uncommitted (other sessions' work, deliberately left out):** [2026-11-26 22:00 PST: the Apify cap files, its test, its `fast.list` line, the `f050e860` record and `qa/BUGS.md` rows, and the field-notes SCOUT section are now committed in `8557798db` + `95370d285` (not pushed); only `sidecar/cron-orchestrator.js` and the untracked files remain.] the Apify per-run cap (`sidecar/hostquota.js`,
+**Still uncommitted (other sessions' work, deliberately left out):** [2026-11-26 22:00 PST: the Apify cap files, its test, its `fast.list` line, the `f050e860` record and `qa/BUGS.md` rows, and the field-notes SCOUT section are now committed in `8557798db` + `95370d285` (pushed 2026-11-26 04:32); only `sidecar/cron-orchestrator.js` and the untracked files remain.] the Apify per-run cap (`sidecar/hostquota.js`,
 `mcp/translate.js`, `tools/builtin/web.js`, `test/hostquota-run-cap.test.js`, its `test/fast.list` line, `qa/bugs/f050e860`
 + its `qa/BUGS.md` rows, the SCOUT section of the field notes), `sidecar/cron-orchestrator.js`, `sidecar/index.js`, and
 untracked files (`chat*`, assessment notes and others). **Fixed 2026-11-26 (owner's request):** `test/fast.list` had named
