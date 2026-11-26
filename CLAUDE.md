@@ -35,7 +35,7 @@ You are my advisor, not my assistant. Your job is accuracy, not agreement. Follo
 node sidecar/index.js          # run the sidecar directly against LIVE state (Node core modules only — no install needed)
 npm run dev:seed:keep          # the real dev loop — scratch workspace from dev/fixtures/seed-workspace/, SKYNET_DEV=1
 npm ci                         # install deps (desktop shell / dev tooling only)
-npm run test:fast              # the merge gate — ~364 steps from test/fast.list via scripts/run-fast-tests.mjs
+npm run test:fast              # the merge gate — 1,018 steps from test/fast.list via scripts/run-fast-tests.mjs (counted 2026-11-25)
 npm run test:fast -- <substr>  # filter test:fast to steps whose path contains <substr>
 node test/<name>.test.js       # run one test file standalone (plain node, no framework — requires test/_assert.js)
 npm run test:http              # live sidecar HTTP/E2E suite (test/http.list)
@@ -109,10 +109,11 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 - **Ten agents exist** (live roster, 2026-11-24): NIGHT4CHRIST (`agent`, Commander), SCOUT (research), DESIGNER (`webdesigner`, product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), and the studio crew STORYWRITER, DIRECTOR, PRODUCER, QC_EDITOR (`qceditor`), COPYWRITER. The GPT-4o Independent Reviewer (`gpt4o_reviewer`) is **designed but not in the roster** — see its section below.
 - **approvalMode — historical snapshot 2026-11-24, not current state** (live source: `agent.roster.json` / `node scripts/agent-config-integrity.mjs`): `full` on 8 — agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor; `ask` on 2 — producer, copywriter. Only `'full'` and `'ask'` exist; anything else normalizes to `ask`. **An `ask` agent in a cron run never stalls** — an ungranted consent-gated call is denied immediately (`sidecar/permissions.js`, `SILENCE`); unattended capability for `ask` agents comes from routine `unattendedGrants` and the Workshop grant, not from waiting. Full Access allows before even the hardline floor (`permissions.js` `full-power`), and answering "Full access" on any permission card permanently flips that agent to `full` (`persistAgentFullAccess`) — that is how modes drift without a doc trail. Older docs saying SCOUT/DESIGNER/PUBLISHER are `ask` (`STATION_FIELD_NOTES.md` §1, §16 table) are stale.
-- **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval.
-- **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and avoid `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
+- **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval. The same applies to commits, paid generation (Higgsfield MCP credits are the owner's Plus wallet), and StarNet/OmniRoute restarts: each needs the owner's explicit yes for that action, and one approval does not carry over to the next.
+- **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and never run `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. Inspect a file before editing it, leave unrelated working-tree changes exactly as found (never fold them into your own edit), and ask before expanding scope beyond what the owner approved. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room. Verified by one real cron run: the `skill.view` error is gone.
 - **First real product**: "Verses for Hard Days" (`workspaces/agent/verses-for-hard-days/`) — 10 KJV scripture printable pages plus competitor pricing research and a full listing draft with per-sale profit calculation. Status: `approved-to-publish` (owner-approved, not yet published — no Etsy API exists).
+- **Memorial film engine (`memorial/`)**: production integration proceeds in owner-approved stages. Finish a stage, report, and stop; never start the next stage without explicit approval. Current stage, evidence, open issues and recovery steps: `memorial/MEMORIAL_SESSION_HANDOFF.md`. Read it before touching `memorial/`.
 - **2026-10-20: two new STUDIO tools shipped** (`image_stock_fetch` — CC0/public-domain source imagery with a licence record per asset; `vector_export` — SVG → 300-PPI PNG + hand-written PDF) and `image_quality_check` was hardened to accept the real argument shapes models actually send. Full detail: `STATION_FIELD_NOTES.md` §4 and §9.
 - **Model routing** is switched with `scripts/station-models.mjs`, not by hand. Current assignment and the OpenRouter wallet balance drift fast — check `node scripts/station-models.mjs list` rather than trusting a number written here.
 
@@ -318,12 +319,36 @@ may reply 200 but change nothing.
 ### 🧪 Tests
 
 ```bash
-npm run test:fast    # The merge gate — ~364 steps (halts at step 305 on this device on the
-                     # pre-existing qa-product-perfect-claims failure; 12 documented pre-existing failures)
+npm run test:fast    # The merge gate — 1,018 steps (can stop at step 304: qa/bugs/2ba9cd3e is INTERMITTENT on this
+                     # device; step by step 2026-11-26: 1,007 green / 12 red, all pre-existing — handoff §1b/§1c)
 npm run test:http    # Live sidecar HTTP/E2E suite (run whenever you touch routes, streaming,
                      # persistence, providers, tools, schedules, or channels)
 npm test             # test:fast + test:http
 ```
+
+**Test harness rules (learned 2026-11-25, `qa/bugs/2c50b150`, `qa/bugs/7e750ab7` — fixes UNCOMMITTED, see
+`memorial/MEMORIAL_SESSION_HANDOFF.md` §1a):**
+- **Run tests with credentials stripped** — tests copy `process.env` into the sidecars they spawn, and a test
+  sidecar that outlives its test keeps whatever keys you had:
+  `strip=$(env | grep -oE '^[A-Za-z_]*(KEY|TOKEN|SECRET|PASSWORD)[A-Za-z_]*' | sed 's/^/-u /'); env $strip node test/x.test.js`
+- **`A.report()` (`test/_assert.js`) calls `process.exit()`.** Never call it inside a `try` whose `finally`
+  kills a sidecar or removes a folder — the finally never runs, even on a PASS. Call it after the try/finally.
+- **A booted sidecar writes `<workspace>.recovery-owner.json(.generations)` BESIDE its workspace** and never
+  deletes them. Wrap temp dirs in `track(fs.mkdtempSync(...))` from `test/helpers/tmp-tracker.js` (removes the
+  dir + both siblings at exit, even after a failure); `SidecarFixture.dispose()` does the same.
+- **Test sidecars on a fresh workspace default to production DISARMED**, and the `custom` provider tests use for
+  mocks is metered — so a test driving a mock must arm ITS sandbox (`process.env.STARNET_PRODUCTION_ARMED = '1'`
+  at the top, or `SidecarFixture.create({armed:true})`). Never change the gate default or mark `custom` unmetered.
+- **Stop a spawned sidecar and WAIT for `exit`** before the test ends — a shutting-down sidecar rewrites its
+  workspace after cleanup.
+- **After any test run:** `pgrep -af 'sidecar/index\.js'` must show only the launcher's child (parent = the
+  `start-starnet.sh` PID). Anything else is a leak: verify `SKYNET_WORKSPACES` is under `$PREFIX/tmp`, port ≠ 8787,
+  parent 1 — then ask, then kill by PID.
+- **e2e baseline on this device (2026-11-25, all 113 `http.list` e2e steps, keyless, with the uncommitted fixes):**
+  108 green / 5 red — `output-recovery`, `image-task`, `e2e.attachments`, `nightshift-presence`,
+  `browser.gauntlet` (hangs to timeout; environmental). Historical snapshot; re-measure.
+- `scripts/run-test-list.mjs` STOPS at the first failing step — to measure a whole list, run each step through it
+  with its own filter.
 
 ### 🔧 Upgrading Claude Code itself on this phone (host tool, not StarNet)
 
@@ -387,4 +412,23 @@ Never hardcode a dated armed/disarmed, provider, model, or chain value as "curre
 All dated session history (2026-10-26 through 2026-11-17) has been moved to `docs/CLAUDE_ARCHIVE_20261120.md` with zero history deleted.
 
 ### Live platform fix not yet reflected above
-- `sidecar/workspace-owner.js` — Android/Termux stale-lock recovery: when `process.kill(pid, 0)` returns `EPERM`/`EACCES` (permission-blocked, not a liveness answer), `defaultPidAlive` falls back to `fs.accessSync('/proc/<pid>', F_OK)`; ENOENT there proves the holder is dead and the stale lock is reclaimable. This fixed a `WORKSPACE_BUSY` exit-73 that held a dead PID 14644 claim forever. The fix is uncommitted in the working tree.
+- `sidecar/workspace-owner.js` — Android/Termux stale-lock recovery: when `process.kill(pid, 0)` returns `EPERM`/`EACCES` (permission-blocked, not a liveness answer), `defaultPidAlive` falls back to `fs.accessSync('/proc/<pid>', F_OK)`; ENOENT there proves the holder is dead and the stale lock is reclaimable. This fixed a `WORKSPACE_BUSY` exit-73 that held a dead PID 14644 claim forever. Committed in `ad1c83fea` (corrected 2026-11-26: this line used to say "uncommitted"; `git log -- sidecar/workspace-owner.js` and the HEAD source show the EPERM/EACCES → `/proc` fallback).
+
+### Session d2ab07f3 (2026-11-25 evening) — uncommitted work waiting for the owner
+Full inventory, evidence and backups: `memorial/MEMORIAL_SESSION_HANDOFF.md` §1a. In short: ~83 test files +
+`test/helpers/{tmp-tracker,sidecar-fixture}.js` + `qa/bugs/{2c50b150,7e750ab7}` + `qa/BUGS.md` changed, NOT
+committed (HEAD `a951b8967`). Run full `npm run test:fast` before any commit; commits need the owner's yes.
+- **`KLING_API_KEY` is no longer in `~/.claude/settings.json` `env`** (removed 2026-11-25, owner's request) — Claude
+  Code sessions no longer inherit it, so tests started from Claude no longer leak it. StarNet still gets it from
+  `~/.config/starnet/env`. Backup `~/.claude/settings.json.bak-20261125-pre-kling-removal` still holds the key (mode 600).
+- **The Outbox ▶ Play button works in a real browser** (headless Chromium, real click, 4-minute film played and
+  seeked; handoff §3e). Nobody has watched/listened by eye or ear yet.
+- **Kling has never produced or billed anything** with this key (its own task/cost API: 0 tasks, no resource
+  packs; every StarNet attempt refused "Account balance not enough").
+
+### Session 085a8b6e (2026-11-25/26) — more uncommitted work, same rules
+Start at `memorial/MEMORIAL_SESSION_HANDOFF.md` §1c, then §1b. Memorial: opt-in `"theme": "dawn"` (4 owner-chosen
+watercolour backgrounds — StarNet's own AI art), per-card `"background"`, light chapter/verse cards, portrait card
+with the photo on its own rising layer; tests 120/120. Demo film is in Central Outbox **and** WORK → DELIVERABLES
+(the owner looks there — put films in both). Also: runner credential scrub (`scripts/run-test-list.mjs` `stepEnv`),
+bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_FIELD_NOTES.md` §3).

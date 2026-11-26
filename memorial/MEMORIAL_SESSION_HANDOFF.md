@@ -1,13 +1,181 @@
 # Memorial engine — session handoff
 
-Last updated 2026-11-25, end of session (all commits pushed to the station branch, §1; studio fix
-live; orphan test sidecars cleaned up; test-runner fix tried and reverted, §1). Previous update:
-2026-11-24, session ea68579f.
+Last updated 2026-11-26, session 085a8b6e (§1c: "Lord lead the way" dawn theme + portrait card, film in Outbox AND Deliverables; §1b: test env, runner key scrub); before that 2026-11-25 evening, end of session d2ab07f3 (run as `claude --resume ea68579f`, PID 27670 —
+ONE session, not two). This session: the 4-minute film PLAYED in a real (headless) browser through the
+Outbox Play button (§3e); then, at the owner's request, a long detour fixing the StarNet TEST HARNESS
+(orphan test sidecars holding the real Kling key, temp-folder leaks, 38 e2e tests failing on the production
+gate) — all of it **uncommitted**, full inventory in §1a. Previous update: earlier 2026-11-25 (commits
+pushed, studio fix live). Before that: 2026-11-24, session ea68579f.
+
+## 1a. START HERE — what session d2ab07f3 left UNCOMMITTED (2026-11-25 evening)
+
+Nothing below is committed or pushed. HEAD is still `a951b8967` on `feat/harness-backend`.
+`git status` shows ~90 changed/new files from this session; `CLAUDE.md`, `STATION_FIELD_NOTES.md` and
+`sidecar/cron-orchestrator.js` were ALREADY modified before it (only the dated additions in the two .md
+files are this session's). Every edited file has a same-directory backup; suffix tells which change.
+
+| # | Change | Files | Backup suffix | Proof (all keyless, live station untouched) | Record |
+|---|---|---|---|---|---|
+| 1 | Outbox Play verified in a real browser | none (scratch script only) | — | headless Chromium 152, real click: 1920×1080, 238.13 s, playhead 0.31→20.92 s, seek → 122.87 s, 206 `video/mp4`; every page write blocked; agent config hashes unchanged | §3e |
+| 2 | Orphan test sidecars stopped | — (PIDs 28176, 28290, my replay 6077) | — | identity-checked, killed by PID, owner said "verify first" | `qa/bugs/2c50b150` |
+| 3 | `KLING_API_KEY` removed from `~/.claude/settings.json` `env` | `~/.claude/settings.json` (outside repo) | `.bak-20261125-pre-kling-removal` (STILL HOLDS THE KEY, mode 600) | JSON parses; only that key removed; station env + sidecar 5766 still have it | memory |
+| 4 | `A.report()` moved after `finally` (report() calls `process.exit()` and skipped cleanup) | 3 http tests + 7 siblings (`update-preparation[.http]`, `workspace-lineage[.http]`, `lineage-stationless-halt.http`, `attachments`, `workspace-owner[.e2e]`, `workspace-recovery`, `loops-endurance.e2e`) | `.bak-20261125-report-after-finally` | before: passing runs left sidecars 4692/5187 + folders; after: none; planted failure still exits 1 | `2c50b150` |
+| 5 | `.recovery-owner.json(.generations)` siblings removed | `workspace-owner.e2e`, `loops-endurance.e2e`, `test/helpers/sidecar-fixture.js` (`removeWorkspace()`, exit sweep also removes profile) | `.bak-20261125-generations-cleanup` | replays clean | `2c50b150` |
+| 6 | NEW `test/helpers/tmp-tracker.js`: `track(fs.mkdtempSync(...))` removes dir + siblings at process exit, even after a failure | 57 e2e files (+1 line each, line endings preserved) | `.bak-20261125-tmp-tracker` | all 113 e2e steps ×2: leaking steps 60 → 2 (Chromium's own dirs), 0 processes, passes identical | `2c50b150` |
+| 7 | 38 e2e tests arm their own throwaway sidecars: `process.env.STARNET_PRODUCTION_ARMED = '1'` | 38 e2e files (+4 lines each) | `.bak-20261125-arm-test-sidecar` | experiment (outer env only, no edits) 38/42 green; after: suite 70/43 → **108/5**, no green→red | `qa/bugs/7e750ab7` |
+| 8 | `openai-compat.e2e` waits for its sidecar to exit (`stopChild`) | 1 file | `.bak-20261125-await-exit` | 3 replays OK (36), nothing left | `7e750ab7` |
+| 9 | Bug records + index | `qa/bugs/2c50b150-*.md` (corrected root cause, all tables), NEW `qa/bugs/7e750ab7-*.md`, `qa/BUGS.md` (regenerated) | `2c50b150`: `.bak-20261125-rootcause` | `--validate` OK (228 files) | — |
+
+**Checks run:** `source-text-integrity`, `test-list-runner`, `qa-bugs-register` green; every changed file
+`node --check`ed. **NOT run:** full `npm run test:fast` and full `npm run test:http` (only the e2e
+steps of `http.list`, each through `scripts/run-test-list.mjs`). Run full `test:fast` before committing.
+Tests were run on Node v26.4.0, not Node 22.
+
+**Still red in the e2e suite (not caused by this work; files untouched by the gate fix):**
+`output-recovery.e2e` (evidence-length assertion; already known), `image-task.e2e` (Images API request
+shape), `e2e.attachments` ("prior dialogue run completes cleanly"), `nightshift-presence.e2e` (presence
+expected false, got true), `browser.gauntlet.e2e` (passed 25 s once, now hangs to the 600 s cutoff; none of
+its 9 loaded files modified; Chromium launches, gets SIGKILLed ~25 s in, test then waits with no timeout —
+environmental, not investigated further).
+
+**Facts learned (also in CLAUDE.md "Test harness" + memory):**
+- `A.report()` (`test/_assert.js`) calls `process.exit()` — never call it inside a `try` whose `finally`
+  cleans up.
+- A booted sidecar writes `<workspace>.recovery-owner.json(.generations)` BESIDE its workspace and never
+  deletes them, by design.
+- Test sidecars on fresh workspaces default to production DISARMED; the `custom` provider is metered, so a
+  test driving a mock through it must arm its sandbox. Never "fix" by changing the gate default or marking
+  `custom` unmetered.
+- The Claude Code process had the real `KLING_API_KEY` in its env via `~/.claude/settings.json` — that is
+  how test sidecars got it. Removed; sessions started BEFORE the removal (incl. this one) still hold it.
+- Kling account: 0 text2video / image2video / image tasks ever, no resource packs in 90 days; every StarNet
+  attempt (9, 2026-11-20 03:29–04:11Z) refused "Account balance not enough". The key has never produced or
+  billed anything as far as Kling's own API shows.
+- `$PREFIX/tmp` still holds ~1,666 OLD `starnet-*` test folders (2.2 GB, since 2026-10-16; no real key values
+  found in them). Not deleted.
+
+**Open, owner's call:** commit (needs a yes; run full `test:fast` first), the 4 other red e2e tests,
+`browser.gauntlet` hang, deleting the 1,666 old tmp folders, deleting the settings.json backup that holds the
+Kling key, re-applying the reverted runner fix (env scrub + parent-death guard) — no longer needed for the
+direct cause but still a second layer.
+## 1b. Session 085a8b6e (2026-11-25, late; same Claude process 27670 after `/clear`) — state re-checked
+
+Nothing committed or pushed; HEAD still `a951b8967`. §1a still holds; this adds what was re-verified and found.
+
+**Live station [Verified, read-only]:** health ok; `.spend-pending/` empty; production ARMED (file unchanged
+since 2026-11-21); only sidecar 5766 (parent = launcher 5722) — no orphan test sidecars.
+`scripts/run-test-list.mjs` and `test/fast.list` byte-identical to HEAD (reverted runner fix NOT applied).
+
+**This Claude process still holds `KLING_API_KEY`** — `/clear` does not restart Claude Code, and the key was
+removed from `~/.claude/settings.json` only for NEW launches. Strip credentials for every test run from it
+(CLAUDE.md "Test harness rules"). Quit and relaunch `claude` to drop it.
+
+**Full `test:fast` measured — first time on this device** (1,018 steps, NOT ~364 as CLAUDE.md said; each step
+through the real runner, keyless, `timeout 600` per step; script + per-step TSV in this session's scratchpad
+`fast-each.sh`): **1,005 green / 13 red, 0 stray sidecars, 844 s of step time** (under the 1,200 s `npm run test:fast` cap, but the real runner STOPS at the first red: step 304). Every red test file is unmodified in the working tree. Red: `ledger-reconcile` (304, NEW record `2ba9cd3e`), `qa-product-perfect-claims` (310, documented), `agent-capabilities` (364, reads the real `~/.local/share/StarNet/.../agent.save.json` — fails under the hermetic HOME), `image-qc` (370, DPI/pHYs), `crt-context-loss.e2e`, `world-sharpen`, `worldlight-receiver` (408/498/503, no WebGL in headless Chromium here), `routing.b5` (650, `outbox_list`/`outbox_read` now static on connectors — introduced by Nov 3–11 commits, NOT by the memorial commits), `lint-determinism` (813, `Date.now` in `sidecar/cron-orchestrator.js:305` — the pre-existing uncommitted change — and `cron-orchestration-tasks.js:67`), `failopen-ratchet` (830, bare catches in `image-kling-upscale.js`, `openai-image.js`), `skin-study-preview`, `projection-load-geometry` (888/890, `sharp` has no android-arm64 build), `workspace-probe-errors` (911, "uncertain EPERM must never authorize taking a workspace" — [Likely] contradicted by the committed Android `/proc` fallback `ad1c83fea`, not investigated). All 5 memorial steps green. No red is attributable to session d2ab07f3's uncommitted test-harness changes. Per-step TSV kept at `~/memorial-research/testfast-20261125-results.tsv`.
+
+**Temp folders, corrected inventory** (nothing deleted): `$PREFIX/tmp` is 9.4 GB.
+| What | Count | Size | Whose |
+|---|---|---|---|
+| `starnet-webreader-<pid>` Chromium profiles | 13 | 2,042 MB | LIVE station web reader, 2026-10-19 … 11-02, every PID dead — `browser.js` rm's the profile only on a clean close |
+| other `starnet-*` test folders | 1,653 | ~145 MB | test debris since 2026-10-16 |
+| `*.recovery-owner.json*` | 1,855 | 16 MB | test sidecars (fixed going forward by `tmp-tracker`) |
+| `sk-*` | 1,285 | 14 MB | test debris |
+| `video-prov-*` | 3 | 394 MB | video-provider tests |
+| `claude-10387/` | — | 6.6 GB | Claude Code session scratchpads (all sessions) |
+So the handoff's "1,666 folders, 2.2 GB of test debris" was mostly NOT test debris.
+
+**Reverted runner fix — evaluated [Recommendation]:** the direct causes are fixed (§1a #4–#6), but two paths
+still hand real keys to test sidecars: a Claude process started before the settings change (this one), and any
+shell that ran the cheat-sheet `set -a; . ~/.config/starnet/env`. Re-apply the env scrub (with an opt-in variable
+for deliberate live-key tests). Hold the parent-death guard unless it fails the step loudly — a silent guard would
+have hidden the report-before-finally defect.
+
+**Agent integration (README "held for Phase D") — NOT started.** No `memorial_render` tool, no `noAgent` tick in
+`sidecar/`. Films still reach the Outbox only via `node memorial/cli.mjs outbox`.
+
+**Bug records:** `2c50b150` retitled to the corrected root cause + re-check block; NEW `2ba9cd3e` (P2,
+ledger-reconcile JSON cut off at the pipe buffer); `qa/BUGS.md` regenerated; `--validate` OK (229 files).
+Backups `*.bak-20261125-retitle`.
+
+**Competitor research (MemoryMotionCo) + prototype — see memory
+`project_memorial_competitor_memorymotionco.md`.** Our photo scenes beat a template; our TITLE/CLOSING CARDS
+lose (text-only, darkened taupe, no portrait). A scratch prototype — hero portrait melted into the watercolor
+background + Great Vibes (OFL) name written on with a feathered wipe — rendered 5.5 s in ~4 s wall and looks
+right by eye: `~/memorial-research/title-proto-20261125/` (README inside). Not wired into the engine.
+
+**Owner decisions this session (2026-11-25):** (1) title-card upgrade = next stage → BUILT, below; (2) delete dead
+tmp leftovers → DONE (3,109 entries, 9,591 → 7,386 MB, nothing in use; record `2c50b150`); (3) re-apply the
+runner fix as "key scrub only" → DONE, uncommitted (`scripts/run-test-list.mjs` `stepEnv`, opt-in
+`STARNET_TEST_KEEP_CREDENTIALS=1`; replay old runner → keys reach the step, new → none; a real
+`update-preparation.http` sidecar started from this key-holding process held no Kling key). Backups `*.bak-20261125-key-scrub`.
+
+**Stage: portrait title/closing card — BUILT, uncommitted [Verified].** Opt-in `"portrait": <photo number>` on a
+title or closing card (README "Portrait title / closing card"). Files: `memorial/plates.mjs` (renderPortraitCard,
+PORTRAIT, portraitAlpha, MemScript font), `memorial/gallery.mjs` (validation, `portraitCrop`, `faceOpacity`, audit
+checks `portrait-crop` / `portrait-keeps-faces`, write-on mask in `segmentGraph`), NEW
+`memorial/assets/fonts/GreatVibes-Regular.ttf` + `GreatVibes-OFL.txt`, `memorial/README.md`,
+`test/memorial-gallery.test.js` (+16 assertions → 112). Backups `*.bak-20261125-portrait-card`.
+Cards without `portrait` produce the same graph as before (asserted). First audit REFUSED the grill photo (face near
+the top edge) — correct; then my own face test was wrong (it tested box corners, which are background) — now tests
+the oval inside each face box. Demo: `~/memorial-research/portrait-demo/` (fictional demo photos, title portrait =
+photo 2, closing = photo 1): 56.5 s, 481 s wall, VERIFIED, QC every check PASS, 19/19 audit; frames looked at:
+name written on at 2.2 s / 3.0 s, complete with dates at 6 s; face and hair intact. Memorial tests 5 steps green.
+NOT done: nobody has watched it on a TV or listened; not in the Outbox/Library; `gallery-demo.json` left unchanged.
+
 **Read this before touching `memorial/`.** Permanent rules: root `CLAUDE.md`. Architecture, order
 spec and operator workflow: `memorial/README.md`. This file holds what changes between sessions.
 Labels: **[Verified]** = seen in a live run this session (real output numbers);
 **[Code inspection]** = read in source, not reproduced; **[Recommendation]** = proposal only;
 **[Not done]** = deliberately left.
+
+## 1c. "Lord lead the way" title card + dawn theme (2026-11-25, same session, owner-authorised, UNCOMMITTED)
+
+Owner supplied 4 watercolour dawns (`~/storage/downloads/lord lead the wY/`, 1024x1536 PNG, origin not recorded) and named
+`17956322123615191295378050759541.png` the title background. Done (backups `*.bak-20261125-lead-the-way`):
+- `assets/backgrounds/lead-the-way-{sunrise,river,still-waters,lake}.jpg` — 16:9 crops, uniform lanczos scale to 3840x2160.
+  Sunrise crop 874x492 @ (150,461) puts the sun (source 266,658) at 13% across, left of the portrait.
+- `plates.mjs`: `BACKGROUND_SETS.dawn`; `INK.dawn` = light cards (chapter/verse: background soften 3, light pool, dark ink,
+  light halo); portrait card: background drawn sharp, two light pools, portrait on its own layer (`PORTRAIT_IN` 0.5 s + 2.0 s),
+  text retimed (line 1.6 s, name 2.4 s), edge brightening `EDGE_LIGHT` 0.88 only below 0.97 opacity (faces proven ≥ 0.98).
+- `gallery.mjs`: `"background"` per card (validated). README documents all of it.
+- `test/memorial-gallery.test.js`: 120 assertions OK (8 new). Other 4 memorial tests OK.
+- Demo: `~/memorial-research/lordlead/order.json` → `render/out/lead-the-way-demo.mp4`, 58.7 s, 284.5 s render,
+  VERIFIED, every QC check PASS, 19/19 audit. Frames at 0.3/1.2/2.2/3.3/4.4/7.5 s looked right by eye (`title-seq.jpg`).
+- Higgsfield `upscale_image` tried on all 4 (8 credits, owner authorised): it REPAINTS (SSIM 0.65–0.69, sun reshaped, rays and
+  trees added, watercolour texture lost). Rejected; outputs unused in `~/memorial-research/lordlead/up/`.
+- **Provenance [Verified, sha256 = manifest rows]:** the 4 images are StarNet's own AI art of 2026-11-22 — sunrise/lake =
+  DESIGNER `psalm-34-18-soft-watercolor-sunrise-{master-4x5,2x3}.png`, river = DESIGNER `psalm-46-1-art-A3.png`, still
+  waters = DIRECTOR `ref-still-01.png`. AI-generated → Etsy AI disclosure applies if shown in a listing.
+- **In the Outbox [Verified 2026-11-25, owner asked]:** `cli.mjs outbox` (MEMORIAL_BUSINESS_ROOT=scratch) → owner `agent`
+  (NIGHT4CHRIST), project `memorial-lead-the-way-demo`, film + storyboard; manifest 211 → 214 lines (backup
+  `.deliverables/manifest.jsonl.bak-20261125-lead-the-way`); film sha256 `c8e8fba2…` identical to the render;
+  verification `passed` ("real footage, 44196460 bytes; memorial QC: 18/18 checks pass"); qc/approval left to the owner.
+  Headless Chromium on live :8787 (all 13 page writes blocked; agent.save/roster hashes identical; integrity exit 0):
+  real click on "▶ Play lead-the-way-demo.mp4" → 1920x1080, 58.7 s, playhead 1.21 → 19.66 s, seek → 32.93 s playing,
+  server `206 video/mp4 bytes 0-44196459/44196460`, signed src. Screenshot of the title card in the Outbox player taken.
+- **In the Deliverables LIBRARY too [Verified 2026-11-25, owner: "I want to play it in deliverables, I don't see it"]:** copied to
+  `workspaces/agent/workshop/memorial-lead-the-way-demo/lead-the-way-demo.mp4` (cmp identical), registered via
+  `POST /api/deliverables/register` (token read from the env file's one line, fingerprint = live sidecar) → `registered:true,
+  status:kept` (route's own video-verify). Journal 568 → 569 (backup `deliverables.library.jsonl.bak-20261125-lead-the-way`).
+  Headless Chromium (writes blocked): WORK → DELIVERABLES → top card "Memorial film — Lord lead the way…" (no search needed)
+  → expand → OPEN → inline player; a REAL CLICK ON ▶ (28 px from the left, 56 px up from the bottom of the 275x155 player)
+  → playing 1.4 → 21.8 s, seek → 32.5 s, `206 video/mp4` ranges of this file. Clicking/tapping the PICTURE does not start
+  it (desktop Chrome native controls); a click on the bottom strip is the timeline. Player has no `muted` attribute (code).
+  Script: session scratchpad `play/library-play-test.mjs`.
+- **Agent config changed during this window — NOT by me as far as the evidence goes:** `agent.save.json`/`roster` rewritten
+  11:49:49–51 local (rev 5548 → 5549): only `updatedAt`/`savedAt`/`_saveRevision` and `stationStats.runSyncAt`/`ratingSyncAt`
+  (the page's xpstore growth sync). Integrity exit 0. My test runs blocked every page write; the one killed by `timeout` had
+  no browser left before 11:49:50. [Likely] the owner's own open tab. Unprovable: Android denies /proc/net/tcp.
+  HAZARD for the next tester: an external `timeout` kills node, not the Chromium it spawned; with the CDP session gone the
+  request blocking is gone too. Put the deadline inside the script and kill Chromium in `finally`.
+- **Commit gate [Verified 2026-11-26]:** full `test:fast` step by step (`fast-each.sh`, credential vars stripped, 1,019 steps —
+  the working tree's list includes the uncommitted `hostquota-run-cap` test): **1,007 green / 12 red, every red on the
+  2026-11-25 pre-existing list** (qa-product-perfect-claims, agent-capabilities, image-qc, 3× WebGL, routing.b5,
+  lint-determinism, failopen-ratchet, 2× sharp, workspace-probe-errors); no step left a sidecar. Step 304
+  (`ledger-reconcile`) was GREEN this time: `2ba9cd3e` is intermittent (record corrected). Per-step results:
+  `~/memorial-research/testfast-20261126/results.tsv`.
+Not done: nobody has watched it with sound or on a TV.
 
 ## 0. Where everything is (quick index)
 
@@ -51,7 +219,7 @@ Labels: **[Verified]** = seen in a live run this session (real output numbers);
 - **StarNet** was restarted by the owner twice on 2026-11-25; now launcher **5722**, sidecar **5766**
   (booted 16:48:05 PST, after the studio fix was written). Health ok, `.spend-pending/` empty.
 - **Two orphan test sidecars (PIDs 10757, 10883) — STOPPED** with the owner's yes. They were left by an
-  interrupted 2026-11-22 `test:http` run, ran 55 h with parent PID 1, held the real `KLING_API_KEY`
+  2026-11-22 `test:http` run (CORRECTED in §1a: not necessarily interrupted — even PASSING runs leaked), ran 55 h with parent PID 1, held the real `KLING_API_KEY`
   (fingerprint = station's) and answered a fixture token that is public in the repo. Their folders and 29
   more leftover test folders in `$PREFIX/tmp` were deleted. Record: `qa/bugs/2c50b150-*.md` (P1, open).
 - **Test-runner fix for `2c50b150` — written, proven, then REVERTED at the owner's request.** It stripped
@@ -363,6 +531,24 @@ artifact / deliverable / ticket step, so `test:http` was not run; full `test:fas
   error comes: the player just stops. That covers ~20 minutes of seeking for a 4-minute film; reload fixes it.
 - A stream re-reads the file after hashing (§3c #3, stated, not eliminated).
 
+### 3e. Played in a real browser [Verified 2026-11-25, session d2ab07f3]
+
+Claude in Chrome was not connected, so the station's own Chromium 152 ran headless against live :8787
+(scratch profile, deleted after). Every non-GET `/api/*` request was blocked by CDP request interception,
+so the page could not write: it tried 13 (`/api/save`, `/api/roster`, `/api/activity`, …), all refused;
+`agent.save.json` / `agent.roster.json` hashes identical before and after, `agent-config-integrity` exit 0.
+Path: WORK menu → CENTRAL OUTBOX (121 rows, 6 Play buttons) → real mouse click on
+"▶ Play gallery-long.mp4". Result: 1920×1080, duration 238.13 s, `paused:false`, `readyState 4`, no error,
+playhead advanced 0.31 → 20.92 s in ~18 s; seek to the middle → plays from 122.87 s. Server answered
+`206 video/mp4 bytes 0-71702790/71702791`, then `206 … 36896768-…` for the seek. Signed src.
+NOT checked: picture/sound by eye or ear, phone Chrome, the 5-minute ticket re-sign path.
+Script: session scratchpad `play-test.mjs` (not kept in the repo).
+
+**Orphan test sidecars, second occurrence** — corrected root cause in `qa/bugs/2c50b150-*.md`:
+`A.report()` exits before `finally`, so even PASSING runs of three HTTP tests leak a sidecar; the real
+Kling key comes from `~/.claude/settings.json` `env`. PIDs 28176/28290 (+ replay 6077) stopped with the
+owner's approval.
+
 ## 4. Defects found and fixed this session
 
 1. **[Verified] Sideways phone photos were cropped as landscapes (classic engine).** `ffprobe`
@@ -456,11 +642,13 @@ artifact / deliverable / ticket step, so `test:http` was not run; full `test:fas
 
 ## 6. Not done — needs the owner
 
+0. **Session d2ab07f3's uncommitted test-harness work** — see §1a (commit needs a yes; full `test:fast` first).
 1. **Push `3a0e74936`** (bug record only) when wanted — fast-forward to the station branch.
-2. **Watch the films**: reload StarNet → Outbox → ▶ Play (`gallery-long.mp4` first). Streaming is proven by
-   signed-URL fetches (§3d); no real browser has played one.
+2. **Watch the films**: reload StarNet → Outbox → ▶ Play (`gallery-long.mp4` first). A headless Chromium
+   played it through the real Play button (§3e); nobody has looked at or listened to it yet.
 3. **Studio fix, first real exercise**: the next studio re-render (spends Kling/Higgsfield credits).
-4. **Test-runner leak `2c50b150`**: fix was reverted; decide whether to re-apply it (above) or another way.
+4. **Test-runner leak `2c50b150`**: the DIRECT cause (report-before-finally, sibling folders) is fixed
+   uncommitted in §1a; the reverted runner fix (env scrub + parent-death guard) is optional extra defence.
 5. **Agent integration** (README "held for Phase D"): a `memorial_render` tool under capId `studio` and a
    `noAgent` cron tick. Outbox registration is DONE via `cli.mjs outbox`.
 6. **Listen** to the eight tracks and choose the shop's default (`manifest.json` → `default`).

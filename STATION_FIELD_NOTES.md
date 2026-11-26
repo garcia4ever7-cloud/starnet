@@ -124,6 +124,14 @@ Lines are `{"name": "...", "payload": {...}}` — not `{type}`/`{event}`. Useful
   `paths`, declared name wins). Garbage still fails closed, but the error now names the missing file
   rather than the shape. Fixed + regression-tested 2026-10-20; verified live, 9 turns → 2.
   **If you add an agent-facing tool with a non-scalar parameter, expect this class.**
+- **Higgsfield `upscale_image` (bytedance, 4k, 2 credits each) repaints the picture — it is not a faithful
+  upscaler.** Measured 2026-11-25 on four 1024×1536 watercolours (8 credits, owner-authorised): SSIM of the
+  downscaled result vs the original 0.65–0.69 (a faithful upscale scores > 0.9); by eye the sun changed shape and
+  gained rays, new trees appeared, rocks and bushes were redrawn, watercolour paper texture became a photo look;
+  output 2737×4096, not exactly the source aspect. Never use it on customer photos or on art that must stay
+  recognisable; lanczos of the original was kept. Check any upscaler the same way before trusting it:
+  `ffmpeg -i up.png -i orig.png -filter_complex "[0]scale=<orig size>:flags=area[a];[a][1]ssim" -f null -`
+  plus a side-by-side crop. Detail: `memorial/MEMORIAL_SESSION_HANDOFF.md` §1c.
 
 ---
 
@@ -2355,3 +2363,46 @@ candidates and compare against the live secret. It answers "is this dangerous" w
 either value, and it is the same method used for the already-dead Airtable PAT.
 
 The repo still must not be made public without reviewing all 45.
+
+- 2026-11-23T17:09:12.583Z AUTO-WARNING (cron, 2 failures in a row): ⚠ "Etsy Scout daily research" (agent: scout) has failed 2 runs in a row. Last error: run ended without completion: budget
+
+## 2026-11-25 — test harness: orphan sidecars with the real Kling key, temp-folder leaks, 38 e2e tests blocked by the production gate
+
+Session d2ab07f3 (`claude --resume ea68579f`). All fixes **uncommitted**; inventory + backups in
+`memorial/MEMORIAL_SESSION_HANDOFF.md` §1a; records `qa/bugs/2c50b150`, `qa/bugs/7e750ab7`.
+
+**Orphans, second occurrence.** PIDs 28176/28290 (`update-preparation.http`, ports 41357/43379, parent 1) held the
+live `KLING_API_KEY` (SHA-256 prefix `6ab63dd701a4`) behind the fixture token printed in the test file, ~60% CPU each
+spinning on deleted workspaces. Bound 127.0.0.1 only. Stopped by PID after an identity check.
+- **Real root cause:** `test/_assert.js` `report()` → `process.exit()`, called INSIDE `try`, so the `finally`
+  (kill + rmSync) never ran — **every** run leaked, passing or not. Replay: `OK (9 assertions)`, exit 0, sidecar alive.
+  10 files had the order; all fixed (report after finally).
+- **Why the key was there:** `~/.claude/settings.json` had `env.KLING_API_KEY`, so every Claude Code process and
+  everything it spawned carried it. Removed.
+- **Kling usage audit** (read-only GETs `api-singapore.klingai.com`): `/v1/videos/text2video`, `/image2video`,
+  `/v1/images/generations` list → 0 tasks; `/account/costs` 90 days → no resource packs. StarNet log: 9 attempts
+  2026-11-20 03:29–04:11Z, all "Account balance not enough". Ledger "kling" hits were `thinkingmachines/inkling:free`.
+- **Manual cron fires (last 3 days):** 3, all with terminal `runs.jsonl` rows (2 done, 1 cancelled = the 11-24 audit
+  mistake). Nothing in flight; `.spend-pending/` empty.
+
+**Sibling folders.** `sidecar/workspace-recovery.js` elects recovery ownership in the PARENT dir
+(`<basename>.recovery-owner.json`) and `sidecar/workspace-owner.js` never deletes generations — so removing only
+the workspace leaves `<ws>.recovery-owner.json.generations`. New `test/helpers/tmp-tracker.js` `track()` (57 e2e
+files) + `SidecarFixture` `removeWorkspace()`. All 113 e2e steps ×2: leaking steps 60 → 2 (Chromium's own dirs).
+
+**Production gate in tests.** Fresh test workspace → `readArmState` default DISARMED; mocks go through provider
+`custom` (`unmetered: false`) → `decide()` refuses `disarmed+metered+unattended`. Experiment with
+`STARNET_PRODUCTION_ARMED=1` in the outer env only: 38/42 red → green. Fix: the 38 files set it themselves.
+e2e suite 70/43 → 108/5. Remaining red: output-recovery, image-task, e2e.attachments, nightshift-presence,
+browser.gauntlet (hangs; none of its 9 files changed; environmental).
+
+**Traps hit this session (so they are not repeated):**
+- Python `open()` text mode turned 3 CRLF test files into LF (a 300-line diff). Use `newline=''` and verify every
+  file's `git diff --numstat` matches the intended line count.
+- `$(cmd | tail -1); rc=${PIPESTATUS[0]}` inside command substitution reports the wrong exit code.
+- A shell script that uses `$S` from the caller's shell gets an empty value → every step "fails" in 0 s. A 0 s run
+  is a harness bug, not a test result.
+- Stopping a background test run mid-step can itself orphan a sidecar — check `pgrep` afterwards.
+- `pgrep -f chrom` matches your own shell whose command line contains the word.
+- Loading the full station UI headless makes it POST `/api/save`, `/api/roster`, `/api/activity`… — block non-GET
+  `/api/*` via CDP `Fetch` when you only want to look.
