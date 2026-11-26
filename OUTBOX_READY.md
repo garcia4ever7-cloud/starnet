@@ -1,3 +1,5 @@
+> **HISTORICAL snapshot — not current state (marked 2026-11-26).** Written in Oct–Nov 2026; agents, models, routines and dossiers have changed since. For the live state read `handoff.md`, then `CLAUDE.md` "Where we left off".
+
 # 🎬 StarNet Outbox - Video Pipeline Ready
 
 **Status**: Infrastructure complete ✅ | Video generation in progress ⏳

@@ -1,3 +1,5 @@
+> **HISTORICAL snapshot — not current state (marked 2026-11-26).** Written in Oct–Nov 2026; agents, models, routines and dossiers have changed since. For the live state read `handoff.md`, then `CLAUDE.md` "Where we left off".
+
 # Christian Story Studio Orchestration System
 
 A complete autonomous multi-agent orchestration infrastructure for the Christian Story Studio video production pipeline.
