@@ -66,6 +66,68 @@ function withOrientation(jpeg, orientation) {
   bad(o => { o.cards.push({ type: 'chapter', after: 1 }); }, 'a chapter with no title is refused');
   bad(o => { delete o.subject; }, 'a title card with no name is refused');
   bad(o => { o.background = 'no-such-background'; }, 'an unknown background is refused');
+  bad(o => { o.cards[0].portrait = 3; }, 'a portrait card naming a photo that does not exist is refused');
+  bad(o => { o.cards.push({ type: 'chapter', title: 'X', after: 1, portrait: 1 }); }, 'portrait on a chapter card is refused');
+  A.notThrows(() => { const o = base(); o.cards[0].portrait = 2; G.validateGalleryOrder(o); }, 'portrait: <photo number> on a title card is valid');
+
+  /* ---------- 1b. portrait card: faces must sit in the solid centre of the faded photo ---------- */
+  {
+    const P = await import(M('plates.mjs'));
+    A.eq(P.portraitAlpha(0.5, 0.5), 1, 'portrait centre is fully opaque');
+    A.eq(P.portraitAlpha(0, 0.5), 0, 'portrait side edge is fully faded');
+    A.ok(P.portraitAlpha(0.5, 0.06) < 0.5, 'near the top edge the photo is mostly faded');
+    const face = { x0: 0.40, y0: 0.30, x1: 0.60, y1: 0.50 };
+    const whole = { x: 0, y: 0, w: 1, h: 1 };
+    A.ok(G.faceOpacity(face, whole) >= 0.98, 'a centred face is fully opaque');
+    A.ok(G.faceOpacity({ x0: 0.40, y0: 0.0, x1: 0.60, y1: 0.12 }, whole) < 0.5, 'a face at the top edge would be faded — measured, not assumed');
+    A.eq(G.portraitCrop({ w: 1000, h: 1250, faces: null }).ok, false, 'unknown faces: no portrait crop (the fade could hide an unmarked face)');
+    const topFace = { w: 1792, h: 2240, faces: [{ x0: 0.295, y0: 0.095, x1: 0.563, y1: 0.309 }] };
+    const pc = G.portraitCrop(topFace);
+    A.ok(pc.ok, 'a face near the top of a tall photo gets a crop that zooms in: ' + pc.reason);
+    A.ok(pc.ok && G.faceOpacity(topFace.faces[0], pc) >= 0.98, 'and in that crop the face is fully opaque');
+    A.ok(pc.ok && pc.w * topFace.w >= G.PORTRAIT_MIN_PX - 1e-6, 'the crop never narrows below PORTRAIT_MIN_PX of the original');
+    const apart = { w: 3000, h: 2000, faces: [{ x0: 0.02, y0: 0.4, x1: 0.12, y1: 0.55 }, { x0: 0.88, y0: 0.4, x1: 0.98, y1: 0.55 }] };
+    A.eq(G.portraitCrop(apart).ok, false, 'two faces at opposite edges cannot both be in the solid centre — refused, not faded');
+    /* the write-on: a layer with `wipe` gets a sliding mask; a plain layer keeps its fade */
+    const plan = { w: 1920, h: 1080, fps: 30 };
+    const item = { hold: 7, motion: { kind: 'still', amp: 0 }, layers: [{ at: 0.6, fade: 1 }, { at: 1.3, fade: 0, wipe: { dur: 2.3, x0: 900, x1: 1700 } }] };
+    const g = G.segmentGraph(item, plan, 1);
+    A.ok(/\[1:v\][^;]*fade=t=in:st=0\.600/.test(g), 'a plain layer still fades in');
+    A.ok(/alphamerge\[l1\]/.test(g) && /crop=1920:1080:x='1182-962\*clip\(\(t-1\.300\)\/2\.300,0,1\)'/.test(g), 'a wipe layer is written on by a mask sliding from x0 to x1');
+    const plain = G.segmentGraph({ hold: 5, motion: { kind: 'still', amp: 0 }, layers: [{ at: 0.45, fade: 1.2 }] }, plan, 1);
+    A.ok(!/alphamerge|geq/.test(plain), 'a card without a wipe layer has the same graph shape as before (no mask chain)');
+
+    /* ---------- 1c. per-card backgrounds, the dawn set, light cards, the portrait's edge (2026-11-25) ---------- */
+    bad(o => { o.cards[0].background = 'no-such-background'; }, 'a card naming an unknown background is refused');
+    A.notThrows(() => { const o = base(); o.cards[0].background = 'lead-the-way-sunrise'; G.validateGalleryOrder(o); }, 'a card may name its own background');
+    A.ok(P.BACKGROUND_SETS.dawn.length === 4 && P.BACKGROUND_SETS.dawn.every(n => P.backgroundPath(n)), 'the dawn set: four backgrounds, every file present');
+    const { createCanvas } = require('@napi-rs/canvas');
+    const ptmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-portrait-'));
+    try {
+      /* A uniformly dark photo: any brightening is the edge light, so it is measurable. */
+      const pc0 = createCanvas(400, 500); const px0 = pc0.getContext('2d');
+      px0.fillStyle = 'rgb(20,20,20)'; px0.fillRect(0, 0, 400, 500);
+      const pf = path.join(ptmp, 'dark.png'); fs.writeFileSync(pf, pc0.toBuffer('image/png'));
+      const w = 640, h = 360;
+      const r = await P.renderCardPlates({ type: 'title' }, { name: 'A B', born: '1950', died: '2020' },
+        { w, h, theme: 'dawn', background: P.backgroundPath('lead-the-way-sunrise'), portrait: { file: pf, crop: { x: 0, y: 0, w: 1, h: 1 } } });
+      A.eq([r.layers[0].at, r.layers[0].fade], [P.PORTRAIT_IN.at, P.PORTRAIT_IN.fade], 'the portrait is its own layer and rises after the landscape is seen alone');
+      const { loadImage } = require('@napi-rs/canvas');
+      const li = await loadImage(r.layers[0].png); const lc = createCanvas(w, h); const lx = lc.getContext('2d'); lx.drawImage(li, 0, 0);
+      const at = (u, v) => { const X = Math.floor((P.PORTRAIT.x + u * P.PORTRAIT.w) * w), Y = Math.floor((P.PORTRAIT.y + v * P.PORTRAIT.h) * h); return [...lx.getImageData(X, Y, 1, 1).data]; };
+      A.eq(at(0.5, 0.45), [20, 20, 20, 255], 'the opaque core (where faces are proven to sit) is untouched by the edge light');
+      let edge = null; for (let u = 0.5; u < 1; u += 0.002) { const a = P.portraitAlpha(u, 0.5); if (a < 1 && a >= 0.98) { edge = at(u, 0.5); break; } }
+      A.eq(edge && edge.slice(0, 3), [20, 20, 20], 'where opacity is 0.98–1 (a face edge may sit there) the colour is untouched too — the first version lightened it ~12%');
+      let lit = null; for (let u = 0.5; u < 1; u += 0.005) { if (P.portraitAlpha(u, 0.5) < 0.6 && P.portraitAlpha(u, 0.5) > 0.3) { lit = at(u, 0.5); break; } }
+      A.ok(lit && lit[0] > 120, 'in the fade zone a dark photo brightens toward the light instead of leaving a smudge: ' + JSON.stringify(lit));
+      const lum = async (buf) => { const im = await loadImage(buf); const c = createCanvas(64, 36); const x = c.getContext('2d'); x.drawImage(im, 0, 0, 64, 36); const d = x.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return s / (d.length / 4) / 3; };
+      const chap = { type: 'chapter', title: 'Family' };
+      const bgRiver = P.backgroundPath('lead-the-way-river');
+      const dark = await lum((await P.renderCardPlates(chap, {}, { w, h, theme: 'warm', background: bgRiver })).base);
+      const light = await lum((await P.renderCardPlates(chap, {}, { w, h, theme: 'dawn', background: bgRiver })).base);
+      A.ok(light > dark + 40, `dawn cards are light cards (mean luma ${light.toFixed(0)} vs warm ${dark.toFixed(0)} on the same background)`);
+    } finally { fs.rmSync(ptmp, { recursive: true, force: true }); }
+  }
 
   /* ---------- 2. resolveFaces: unknown is not "none" ---------- */
   A.eq(F.resolveFaces(undefined, []).faces, null, 'detector found nothing → faces are UNKNOWN (null), never "none"');

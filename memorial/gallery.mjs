@@ -39,7 +39,7 @@ import {
 } from './layouts.mjs';
 import {
   renderScenePlate, renderCardPlates, textOutsideSafe, backgroundPath, backgroundsAvailable,
-  BACKGROUND_SETS, PLATE_SCALE, TITLE_SAFE, ACTION_SAFE, clearImageCache,
+  BACKGROUND_SETS, PLATE_SCALE, TITLE_SAFE, ACTION_SAFE, clearImageCache, PORTRAIT_AR, portraitAlpha,
 } from './plates.mjs';
 import { totalSeconds, timeline, HEAD_FADE, TAIL_FADE } from './join.mjs';
 import { resolveMusic, masterBed, muxBed } from './audio.mjs';
@@ -84,6 +84,15 @@ export function validateGalleryOrder(order) {
     if (c.actBreak != null && typeof c.actBreak !== 'boolean') throw new Error(`cards[${i}].actBreak must be true or false`);
     if (c.type === 'verse' && !String(c.text || '').trim()) throw new Error(`cards[${i}] is a verse with no text`);
     if (c.type === 'chapter' && !String(c.title || '').trim()) throw new Error(`cards[${i}] is a chapter with no title`);
+    if (c.background != null && !backgroundPath(c.background)) {
+      throw new Error(`cards[${i}].background: no background '${c.background}' (have: ${backgroundsAvailable().join(', ')})`);
+    }
+    if (c.portrait != null) {
+      if (c.type !== 'title' && c.type !== 'closing') throw new Error(`cards[${i}].portrait is only for a title or closing card`);
+      if (!(Number.isInteger(c.portrait) && c.portrait >= 1 && c.portrait <= photos.length)) {
+        throw new Error(`cards[${i}].portrait is ${c.portrait} — must be a photo number from 1 to ${photos.length}`);
+      }
+    }
   });
   if (cards.some(c => c.type === 'title' || c.type === 'closing') && !(order.subject && String(order.subject.name || '').trim())) {
     throw new Error('order.subject.name is required for a title or closing card');
@@ -215,22 +224,43 @@ export async function planGallery(order, opts = {}) {
     const tag = String(n).padStart(3, '0');
     if (it.kind === 'card') {
       if (it.card.type === 'chapter' && n > 0) chapter++;
-      const bg = bgs.card(chapter);
-      const r = await renderCardPlates(it.card, order.subject || {}, { w, h, theme: order.theme || 'warm', background: bg });
+      /* A card may name its own background; otherwise it takes its chapter's. */
+      const bg = it.card.background != null ? backgroundPath(it.card.background) : bgs.card(chapter);
+      /* Portrait card: the crop of the chosen photo that keeps every protected face, then proof
+       * that each face sits where the faded edge is still fully opaque. Unknown faces refuse. */
+      let portrait = null;
+      if (it.card.portrait != null) {
+        const p = photos[it.card.portrait - 1];
+        const crop = portraitCrop(p);
+        if (!crop.ok) {
+          check(n, 'portrait-crop', false, `photo ${it.card.portrait}: ${crop.reason}${p.faces == null ? ' — mark its faces ("faces") or choose another photo' : ''}`);
+        } else {
+          portrait = { file: p.file, crop };
+          const faces = p.faces || [];
+          /* The face itself must be fully opaque; hair and shoulders (the protected margin) may soften. */
+          const minFace = faces.length ? Math.min(...faces.map(f => faceOpacity(f, crop))) : 1;
+          const minHead = faces.length ? Math.min(...faces.map(f => faceOpacity(protect(f), crop))) : 1;
+          check(n, 'portrait-keeps-faces', minFace >= 0.98, faces.length
+            ? `photo ${it.card.portrait}: ${faces.length} face(s), lowest face opacity ${minFace.toFixed(2)} (needs ≥ 0.98); with headroom ${minHead.toFixed(2)}`
+            : `photo ${it.card.portrait}: declared face-free`);
+        }
+      }
+      const r = await renderCardPlates(it.card, order.subject || {}, { w, h, theme: order.theme || 'warm', background: bg, portrait });
       it.plate = path.join(platesDir, `plate-${tag}.png`);
       await fsp.writeFile(it.plate, r.base);
       it.layers = [];
       for (let k = 0; k < r.layers.length; k++) {
         const f = path.join(platesDir, `plate-${tag}-L${k}.png`);
         await fsp.writeFile(f, r.layers[k].png);
-        it.layers.push({ file: f, at: r.layers[k].at, fade: r.layers[k].fade, sha: sha(r.layers[k].png) });
+        it.layers.push({ file: f, at: r.layers[k].at, fade: r.layers[k].fade, wipe: r.layers[k].wipe, sha: sha(r.layers[k].png) });
       }
+      it.portrait = portrait ? it.card.portrait : undefined;
       it.plateSha = sha(r.base);
       it.text = r.text;
       it.hold = Number(Math.max(Number(it.card.hold ?? CARD_HOLD), r.minHold).toFixed(2));
       it.minHold = r.minHold;
       it.bg = bg ? path.basename(bg, '.jpg') : 'gradient';
-      it.motion = safeMotion(n % 2 ? 'pull' : 'push', null, { x: 0.5, y: 0.5 }, 0.05);
+      it.motion = safeMotion(n % 2 ? 'pull' : 'push', r.portraitRect || null, { x: 0.5, y: 0.5 }, 0.05);
       const bad = textOutsideSafe(r.text);
       check(n, 'text-safe', bad.length === 0, bad.length ? `outside title-safe: ${bad.map(b => JSON.stringify(b.text)).join(', ')}` : `${r.text.length} line(s) inside the ${TITLE_SAFE * 100}% title-safe margin`);
       continue;
@@ -342,7 +372,7 @@ export async function planGallery(order, opts = {}) {
     items: items.map((it, n) => ({
       n, at: Number(tl.starts[n].toFixed(2)), hold: it.hold, kind: it.kind,
       ...(it.kind === 'card'
-        ? { type: it.card.type, lines: it.layers.length, background: it.bg }
+        ? { type: it.card.type, lines: it.layers.length, background: it.bg, portrait: it.portrait }
         : { layout: it.scene.kind, photos: it.scene.photos, why: it.scene.why, crop: it.scene.crop ? Number((it.scene.crop.cut * 100).toFixed(1)) : 0, background: it.bg, caption: it.caption || undefined, recap: it.recap || undefined }),
       motion: it.motion, actBreak: it.actBreak || undefined,
     })),
@@ -352,6 +382,48 @@ export async function planGallery(order, opts = {}) {
   };
   await fsp.writeFile(path.join(dirs.work, 'plan.json'), JSON.stringify(report, null, 1));
   return { plan, dirs, photos, report };
+}
+
+/**
+ * portraitCrop — the window of a photo shown on a portrait card. The largest window (most of
+ * the photo) whose bare faces all land where the faded edge is still fully opaque; it zooms in
+ * only as far as that needs, face centre placed a little above the middle. Unknown faces are
+ * refused (the edge could fade a face nobody marked); no window narrower than 560 px of the
+ * original is used, so a small face is never blown up into mush.
+ */
+export const PORTRAIT_MIN_PX = 560;
+
+/** Lowest portrait opacity on the oval inscribed in face box `f` (photo fractions) under crop `c`.
+ *  A face is an oval: the corners of its box are background, so they are not tested. */
+export function faceOpacity(f, c) {
+  const ex = (f.x0 + f.x1) / 2, ey = (f.y0 + f.y1) / 2, rx = (f.x1 - f.x0) / 2, ry = (f.y1 - f.y0) / 2;
+  let min = 1;
+  for (let k = 0; k < 32; k++) {
+    const a = (k / 32) * Math.PI * 2;
+    const u = (ex + rx * Math.cos(a) - c.x) / c.w, v = (ey + ry * Math.sin(a) - c.y) / c.h;
+    min = Math.min(min, u < 0 || u > 1 || v < 0 || v > 1 ? 0 : portraitAlpha(u, v));
+  }
+  return min;
+}
+export function portraitCrop(p) {
+  if (p.faces == null) return { ok: false, reason: 'faces unknown' };
+  const ar = PORTRAIT_AR;
+  const maxW = Math.min(p.w, p.h * ar);
+  if (!p.faces.length) {
+    const cw = maxW, ch = cw / ar;
+    return { ok: true, x: (p.w - cw) / 2 / p.w, y: (p.h - ch) * 0.4 / p.h, w: cw / p.w, h: ch / p.h, reason: 'declared face-free' };
+  }
+  const u = unionOf(p.faces);
+  const cx = (u.x0 + u.x1) / 2 * p.w, cy = (u.y0 + u.y1) / 2 * p.h;
+  const alphaOf = (f, c) => faceOpacity(f, c);
+  for (let s = 1; s >= 0.2; s -= 0.02) {
+    const cw = maxW * s, ch = cw / ar;
+    if (cw < Math.min(PORTRAIT_MIN_PX, maxW)) break;
+    const x = Math.min(Math.max(0, cx - cw / 2), p.w - cw), y = Math.min(Math.max(0, cy - ch * 0.42), p.h - ch);
+    const c = { x: x / p.w, y: y / p.h, w: cw / p.w, h: ch / p.h };
+    if (Math.min(...p.faces.map(f => alphaOf(f, c))) >= 0.98) return { ok: true, ...c, reason: `${Math.round(cw)}x${Math.round(ch)} px window, zoom ×${(1 / s).toFixed(2)}` };
+  }
+  return { ok: false, reason: 'no window puts every face in the solid centre of the portrait (faces too far apart, or too near the photo edge) — choose a photo with one or two close faces' };
 }
 
 /* ------------------------------------------------------------------ segments */
@@ -379,7 +451,22 @@ export function segmentGraph(item, plan, oversample = OVERSAMPLE) {
      * inside the graph by `loop`; feeding it with `-loop 1` instead decoded and converted the
      * same PNG on every frame. Measured on a 4-layer verse card (2026-11-24): 69.2 s → 52.7 s,
      * output identical (PSNR infinite, same 303 frames). */
-    g.push(`[${k + 1}:v]scale=in_range=pc:out_range=tv:out_color_matrix=bt709,format=yuva444p,loop=loop=-1:size=1:start=0,fade=t=in:st=${L.at.toFixed(3)}:d=${L.fade.toFixed(3)}:alpha=1[l${k}]`);
+    const src = `[${k + 1}:v]scale=in_range=pc:out_range=tv:out_color_matrix=bt709,format=yuva444p,loop=loop=-1:size=1:start=0`;
+    if (L.wipe) {
+      /* Written on: the layer's own alpha is multiplied by a soft edge travelling left to right.
+       * The edge is a crop window sliding over ONE pre-drawn gradient strip (drawn once, then
+       * repeated by `loop`), so the per-frame cost is a crop and a multiply — no per-pixel maths. */
+      const W = plan.w, H = plan.h, R = Math.round(H * 0.15);
+      const sx = W + R - L.wipe.x0, ex = W - L.wipe.x1;
+      g.push(`${src},split[l${k}c][l${k}s]`);
+      g.push(`[l${k}s]alphaextract[l${k}a]`);
+      g.push(`color=c=black:s=${2 * W + R}x${H}:r=${plan.fps},format=gray,geq=lum='255*clip((${W + R}-X)/${R},0,1)',trim=end_frame=1,loop=loop=-1:size=1:start=0,setpts=N/${plan.fps}/TB,`
+        + `crop=${W}:${H}:x='${sx}-${sx - ex}*clip((t-${L.at.toFixed(3)})/${L.wipe.dur.toFixed(3)},0,1)':y=0[l${k}m]`);
+      g.push(`[l${k}a][l${k}m]blend=all_mode=multiply,format=gray[l${k}w]`);
+      g.push(`[l${k}c][l${k}w]alphamerge[l${k}]`);
+    } else {
+      g.push(`${src},fade=t=in:st=${L.at.toFixed(3)}:d=${L.fade.toFixed(3)}:alpha=1[l${k}]`);
+    }
     g.push(`[${prev}][l${k}]overlay=0:0:format=auto:eof_action=repeat[m${k + 1}]`);
     prev = `m${k + 1}`;
   });

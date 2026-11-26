@@ -36,6 +36,8 @@ export const BACKGROUND_SETS = {
   warm:  ['golden-flowers-watercolor', 'classic-elegance', 'garden-of-memories', 'eternal-love'],
   cool:  ['heavenly-peace', 'scenic-sky-valley', 'faith-and-hope', 'classic-elegance'],
   plain: ['classic-elegance'],
+  /* Four watercolour dawns over water, supplied by the owner 2026-11-25 ("Lord lead the way"). */
+  dawn:  ['lead-the-way-sunrise', 'lead-the-way-river', 'lead-the-way-still-waters', 'lead-the-way-lake'],
 };
 export function backgroundsAvailable() {
   if (!fs.existsSync(BG_DIR)) return [];
@@ -71,7 +73,9 @@ export function ensureFonts() {
   const text = reg('EBGaramond-Regular.ttf', 'MemText') || sys('NotoSerif-Regular.ttf', 'MemText');
   const italic = reg('EBGaramond-Italic.ttf', 'MemItalic') || sys('NotoSerif-Italic.ttf', 'MemItalic');
   if (!display || !text) throw new Error('memorial/plates: no serif font found — see memorial/assets/fonts/');
-  FONTS = { display: 'MemDisplay', text: 'MemText', italic: italic ? 'MemItalic' : 'MemText' };
+  /* Script face for the portrait card's name (Great Vibes, SIL OFL). Falls back to the italic. */
+  const script = reg('GreatVibes-Regular.ttf', 'MemScript');
+  FONTS = { display: 'MemDisplay', text: 'MemText', italic: italic ? 'MemItalic' : 'MemText', script: script ? 'MemScript' : (italic ? 'MemItalic' : 'MemText') };
   return FONTS;
 }
 
@@ -116,6 +120,18 @@ async function drawArtBackground(ctx, bgFile, W, H, { soften = 3, dim = 0.96 } =
   ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, 0, 0, W, H);
   ctx.filter = 'none';
   if (dim < 1) { ctx.fillStyle = `rgba(20,14,8,${(1 - dim).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
+}
+
+/* An elliptical pool of light: full strength in the middle, gone by the edge of (rx, ry). */
+function lightPool(ctx, cx, cy, rx, ry, rgb, peak) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(1, ry / rx);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(${rgb},${peak})`);
+  g.addColorStop(0.45, `rgba(${rgb},${(peak * 0.78).toFixed(3)})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g; ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
+  ctx.restore();
 }
 
 function vignette(ctx, W, H, strength = 0.28) {
@@ -312,7 +328,10 @@ function trackedWidth(ctx, s, tracking) {
 
 const INK = { warm: { ink: '#fff6e6', faint: '#f0dfc2', rule: '#e2c99c', scrim: '38,26,14' },
               cool: { ink: '#f4f8fb', faint: '#d5e2ea', rule: '#b9cfdb', scrim: '14,24,32' },
-              plain: { ink: '#f5f2ec', faint: '#d9d2c6', rule: '#b8ad9c', scrim: '18,16,14' } };
+              plain: { ink: '#f5f2ec', faint: '#d9d2c6', rule: '#b8ad9c', scrim: '18,16,14' },
+              /* Light cards: the background at full brightness, a pool of morning light behind the
+               * text, dark ink with a soft light halo. Made for the 'dawn' watercolours. */
+              dawn:  { ink: '#4a3520', faint: '#6a4e30', rule: '#a08048', scrim: '38,26,14', light: '253,248,238' } };
 
 function fmtDate(d, style = 'year') {
   if (!d) return '';
@@ -345,7 +364,13 @@ export async function renderCardPlates(card, subject, opts) {
   /* ---- base: art background, softened and dimmed so type stays legible on any of them ---- */
   const baseC = createCanvas(W, H);
   const bx = baseC.getContext('2d');
-  if (opts.background) {
+  if (theme.light && !((card.type === 'title' || card.type === 'closing') && opts.portrait)) {
+    if (opts.background) await drawArtBackground(bx, opts.background, W, H, { soften: 3, dim: 1 });
+    else { bx.fillStyle = `rgb(${theme.light})`; bx.fillRect(0, 0, W, H); }
+    bx.fillStyle = `rgba(${theme.light},0.14)`; bx.fillRect(0, 0, W, H);
+    lightPool(bx, W / 2, H / 2, W * 0.50, H * 0.40, theme.light, 0.80);
+    vignette(bx, W, H, 0.10);
+  } else if (opts.background) {
     await drawArtBackground(bx, opts.background, W, H, { soften: 10, dim: 1 });
     bx.fillStyle = `rgba(${theme.scrim},0.46)`;
     bx.fillRect(0, 0, W, H);
@@ -354,18 +379,22 @@ export async function renderCardPlates(card, subject, opts) {
     g.addColorStop(0, `rgb(${theme.scrim})`); g.addColorStop(1, '#0b0806');
     bx.fillStyle = g; bx.fillRect(0, 0, W, H);
   }
-  /* A soft dark pool behind the text block: contrast without a visible box. */
-  const pool = bx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.46);
-  pool.addColorStop(0, `rgba(${theme.scrim},0.50)`);
-  pool.addColorStop(1, `rgba(${theme.scrim},0)`);
-  bx.fillStyle = pool; bx.fillRect(0, 0, W, H);
-  vignette(bx, W, H, 0.30);
+  if (!theme.light) {
+    /* A soft dark pool behind the text block: contrast without a visible box. */
+    const pool = bx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.46);
+    pool.addColorStop(0, `rgba(${theme.scrim},0.50)`);
+    pool.addColorStop(1, `rgba(${theme.scrim},0)`);
+    bx.fillStyle = pool; bx.fillRect(0, 0, W, H);
+    vignette(bx, W, H, 0.30);
+  }
 
   /* ---- text layers, at frame size ---- */
   const layers = [];
   const text = [];
   const mk = () => { const c = createCanvas(w, h); const x = c.getContext('2d'); x.textBaseline = 'alphabetic'; return [c, x]; };
-  const shadow = (x, size) => { x.shadowColor = 'rgba(0,0,0,0.55)'; x.shadowBlur = size * 0.30; x.shadowOffsetY = size * 0.05; };
+  const shadow = theme.light
+    ? (x, size) => { x.shadowColor = `rgba(${theme.light},0.95)`; x.shadowBlur = size * 0.35; x.shadowOffsetY = 0; }
+    : (x, size) => { x.shadowColor = 'rgba(0,0,0,0.55)'; x.shadowBlur = size * 0.30; x.shadowOffsetY = size * 0.05; };
   const box = (cx, y, tw, size, s) => text.push({ x: (cx - tw / 2) / w, y: (y - size) / h, w: tw / w, h: (size * 1.25) / h, text: s });
   const maxTextW = w * (1 - 2 * TITLE_SAFE) * 0.90;
   const stagger = opts.stagger ?? 1.6, fade = opts.fade ?? 1.2, lead = opts.lead ?? 0.9;
@@ -378,6 +407,8 @@ export async function renderCardPlates(card, subject, opts) {
       size -= 2;
     }
   };
+
+  if ((type === 'title' || type === 'closing') && opts.portrait) return renderPortraitCard(card, subject, opts, F);
 
   if (type === 'title' || type === 'closing' || type === 'chapter') {
     const [c, x] = mk();
@@ -486,6 +517,157 @@ export async function renderCardPlates(card, subject, opts) {
     return { base: baseC.toBuffer('image/png'), layers, text, minHold: lastIn + 3.2 };
   }
   throw new Error(`memorial/plates: unknown card type '${type}'`);
+}
+
+/* ------------------------------------------------------------------ portrait card */
+
+/* The portrait card answers the first ten seconds of a competitor's listing video: the person's
+ * own photograph melted into the art background on the left, their name written on in a script
+ * face on the right. Opt-in per card (`"portrait": <photo number>`); a card without it renders
+ * exactly as before. Light background, dark ink — the reverse of the classic dark card.
+ * Where the photo sits and how its edge fades are fixed here so the planner can prove, before
+ * rendering, that every protected face lies in the fully opaque core (portraitAlpha). */
+export const PORTRAIT = { x: 300 / 1920, y: 95 / 1080, w: 700 / 1920, h: 891 / 1080, exp: 2.4, gain: 1.7 };
+/* When the portrait rises: after the landscape has been seen alone for a breath. */
+/* Edge brightening starts below 0.97 opacity; faces are proven at ≥ 0.98, so a face pixel is never altered. */
+export const EDGE_LIGHT = 0.88, EDGE_LIGHT_FROM = 0.97;
+export const PORTRAIT_IN = { at: 0.5, fade: 2.0 };
+export const PORTRAIT_AR = (PORTRAIT.w * 16) / (PORTRAIT.h * 9);   // width/height of the photo window
+
+/** Opacity of the portrait at (u, v), fractions of the portrait window (0..1 each). */
+export function portraitAlpha(u, v) {
+  const dx = Math.abs(u * 2 - 1), dy = Math.abs(v * 2 - 1);
+  return Math.min(1, Math.max(0, (1 - Math.pow(dx, PORTRAIT.exp) - Math.pow(dy, PORTRAIT.exp)) * PORTRAIT.gain));
+}
+
+const LIGHT_INK = { warm: { ink: '#4f3820', name: '#76531f', faint: '#6a4e30', rule: '#a08048', wash: '251,246,236' },
+                    cool: { ink: '#2c3b48', name: '#3a5166', faint: '#46596a', rule: '#8da2b4', wash: '244,248,251' } };
+LIGHT_INK.plain = LIGHT_INK.warm;
+LIGHT_INK.dawn = LIGHT_INK.warm;
+
+async function renderPortraitCard(card, subject, opts, F) {
+  const w = opts.w, h = opts.h;
+  const W = w * PLATE_SCALE, H = h * PLATE_SCALE;
+  const ink = LIGHT_INK[opts.theme] || LIGHT_INK.warm;
+  const { file, crop } = opts.portrait;
+
+  /* ---- base: the art background at full brightness, a paper wash under the text column ---- */
+  const baseC = createCanvas(W, H);
+  const bx = baseC.getContext('2d');
+  /* Drawn sharp: on the title card the background is the picture people remember, not a texture. */
+  if (opts.background) await drawArtBackground(bx, opts.background, W, H, { soften: 0, dim: 1 });
+  else { const g = bx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#f3e7d3'); g.addColorStop(1, '#fbf6ec'); bx.fillStyle = g; bx.fillRect(0, 0, W, H); }
+  /* Two pools of light: one the portrait rises out of, one the name is written into. */
+  lightPool(bx, (PORTRAIT.x + PORTRAIT.w / 2) * W, (PORTRAIT.y + PORTRAIT.h / 2) * H, PORTRAIT.w * W * 0.70, PORTRAIT.h * H * 0.62, ink.wash, 0.42);
+  lightPool(bx, 0.7266 * W, 0.50 * H, W * 0.27, H * 0.40, ink.wash, 0.60);
+
+  vignette(bx, W, H, 0.08);
+
+  /* ---- the photograph, its edge faded by portraitAlpha ----
+   * Its own layer at frame size, not part of the base: it is resampled once from the original
+   * (sharper than plate-then-downscale), it rises out of the landscape instead of being there at
+   * the first frame, and it stays still while the background takes the slow move, which reads as
+   * depth. Same window and same alpha, so the planner's face proof still holds. */
+  const layers = [], text = [];
+  const img = await load(file);
+  const pw = Math.round(PORTRAIT.w * w), ph = Math.round(PORTRAIT.h * h);
+  const pc = createCanvas(pw, ph);
+  const px = pc.getContext('2d');
+  px.imageSmoothingQuality = 'high';
+  px.drawImage(img, crop.x * img.width, crop.y * img.height, crop.w * img.width, crop.h * img.height, 0, 0, pw, ph);
+  const id = px.getImageData(0, 0, pw, ph);
+  const washRGB = ink.wash.split(',').map(Number);
+  for (let j = 0; j < ph; j++) {
+    for (let i = 0; i < pw; i++) {
+      const a = portraitAlpha((i + 0.5) / pw, (j + 0.5) / ph);
+      const o = (j * pw + i) * 4;
+      /* Where the photo thins out it also brightens toward the light, so a dark photo
+       * background (a fence, a porch) melts into glow instead of leaving a smudge. The fully
+       * opaque core — every face, by the planner's proof — is not touched. */
+      if (a < EDGE_LIGHT_FROM) {
+        const k = EDGE_LIGHT * Math.pow((EDGE_LIGHT_FROM - a) / EDGE_LIGHT_FROM, 0.4);
+        for (let ch = 0; ch < 3; ch++) id.data[o + ch] = Math.round(id.data[o + ch] * (1 - k) + washRGB[ch] * k);
+      }
+      id.data[o + 3] = Math.round(id.data[o + 3] * a);
+    }
+  }
+  px.putImageData(id, 0, 0);
+  {
+    const lc = createCanvas(w, h);
+    lc.getContext('2d').drawImage(pc, Math.round(PORTRAIT.x * w), Math.round(PORTRAIT.y * h));
+    layers.push({ png: lc.toBuffer('image/png'), at: PORTRAIT_IN.at, fade: PORTRAIT_IN.fade });
+  }
+
+  /* ---- text layers, at frame size, in the right-hand column ---- */
+  const cx = w * 0.7266, colW = w * 0.40;
+  const mk = () => { const c = createCanvas(w, h); const x = c.getContext('2d'); x.textBaseline = 'alphabetic'; x.textAlign = 'center'; return [c, x]; };
+  const glow = (x, size) => { x.shadowColor = `rgba(${ink.wash},0.85)`; x.shadowBlur = size * 0.25; x.shadowOffsetY = 0; };
+  const box = (y, tw, size, s) => text.push({ x: (cx - tw / 2) / w, y: (y - size) / h, w: tw / w, h: (size * 1.25) / h, text: s });
+
+  const pre = card.line ?? (card.type === 'title' ? 'In Loving Memory' : 'Forever in our hearts');
+  if (pre) {
+    const [c, x] = mk();
+    const ps = Math.round(h * 0.050);
+    x.font = `${ps}px ${F.italic}`; x.fillStyle = ink.faint; glow(x, ps);
+    x.fillText(pre, cx, h * 0.300);
+    box(h * 0.300, x.measureText(pre).width, ps, pre);
+    layers.push({ png: c.toBuffer('image/png'), at: 1.6, fade: 1.2 });
+  }
+
+  /* The name: one line if it fits at a generous size, otherwise two (split at the middle space). */
+  const name = String(subject.name || '').trim();
+  const [nc, nx] = mk();
+  let size = Math.round(h * 0.128), lines = [name];
+  const widest = (ls, s) => { nx.font = `${s}px ${F.script}`; return Math.max(...ls.map(l => nx.measureText(l).width)); };
+  while (widest(lines, size) > colW && size > h * 0.090) size -= 2;
+  if (widest(lines, size) > colW && name.includes(' ')) {
+    const words = name.split(/\s+/);
+    let best = 1, bestDiff = Infinity;
+    for (let k = 1; k < words.length; k++) { const d = Math.abs(words.slice(0, k).join(' ').length - words.slice(k).join(' ').length); if (d < bestDiff) { bestDiff = d; best = k; } }
+    lines = [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+    size = Math.round(h * 0.118);
+  }
+  while (widest(lines, size) > colW && size > 24) size -= 2;
+  nx.font = `${size}px ${F.script}`; nx.fillStyle = ink.name; glow(nx, size);
+  let ny = lines.length === 1 ? h * 0.470 : h * 0.420;
+  let x0 = w, x1 = 0;
+  for (const ln of lines) {
+    const tw = nx.measureText(ln).width;
+    nx.fillText(ln, cx, ny);
+    box(ny, tw, size, ln);
+    x0 = Math.min(x0, cx - tw / 2); x1 = Math.max(x1, cx + tw / 2);
+    ny += size * 0.95;
+  }
+  const writeAt = pre ? 2.4 : 1.7, writeFor = lines.length === 1 ? 2.3 : 2.8;
+  layers.push({ png: nc.toBuffer('image/png'), at: writeAt, fade: 0, wipe: { dur: writeFor, x0: Math.floor(x0 - size * 0.25), x1: Math.ceil(x1 + size * 0.25) } });
+
+  /* Rule, dates and (title only) a short tagline. */
+  const span = [fmtDate(subject.born, card.dates || 'year'), fmtDate(subject.died, card.dates || 'year')].filter(Boolean).join('   —   ');
+  const tagline = card.tagline ?? (card.type === 'title' ? 'Forever loved  ·  Always remembered' : '');
+  const restAt = writeAt + writeFor - 0.2;
+  if (span || tagline) {
+    const [c, x] = mk();
+    const top = lines.length === 1 ? h * 0.565 : h * 0.585;
+    x.strokeStyle = ink.rule; x.lineWidth = Math.max(1.5, h / 540);
+    x.beginPath(); x.moveTo(cx - w * 0.085, top); x.lineTo(cx - w * 0.012, top); x.moveTo(cx + w * 0.012, top); x.lineTo(cx + w * 0.085, top); x.stroke();
+    x.fillStyle = ink.rule; x.beginPath(); x.arc(cx, top, Math.max(2, h / 300), 0, Math.PI * 2); x.fill();
+    if (span) {
+      const ds = Math.round(h * 0.048);
+      x.font = `${ds}px ${F.text}`; x.fillStyle = ink.ink; glow(x, ds);
+      const dw = tracked(x, span, cx, top + h * 0.080, ds * 0.10);
+      box(top + h * 0.080, dw, ds, span);
+    }
+    if (tagline) {
+      const ts = Math.round(h * 0.026);
+      const t = tagline.toUpperCase();
+      x.font = `${ts}px ${F.text}`; x.fillStyle = ink.faint; glow(x, ts);
+      const tw = tracked(x, t, cx, top + h * 0.160, ts * 0.18);
+      box(top + h * 0.160, tw, ts, t);
+    }
+    layers.push({ png: c.toBuffer('image/png'), at: restAt, fade: 1.0 });
+  }
+  const rect = { x0: PORTRAIT.x, y0: PORTRAIT.y, x1: PORTRAIT.x + PORTRAIT.w, y1: PORTRAIT.y + PORTRAIT.h };
+  return { base: baseC.toBuffer('image/png'), layers, text, portraitRect: rect, minHold: restAt + 1.0 + 3.0 };
 }
 
 /** Is every text box inside the title-safe area? Returns the offenders. */

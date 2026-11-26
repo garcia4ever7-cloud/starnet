@@ -221,7 +221,7 @@ and compares, which controls for pan rate, codec and estimator noise at once.
 {
   "orderId": "mem-20261124-jane-doe",
   "style": "gallery",
-  "theme": "warm",                    // warm | cool | plain — picks the text palette and background set
+  "theme": "warm",                    // warm | cool | plain | dawn — picks the text palette and background set
   "background": "art",                // "art" (default) | "blur" (prints on their own blurred photo) | one background name
   "backgrounds": ["heavenly-peace"],  // optional: the art backgrounds chapters cycle through
   "hold": 6.0, "xfade": 1.2,
@@ -250,10 +250,38 @@ An order with a wrong layout name, a non-boolean `actBreak`, faces in pixels, a 
 text, a card with no position, or a card `after` a photo that does not exist is **refused** with
 a message naming the field. (A mis-positioned card used to vanish from the film silently.)
 
+**Portrait title / closing card (added 2026-11-25).** Add `"portrait": <photo number>` (1-based, as in
+`after`) to a `title` or `closing` card: that photo is shown on the left, its edge melted into the art
+background, and the name is written on in a script face (Great Vibes, SIL OFL, `assets/fonts/`) on a
+light background with dark ink. Optional on the title card: `"tagline"` (default "Forever loved · Always
+remembered"; `""` drops it). Without `portrait` a card renders exactly as before.
+The crop is chosen from the photo's faces (`portraitCrop` in `gallery.mjs`): the largest window in which
+every face lies where the faded edge is still fully opaque, never narrower than 560 px of the original.
+The plan audit refuses the film (`portrait-crop` / `portrait-keeps-faces`) when the photo's faces are
+unknown, too far apart or too near its edge — choose a photo with one or two close faces, or mark faces.
+Made to answer the competitor MemoryMotionCo's listing title card; see the session handoff §1b.
+
 Backgrounds available: `classic-elegance`, `eternal-love`, `faith-and-hope`,
 `garden-of-memories`, `golden-flowers-watercolor`, `heavenly-peace`, `scenic-sky-valley` — made
 for this shop with Higgsfield on 2026-11-24 (owner's account; job ids in
 `MEMORIAL_SESSION_HANDOFF.md`).
+
+**Dawn theme, per-card backgrounds, light cards (added 2026-11-25, uncommitted).** `"theme": "dawn"` uses
+four watercolour dawns over water the owner supplied ("Lord lead the way"): `lead-the-way-sunrise`,
+`lead-the-way-river`, `lead-the-way-still-waters`, `lead-the-way-lake` — cropped to 16:9 around each sun
+and horizon (uniform scale, never stretched). Dawn chapter and verse cards are **light** cards: the background
+at full brightness, a pool of morning light behind the text, dark ink with a light halo (warm/cool/plain are
+unchanged). Any card may name its own background with `"background": "<name>"`; otherwise it takes its chapter's.
+On a portrait card the photo is now its own layer: the landscape is seen alone for half a second, the portrait
+rises out of the light (`PORTRAIT_IN`, 0.5 s + 2.0 s fade), then the line, then the name is written on. The
+portrait stays still while the background moves, which reads as depth. Where the photo fades out it also
+brightens toward the light (`EDGE_LIGHT`), so a dark photo background melts into glow instead of leaving a
+smudge; this never touches a pixel at ≥ 0.97 opacity, and faces are proven at ≥ 0.98.
+Provenance [verified 2026-11-25 by sha256 against the deliverable manifest]: all four are StarNet's own AI art from
+2026-11-22 — sunrise = DESIGNER `psalm-34-18-soft-watercolor-sunrise-master-4x5.png`, lake = DESIGNER
+`psalm-34-18-soft-watercolor-sunrise-2x3.png`, river = DESIGNER `psalm-46-1-art-A3.png` (hard-days), still waters =
+DIRECTOR `ref-still-01.png` (readiness-test-sunrise-lake). AI-generated, so Etsy's AI-content disclosure applies to any
+listing that shows them (see the `etsy-rules` skill).
 
 ## Order spec — classic
 
