@@ -5,9 +5,13 @@ Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — 
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
 
 ## Current state (checked live 04:29, re-checked 05:00, read-only)
-- Sidecar 29630 (health ok, app 200), OmniRoute 29422/29443. Started by the Termux:Boot test reboot at 00:33 PST.
+- [12:12 PST: now sidecar 12486, launcher 12468, after the chain-fix restart] Sidecar 29630 (health ok, app 200), OmniRoute 29422/29443. Started by the Termux:Boot test reboot at 00:33 PST.
 - Cron healthy, not halted. Production ARMED (2026-11-21, unattributed). `.spend-pending/` empty.
-- Routines ON (next run): SCOUT daily 09:00 · Etsy pipeline chain 03:00 (11-27) · HARVEST Tue 10:00 (12-01) ·
+- **09:30 (owner's yes 08:48): routines PAUSED until the store is in production.** OFF: SCOUT `7b22107c`, HARVEST
+  `d22650c8`, Quality Gate `41a7de48`, Concept Queue `e7fccdb8`, Print Kit `b8c6f80c`. ON: only the chain `ebc4f07d`,
+  now **Mondays 03:00 America/Los_Angeles** (`0 3 * * 1`, next 11-30). Undo: `{"enabled":true}` per routine; chain
+  `{"schedule":"0 3 * * *","timezone":"America/Los_Angeles"}`. Backup `cron.jobs.json.bak-20261126-pause`. Details: CLAUDE.md top.
+- Earlier — Routines ON (next run): SCOUT daily 09:00 · Etsy pipeline chain 03:00 (11-27) · HARVEST Tue 10:00 (12-01) ·
   Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
 - Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5577 (05:00).
 - **Models (08:32, owner's yes): split.** Fable 5.2: NIGHT4CHRIST, DESIGNER, QC_EDITOR, PUBLISHER. Opus 5.5
@@ -62,6 +66,24 @@ QC_EDITOR (openai gpt-5) hit `provider_stream timeout` ×4 plus every fallback �
 Cron counted the run failed and re-ran the whole chain at 03:20 / 03:28 / 03:32 (gemini rate_limit, OpenRouter
 timeouts). Providers answer normally since. Cause [Likely]: transient provider/network failure, not configuration.
 
+## Chain-retry fix LIVE — 2026-11-26 12:12 PST (owner's yes)
+Patch applied to `sidecar/cron-driver.js` (backup `sidecar/cron-driver.js.orig`, uncommitted); `node --check` OK; replay:
+old `failed`, patched `ok`. Restarted with the clean-env recipe (CLAUDE.md), `.spend-pending/` 0 before and after.
+Now: launcher 12468, sidecar **12486** (replaces 29630), health ok, buildSha `b82cc582d` dirty, no shim/CLAUDE vars, no new
+log errors; all 11 routines byte-identical to the pre-restart snapshot (only the chain on, Mon 03:00 LA, $2, next 11-30).
+A worker error no longer re-fires the chain. Undo: restore `.orig` and restart the same way.
+
+## Chain 03:00 failure — ROOT CAUSE FOUND 09:35 (fix now LIVE, see above)
+`sidecar/cron-driver.js` `startFire` sink sets `state.errMsg` on ANY `agent.run.error` in the stream — including a
+dispatched WORKER's (different runId). 11-26: QC_EDITOR workers `ea12470a`/`82175bd8` died on `ERR_HTTP2_STREAM_ERROR`;
+the lead `a9c37d84` ended `done`, yet cron recorded `failed` + transient → 3 auto-retries (03:20/03:28/03:32, maxRetries 3,
+90 s backoff — station-wide, no per-routine knob). Patch (ignore error/capdenied/run.end events whose runId ≠ the lead's):
+`~/.local/share/StarNet/chainfix-20261126/cron-driver.patch`; `node --check` OK on a copy; replay of the real 11-26
+events: live code → `failed`, patched → `ok`. Not applied to the repo (would only take effect after a restart). Chain
+error state cleared via `POST /api/cron/update {patch:{enabled:true}}` (resumeJob: state scheduled, failures 0, next
+11-30 03:00; runs.jsonl unchanged — nothing ran). Backup `cron.jobs.json.bak-20261126-chainfix`. ~~Until the patch is
+live, a worker error on Monday re-fires the chain up to 3× (≤ ~$4 each, ≤ ~$16, under the $25 rail).~~ [Live 12:12 PST.]
+
 ## Open owner decisions (05:20)
 1. ~~**Per-run spend caps.**~~ **DONE 05:45 (owner's yes):** chain `ebc4f07d` $0.50 → $2.00; SCOUT, HARVEST,
    Quality Gate, Concept Queue, Print Kit $0.25 → $1.00, via `POST /api/cron/update` and read back. Backup
@@ -76,7 +98,12 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
    gpt-5-mini). Top up or not.
 4. **Anthropic balance:** all 10 agents now depend on it; not readable by API — check the console.
 5. **approvalMode `full` on 8 of 10** ("AUTHORITY — FULL POWER" block); only PRODUCER and COPYWRITER are `ask`.
-6. **Garbled owner-profile lines** (Commander dossier, `doc.dossier`, in every agent's prompt): garbled `cd_14`
+6. ~~**Garbled owner-profile lines**~~ **DONE 09:40 (owner's yes, rev 5585):** cd_14, cd_28 rewritten; cd_15/cd_20/cd_21
+   now say KJV (they named NIV as the translation — they quoted no verse, so there was no wording to swap); cd_4 now lets
+   routines proceed without the owner's tap (money/settings stay owner-only); **cd_12 "i want to talk to commander" left
+   as-is (meaning unclear)**. Correction: the block reaches only NIGHT4CHRIST's prompt + `_commander.dossier.json` (cron
+   personas), not every agent. Backups `agent.{save,roster}.json` + `_commander.dossier.json` `.bak-20261126-dossierfix`.
+   Was: (Commander dossier, `doc.dossier`, in every agent's prompt): garbled `cd_14`
    ("…allows when I so . so do it"), `cd_28` ("…what to work on nextI…"), `cd_12` ("i want to talk to commander");
    NIV lines `cd_15`, `cd_20`, `cd_21` contradict KJV-only; `cd_4` "ask me before making changes" fights unattended work.
 7. **Repo is public** (GitHub API 05:00) — make it private? 45 gitleaks findings to review either way. Nothing is
@@ -106,6 +133,7 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
    Opus 5.5 — check `usd` against the $1.00 cap).
 3. After 11-27 03:30: read the chain run (first on Fable workers); QC_EDITOR should answer "VERDICT: PASS/CHANGES";
    check `usd` per run against the $2.00 lead cap and the $2.00 worker pool.
-4. 11-30 (Mon) 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable), $1.00 cap each — check
-   for budget stops. 12-01 (Tue) 10:00: HARVEST (now Opus 5.5 pin).
+4. ~~11-30 (Mon) 09:00: the three null/null routines … 12-01 (Tue) 10:00: HARVEST~~ PAUSED 09:30 (owner's yes). The only
+   scheduled run is the chain, Mon 11-30 03:00 PST — read it after 03:30.
+   [SCOUT's 11-26 09:00 run (step 2) happened before the pause: Opus 5.5, `budget` stop at $0.685 of the $1.00 cap, 6 turns.]
 5. Work the owner decisions above only with a yes.

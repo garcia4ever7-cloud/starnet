@@ -2,6 +2,40 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where we left off — 2026-11-26, 12:12 PST (chain-retry fix is LIVE)
+
+**Chain-retry fix applied and live (owner's yes):** `sidecar/cron-driver.js` patched with
+`~/.local/share/StarNet/chainfix-20261126/cron-driver.patch` (backup `sidecar/cron-driver.js.orig`; uncommitted).
+`node --check` OK; replay of the real 11-26 events: old code `failed`, patched `ok`. Restarted 12:12 PST with the
+clean-env recipe below (`.spend-pending/` 0 before and after): launcher 12468, **sidecar 12486**, health ok, `/api/version`
+buildSha `b82cc582d` (dirty), no `LD_PRELOAD`/`CLAUDE*` in its environ, no new log errors. All 11 routines byte-identical
+before/after (chain `ebc4f07d` only one on, `0 3 * * 1` America/Los_Angeles, fable, $2, next 11-30 03:00).
+Undo: `cp sidecar/cron-driver.js.orig sidecar/cron-driver.js` + the same restart.
+
+## Where we left off — 2026-11-26, 09:45 PST (pause done; chain root cause found; dossier lines fixed)
+
+**Chain `ebc4f07d` 11-26 failure, root cause (read in logs + code):** `sidecar/cron-driver.js` `startFire`'s sink takes
+ANY `agent.run.error` on the stream as the fire's failure — a dispatched worker's too. Two QC_EDITOR worker timeouts
+(`ERR_HTTP2_STREAM_ERROR`) turned a lead that ended `done` into `failed`+transient → 3 auto-retries. Fix = skip
+error/capdenied/run.end events whose `runId` ≠ the lead's; patch at `~/.local/share/StarNet/chainfix-20261126/cron-driver.patch`
+(syntax OK, replay of the real events: failed → ok). ~~NOT applied — it needs a sidecar restart (owner's yes).~~ **[LIVE since 12:12 PST — see above.]** Error state
+cleared via `{patch:{enabled:true}}` (no run). **Dossier (rev 5585):** cd_14/cd_28 rewritten, cd_15/cd_20/cd_21 → KJV,
+cd_4 unattended-friendly, cd_12 left (unclear). See handoff.md. Reload StarNet tabs (an old tab could push the old dossier).
+
+## Where we left off — 2026-11-26, 09:30 PST (routines PAUSED until the store is in production, owner's yes 08:48)
+
+**Paused (`POST /api/cron/update {id, patch:{enabled:false}}`, read back from `GET /api/cron` and `cron.jobs.json`):**
+SCOUT `7b22107c`, HARVEST/Weekly Income Scan `d22650c8`, Quality Gate `41a7de48`, Concept Queue `e7fccdb8`, Print Kit
+`b8c6f80c` — all `enabled:false, state:paused`. Models, caps, schedules unchanged. **The only routine still ON is the
+chain `ebc4f07d`, now weekly: `0 3 * * 1` America/Los_Angeles (Mondays 03:00; next 11-30 03:00)** — was daily `0 3 * * *`
+on the host zone. Route contract (read in `index.js` `handleCronUpdate` + `cron.js parseSchedule`): `patch.schedule` is a
+cron STRING, the zone goes in `patch.timezone` (stored as `schedule.tz`); a schedule edit keeps the job's current tz if none
+is given. Field diff of all 11: nothing else changed. SCOUT's 09:00 run (`0cbd4ad5`, Opus 5.5) had already finished
+before the pause: `reason: budget`, 6 turns, $0.685 (+ $0.037 aux row), 9 tools ok, 2 Apify scrapes. HARVEST's dossier
+timing lines updated (rev 5583 → 5584). Backups: `cron.jobs.json.bak-20261126-pause`,
+`agent.{save,roster}.json.bak-20261126-pause`. **Undo** per routine: the same patch with `{"enabled":true}`; chain:
+`{"schedule":"0 3 * * *","timezone":"America/Los_Angeles"}`.
+
 ## Where we left off — 2026-11-26, 08:40 PST (model split, owner's yes)
 
 **Models split 08:32 PST.** Fable 5.2 (`anthropic/claude-fable-5-2`) stays on NIGHT4CHRIST, DESIGNER, QC_EDITOR,

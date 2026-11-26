@@ -2604,3 +2604,48 @@ transient provider/network streaming failure, not configuration.
   routines — the same patch with the old values (gemini/gemini-flash-lite-latest ×2, gemini/gemini-3-flash-preview).
   Backups `agent.{save,roster}.json` and `cron.jobs.json` `.bak-20261126-opus-split`.
 - Docs commits `d270d2ddc`, `211de66bd`, `4316c2c25` pushed 08:35 with the owner's yes (gitleaks + key/email grep clean).
+
+## 2026-11-26 09:30 PST — routines paused until the store is in production (owner's yes 08:48)
+
+- **Paused** via `POST /api/cron/update {id, patch:{enabled:false}}`: SCOUT `7b22107c`, HARVEST `d22650c8`, Quality Gate
+  `41a7de48`, Concept Queue `e7fccdb8`, Print Kit `b8c6f80c` → `enabled:false`, `state:paused`. Models, caps, schedules kept.
+- **Chain `ebc4f07d` now weekly:** `{"schedule":"0 3 * * 1","timezone":"America/Los_Angeles"}` → `schedule.tz`
+  America/Los_Angeles, next 11-30 03:00 PST. It had no `tz` before (host zone). Contract read in code, not guessed:
+  `handleCronUpdate` passes `patch.schedule` (a STRING: cron / "every 30m" / ISO) to `cron.parseSchedule(str, now,
+  {tz})`; the zone rides `patch.timezone` (or `tz`), else the job's current `schedule.tz` is kept; loose tz fields are deleted.
+- Field-by-field diff of all 11 routines (API and `cron.jobs.json`): only enabled/state (+ derived gate flags,
+  `disabledReason`/`disabledAt`) on the five, schedule/scheduleDisplay/nextRunAt on the chain.
+- **SCOUT 09:00 run before the pause** (`0cbd4ad5`, first on Opus 5.5): `reason: budget`, 6 turns, $0.6852 + $0.0371
+  aux ledger row, 9 tools ok, 2 Apify scrapes counted today. The $1.00 cap stopped it (pre-turn reservation).
+- **HARVEST dossier** timing lines (rev 5583 → 5584, both copies, full-roster POST, integrity CONSISTENT):
+  context `- Runs Tuesdays 10:00 PST.` → `- Your Tuesday 10:00 PST routine is paused until the store is in production.`;
+  purpose `Each Tuesday, find …` → `Each time you are run (your Tuesday routine is paused until the store is in production), find …`.
+  No other agent's docs/prompt states a run time (searched docs, hero, dossier, roster `system`).
+- Backups: `cron.jobs.json.bak-20261126-pause`, `agent.{save,roster}.json.bak-20261126-pause`. Undo: `{"enabled":true}`
+  per routine; chain `{"schedule":"0 3 * * *","timezone":"America/Los_Angeles"}`; dossier: restore from the backups
+  only if nothing else changed since (check `_saveRevision`).
+
+## 2026-11-26 09:45 PST — chain retry storm root cause; Commander dossier lines fixed
+
+- **Why the 11-26 03:00 chain "failed" and re-fired 3×.** `sidecar/cron-driver.js`, `startFire` event sink:
+  `if (name === 'agent.run.error') state.errMsg = …` with no runId check. Worker events arrive on the lead's stream
+  (team.dispatch), so QC_EDITOR workers `ea12470a`/`82175bd8` (`fetch failed (ERR_HTTP2_STREAM_ERROR)`, transient) set the
+  LEAD's errMsg; `finishFire` then gives `ok = !errMsg` → `cron.result outcome:failed reason:done` for lead `a9c37d84`,
+  and `markRun` took the transient path (`maxRetries` 3, `backoffMs` 90 s — ctx defaults, no per-job field) → fires
+  `d54deb69` 03:20 (13 turns, $0.092, own HTTP2 error), `0c6267af` 03:28, `a3654fc9` 03:32 (0 turns). The worker timeouts
+  themselves were network/provider streaming (openai gpt-5 + all 3 fallbacks) — not config.
+- **Fix LIVE since 2026-11-26 12:12 PST** (owner's yes; was "written, not applied"). Applied with `patch`, backup
+  `sidecar/cron-driver.js.orig`, `node --check` OK, replay old `failed` / new `ok`; restarted via the CLAUDE.md clean-env
+  recipe (`.spend-pending/` 0); sidecar 12486, all 11 routines byte-identical before/after; code uncommitted. The fix: skip `agent.run.error` / `capdenied` / `agent.run.end` whose
+  `payload.runId` is set and ≠ the lead's `runId`. Patch: `~/.local/share/StarNet/chainfix-20261126/cron-driver.patch`.
+  `node --check` OK; replaying the logged 11-26 events: live logic `failed`, patched `ok`. Same class probably affects
+  `agent.token`/`agent.tool_call` (worker text in `state.buf`) — not changed, not verified.
+- **Clearing a routine's `error` state without running it:** `POST /api/cron/update {id, patch:{enabled:true}}` on an
+  enabled job calls `resumeJob` → `state:scheduled`, `consecutiveFailures:0`, `retryCount:0`, `nextRunAt` re-anchored
+  from the schedule. Verified: `runs.jsonl` row count unchanged. `lastError` text is kept as history.
+- **Commander dossier (rev 5584 → 5585):** edited `doc.dossier.dims` text (+`updatedAt`) for cd_14, cd_28 (garbled),
+  cd_15/cd_20/cd_21 (NIV → KJV; none quoted a verse), cd_4 (no more "ask me before making changes"); cd_12 left. The
+  prompt block is `composeBlock()` from `frontend/app/dossier.js` (loadable in node; it reproduced the live block byte for
+  byte); it lives only in NIGHT4CHRIST's `doc.agent.systemPrompt` + roster `agent.system` and in `_commander.dossier.json`
+  (server copy for cron personas, set via `POST /api/dossier {block}` → `{"ok":true,"chars":1427}`). Each dim line is
+  trimmed to a fair share (1,600-char cap), so most changed words never reach the prompt. Backups `*.bak-20261126-dossierfix`.

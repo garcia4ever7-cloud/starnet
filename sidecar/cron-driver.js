@@ -462,7 +462,12 @@
         renewLease(job.id, runId);
         if (name === 'agent.token') { state.buf += (p.delta || ''); return; }   // token stream never leaves the driver
         if (name === 'agent.tool_call') state.buf = '';   // prior prose was narration; only the terminal segment is deliverable
-        if (name === 'agent.run.error') { state.errMsg = p.message || 'run error'; state.transient = !!p.transient; }
+        // A dispatched WORKER's events arrive on the lead's stream (team.dispatch). Only the LEAD's own error/terminal
+        // events settle this fire: on 2026-11-26 two QC_EDITOR worker timeouts marked a lead that ended 'done' as a
+        // transient failure, and the whole chain was re-fired three times. Events with no runId keep the old behaviour.
+        const foreign = !!(p.runId && p.runId !== runId);
+        if (foreign && (name === 'agent.run.error' || name === 'capdenied' || name === 'agent.run.end')) { /* worker event: observed, not the lead's outcome */ }
+        else if (name === 'agent.run.error') { state.errMsg = p.message || 'run error'; state.transient = !!p.transient; }
         else if (name === 'capdenied') state.errMsg = state.errMsg || ('no ' + (p.need || 'capability') + ' — ' + (p.reason || ''));
         else if (name === 'agent.run.end') {
           state.reason = p.reason;
