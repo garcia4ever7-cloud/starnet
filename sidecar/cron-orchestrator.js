@@ -389,7 +389,12 @@ async function submitAgentRun(projectId, agentId, blueprint, runTimeoutMs) {
     messages: [
       {
         role: 'user',
-        content: 'Begin your assigned task. Read the blueprint and produce the outputs specified.'
+        // 2026-11-22: a stage agent whose station resolves the orchestrator object CAN delegate on an autonomous run
+        // (see STATION_FIELD_NOTES §16). Run proj-1795386242132-78eng4: STORYWRITER dispatched DIRECTOR and PRODUCER
+        // instead of writing the script; they ran to the 900s cap and the pipeline never left stage 0.
+        content: 'Begin your assigned task. Read the blueprint and produce the outputs specified. ' +
+          'Do this stage YOURSELF in this one reply. The pipeline hands your reply to the next agent automatically, ' +
+          'so do not call team_dispatch, team_spawn or any other team tool, and do not ask another agent to do any part of it.'
       }
     ],
     agentId: agentId,

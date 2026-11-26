@@ -2584,3 +2584,23 @@ transient provider/network streaming failure, not configuration.
   changes" fights unattended work. Not edited — owner decision (edit in the app's dossier panel, one tab).
 - **Date trap:** sessions on 11-25 evening wrote "2026-11-26" (the UTC date). Fixed in CLAUDE.md and the 11-25 evening
   section here. Commits `27d9397fe`/`b7c04e867`/`3210676cb` are 11-25 19:10 PST; `8557798db`/`95370d285` 11-25 22:02 PST.
+
+## 2026-11-26 08:32–08:40 PST — model split (owner's yes); caps raised 05:45
+
+- **Caps (05:45):** chain `ebc4f07d` `maxCostUsd` $0.50 → $2.00; SCOUT, HARVEST and the three 11-30 routines $0.25 →
+  $1.00 (`POST /api/cron/update`). The chain cap does NOT count worker spend: workers are capped by env
+  (`STARNET_BUDGET_PER_WORKER=1.00`, `STARNET_BUDGET_WORKER_POOL=2.00` per lead run). Worst case ≈ $4 per chain fire.
+- **Models (08:32):** Fable 5.2 (`anthropic/claude-fable-5-2`) stays on NIGHT4CHRIST, DESIGNER, QC_EDITOR, PUBLISHER.
+  Opus 5.5 (`anthropic/claude-opus-5-5`) on SCOUT, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER — one
+  `station-models.mjs set <id> claude-opus-5-5 --provider anthropic` per agent (6 snapshots
+  `model-snapshots/2026-11-26T16-32-*__before-set-<id>.json`). Opus passed the 2-turn tool test through
+  `providers/factory.js` at high and medium effort first (~1.8 s, tool call + correct answer). Rev 5577 → 5583;
+  integrity CONSISTENT; save, roster and live API agree; only `model` changed per agent.
+- **Routine pins:** SCOUT `7b22107c` and Weekly Income Scan `d22650c8` → `anthropic/claude-opus-5-5`; chain lead
+  `ebc4f07d` → `anthropic/claude-fable-5-2`. **Trap:** a routine pins `provider` as well as `model`; changing only the
+  model to a Claude id under `provider: gemini` would not run — patch both. Field diff of all 11 routines: nothing
+  else changed. The chain's `state: error` predates the change (03:00 failures).
+- **Undo:** agents — `set <id> claude-fable-5-2 --provider anthropic` per agent (`revert` undoes only the last set);
+  routines — the same patch with the old values (gemini/gemini-flash-lite-latest ×2, gemini/gemini-3-flash-preview).
+  Backups `agent.{save,roster}.json` and `cron.jobs.json` `.bak-20261126-opus-split`.
+- Docs commits `d270d2ddc`, `211de66bd`, `4316c2c25` pushed 08:35 with the owner's yes (gitleaks + key/email grep clean).
