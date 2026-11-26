@@ -9,10 +9,10 @@ and `CODE_MAP.md`; the owner's business brief lives in `CLAUDE_CODE_ETSY_PROJECT
 
 ---
 
-## 1. The single most expensive lesson: delegation is browser-only
+## 1. ~~The single most expensive lesson: delegation is browser-only~~ [Stale as of 2026-11-26: a routine carrying the `orchestrator` grant delegates unattended — see §16]
 
-**`team.dispatch` / `team.spawn` / `team.summon` do not exist in any cron or headless run.** Not a
-bug, not a prompt problem, not a model problem — a deliberate boundary.
+~~**`team.dispatch` / `team.spawn` / `team.summon` do not exist in any cron or headless run.** Not a
+bug, not a prompt problem, not a model problem — a deliberate boundary.~~ [Stale as of 2026-11-26: `team.dispatch` works in a routine with the `orchestrator` grant — see §16; `team.spawn`/`team.summon` stay human-gated (CLAUDE.md)]
 
 - `sidecar/capability/effective-toolsets.js:24` — `const runtimeGranted = lead && r.object === 'orchestrator'`
 - `sidecar/index.js:16135` — `lead: true   // ONLY the browser-commanded run is a lead — it alone gets the orchestrator object`
@@ -20,9 +20,9 @@ bug, not a prompt problem, not a model problem — a deliberate boundary.
 - `orchestrator` is **not in `CAP_PROP_MAP`** (`frontend/app/worldmodel.js`) — it is not a placeable
   prop, so you cannot grant it by building something on the floor
 
-**Do not retry headless delegation.** Three paid runs (~$2.15) were burned proving this. A Commander
+~~**Do not retry headless delegation.** Three paid runs (~$2.15) were burned proving this. A Commander
 asked to dispatch in a routine will either hunt fruitlessly with `tool_search` or silently skip the
-step. Delegation requires a real chat turn from the station UI.
+step. Delegation requires a real chat turn from the station UI.~~ [Stale as of 2026-11-26: verified live 2026-10-27 — see §16; the ~$2.15 was spent before that fix]
 
 **A trap to avoid:** `GET /api/toolsets?agent=<id>` reports the **interactive-lead** view — its own
 response literally contains `"context":"interactive lead"`. It will show `team.dispatch` as available
@@ -699,7 +699,7 @@ it would without the shim. Alternative: do not preload the shim on this device. 
 
 ---
 
-## 11. Higgsfield integration + Refit module extraction (2026-10-25)
+## 11. ~~Higgsfield integration +~~ Refit module extraction (2026-10-25) [Stale as of 2026-11-26: the Higgsfield tool had the wrong base URL, auth and endpoint and never produced a file — see §13b]
 
 **Phase 1: Agent Capabilities Endpoint** ✓
 - New backend endpoint: `GET /api/agent/:id/capabilities`
@@ -707,7 +707,7 @@ it would without the shim. Alternative: do not preload the shim on this device. 
 - Replaces scattered queries with single unified API
 - Used by Phase 2 Refit UI module
 - Tests: 11 new test suites, all passing
-- Status: Production-ready, verified no regressions
+- ~~Status: Production-ready, verified no regressions~~ [Stale as of 2026-11-26: `agent-capabilities` has been a red test:fast step since 10-26 — see the test:fast list in the 2026-10-26 §13; no live check is recorded]
 
 **Phase 2: Refit.js UI Module** ✓
 - New frontend module: `frontend/app/refit.js` (130 lines)
@@ -734,7 +734,7 @@ it would without the shim. Alternative: do not preload the shim on this device. 
 
 ## 12. Image Upscaling via Kling 3.0 API (2026-10-25)
 
-**Status**: ✅ INTEGRATED & TESTED — Ready for production use
+~~**Status**: ✅ INTEGRATED & TESTED — Ready for production use~~ [Stale as of 2026-11-26: Kling has never produced or billed anything — every call refused on balance; see §13a and the 2026-11-25 test-harness section]
 
 ### What's New
 
@@ -752,7 +752,7 @@ New STUDIO tool: **`image_upscale_kling`** — AI-powered neural image upscaling
 
 **API Details**:
 - Endpoint: `https://api-singapore.klingai.com/v1/images/upscale`
-- Credentials: `KLING_API_KEY` environment variable (already configured in `~/.claude/settings.json`)
+- ~~Credentials: `KLING_API_KEY` environment variable (already configured in `~/.claude/settings.json`)~~ [Stale as of 2026-11-26: removed from settings.json on 2026-11-25 — see the 2026-11-25 test-harness section; StarNet reads it from ~/.config/starnet/env]
 - Supported scales: 2x, 3x, 4x
 - Polling timeout: 180 seconds max (typical: 30-120 seconds)
 - Output format: PNG (lossless)
@@ -801,7 +801,7 @@ output_name: "art-4k"
 
 ## 13. Christian Story Studio — Autonomous Video Production Team (2026-10-25)
 
-**Status**: ✅ COMPLETE & DEPLOYED — Ready for first assignment
+~~**Status**: ✅ COMPLETE & DEPLOYED — Ready for first assignment~~ [Stale as of 2026-11-26: the only "video" was fabricated and four live defects stopped the pipeline — see the 2026-10-26 §13 and §13d–§13f]
 
 ### Overview
 
@@ -971,7 +971,7 @@ export ANTHROPIC_API_KEY="your_anthropic_key"  # Already set
 - Agent manuals: `/docs/agents/{STORYWRITER|DIRECTOR|PRODUCER|QC_EDITOR|PUBLISHER}.md`
 - API research: `/docs/CHRISTIAN_STORY_STUDIO.md` (comprehensive analysis)
 
-**Status**: ✅ READY FOR FIRST ASSIGNMENT — Set API credentials and submit your first Christian story.
+~~**Status**: ✅ READY FOR FIRST ASSIGNMENT — Set API credentials and submit your first Christian story.~~ [Stale as of 2026-11-26: see the 2026-10-26 §13 and §13d–§13f]
 
 ---
 
@@ -1198,7 +1198,7 @@ Fixed: `HF_CREDENTIALS=<KEY_ID>:<KEY_SECRET>` added to `~/.config/starnet/env` (
 previous file snapshotted). `sidecar/higgsfield-video.js` reads `HF_CREDENTIALS` first and
 `HF_KEY` second, so either name works once it is in the right file.
 
-**Restarting the live station to pick up new code + env** (the running process had neither):
+~~**Restarting the live station to pick up new code + env** (the running process had neither):~~ [Stale as of 2026-11-26: this kills only node and launches it bare, without the launcher. Use CLAUDE.md's recipe instead: `.spend-pending/` must be empty, kill the launcher and then its node, then `cd ~ && setsid nohup bash ~/start-starnet.sh >> ~/.local/state/starnet/launcher.out 2>&1 < /dev/null &`]
 
 ```bash
 kill <node-pid>                 # confirm port 8787 is dead before restarting
@@ -2406,3 +2406,29 @@ browser.gauntlet (hangs; none of its 9 files changed; environmental).
 - `pgrep -f chrom` matches your own shell whose command line contains the word.
 - Loading the full station UI headless makes it POST `/api/save`, `/api/roster`, `/api/activity`… — block non-GET
   `/api/*` via CDP `Fetch` when you only want to look.
+
+## 2026-11-25 — SCOUT: prompt tightened (live), per-run Apify cap written (NOT live until restart)
+
+**Station relaunch trap, same day.** StarNet was relaunched by hand (`node sidecar/index.js` in a Termux tab):
+`/api/health` said `ok`, but the process had NO provider keys, a random API token (every authed route:
+`forbidden token`), no OmniRoute, no log file and no launcher. Health `ok` proves only that the port answers —
+check `tr '\0' '\n' < /proc/<pid>/environ | grep -oE '^[A-Z_]*KEY[A-Z_]*='` and that the parent is `start-starnet.sh`.
+
+**SCOUT routine `7b22107c` prompt rewritten** via `POST /api/cron/update {id, patch:{prompt}}` (backup
+`workspaces/cron.jobs.json.bak-pre-scout-tighten-20261125`). Cause of the 11-18 / 11-23 / 11-25 `budget` failures,
+read from the run transcripts (`workspaces/transcript-history-v2/segment-*.jsonl`, rows carry `toolCalls` with real
+arguments): 3-6 `tool_search` calls, then 13-16 `get-dataset-items` re-reads of shops already judged, because a
+line in SCOUT's own ledger said "Reuse this instance: datasets …". The new prompt names the judged shops, the two
+`tool_search` queries that unlock everything in one go, the search dataset's real field name (`shop`, not
+`shop_name`), and the 13 Airtable field IDs. Run Now `93e8cc89`: `done`, 12 turns, $0.072 (cap $0.25), ledger
+written, no row (no shop qualified) — but it launched **8 scrapes against "at most 3"** and used the team's day.
+The Airtable write path under the new prompt is still unproven.
+
+**Per-run cap (record `qa/bugs/f050e860`).** A limit that lives in a prompt holds only while the model obeys it.
+`sidecar/hostquota.js` now has `DEFAULT_RUN_LIMITS = { 'apify.com': 3 }`, counted per host-minted `ctx.runId`,
+checked before the daily counter (a refused call spends nothing from the 8). Both doors pass the run id
+(`mcp/translate.js`, `tools/builtin/web.js`). Tunable: `STARNET_HOST_RUN_LIMITS="apify.com=N"` (`=0` = off).
+It applies to EVERY run, attended or not — an owner asking one run for 5 scrapes gets 3 unless that is raised.
+Replay of the real 8-call sequence: old code 8 reached Apify, new code 3. `test/hostquota-run-cap.test.js`
+(42 assertions, in `test/fast.list`). **Uncommitted; backups `*.bak-20261125-apify-run-cap`; the running sidecar
+still has the old modules until it is restarted.**
