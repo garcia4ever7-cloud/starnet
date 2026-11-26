@@ -21,7 +21,7 @@ The Christian Story Studio is a multi-agent autonomous video production system. 
 **Output:** Script that DIRECTOR will visualize
 
 **Quality Standards:**
-- Accurate Biblical references with citations (KJV/NIV/ESV)
+- Accurate Biblical references with citations — **KJV only** (2026-11-26 rule; the shop has no permission for NIV/ESV or other modern translations)
 - Compelling narrative arc with clear character development
 - Dialogue that feels natural and faith-authentic
 - Screenplay properly formatted (sluglines, action, dialogue)

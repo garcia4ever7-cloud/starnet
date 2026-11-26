@@ -2530,7 +2530,7 @@ prompt checks read `agent.roster.json`, which the sidecar writes on every accept
 **Style library.** `webdesigner/styles/` has 2 styles. `index.md` rewritten from the bundle; STYLE-2 filled from
 `gothic-blackletter-faith.md` (status "trial" is inferred — the file has none), STYLE-3/4 rows deleted. The existing
 `soft-watercolor-sunrise.md` (4,412 B) was kept; the bundle's version was not installed. Open: gothic puts lettering in
-the art, but DESIGNER's manual now says "one wordless master image".
+the art, but DESIGNER's manual now says "one wordless master image". [RESOLVED 04:46: see the next section.]
 
 **03:00 chain failure (diagnosis, nothing changed).** Run `a9c37d84` (gemini-3-flash-preview) dispatched SCOUT (done)
 and DESIGNER (openai gpt-5, Psalm 46:1 kit, done 03:05, $0.12). QC_EDITOR (openai gpt-5) then hit
@@ -2545,3 +2545,22 @@ transient provider/network streaming failure, not configuration.
 "no model selected for OPENAI". It last ran gpt-5 on 11-25 15:22. The chain pins its own model, but the three
 11-30 09:00 routines (Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan) show `null/null` in
 `/api/cron` and will use the agent's own (empty) model. Owner decision; proposal in CLAUDE.md "Where we left off".
+
+## 2026-11-26 04:46 PST — three owner-approved fixes (rev 5577); all agents on claude-fable-5-2 since 04:42
+
+- **Models (04:42, rev 5576):** `scripts/station-models.mjs set all claude-fable-5-2 --provider anthropic`; probe OK.
+  Measured first: on the OpenAI chat/completions wire gpt-6.2-astra and gpt-6.2-sol cannot call tools at any
+  reasoning setting, gpt-5.4/5.5 only with reasoning `none`; gpt-5.2 and o3 do tools+vision+reasoning;
+  gemini-3.1-pro-preview is 429 on this key; claude-opus-5-5 and claude-fable-5-2 pass tools+vision and a 2-turn tool
+  exchange through `providers/anthropic.js`. Routine pins (chain lead gemini-3-flash-preview, SCOUT/HARVEST
+  gemini-flash-lite-latest) unchanged — owner decision. OpenRouter (fallback chain) had $6.32 left.
+- **Fix 1:** QC_EDITOR `docs.context` = SCOUT's exact `## Etsy team rules` block + `\n` + its old three lines.
+- **Fix 2:** HARVEST routine prompt `KJV/NIV scripture wall art` → `KJV scripture wall art`, via
+  `POST /api/cron/update {id, patch:{prompt}}` (only the prompt changed; model/schedule/enabled untouched).
+- **Fix 3:** DESIGNER manual, new line after step 2: "Exception: a style file marked lettering: in-art (such as
+  gothic-blackletter-faith) puts its words in the art itself; QC still checks the words are exact KJV and spelled
+  right." `gothic-blackletter-faith.md` gains `status: trial` and `lettering: in-art (exception to wordless master)`;
+  `index.md` row updated to match.
+- Same recipe as the dossier install (splice roster `system` from the current docs, rev +1, full-roster POST).
+  Verified field by field against `*.bak-20261126-044623-*`: only the two docs, their two roster prompts and the one
+  routine prompt changed; integrity CONSISTENT; all 10 agents `anthropic/claude-fable-5-2` in both files and live API.

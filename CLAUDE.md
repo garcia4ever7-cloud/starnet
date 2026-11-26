@@ -19,7 +19,7 @@ Backups (workspaces dir, never commit): `agent.save.json.bak-20261126-041644` (1
 protected by `_saveRevision`; the roster only by its timestamp).
 
 **Style library** (`webdesigner/styles/`): 2 styles. `index.md` rewritten from the bundle (rows:
-soft-watercolor-sunrise active; gothic-blackletter-faith marked "trial" — the file has no status line). The existing
+soft-watercolor-sunrise active; gothic-blackletter-faith "trial", lettering in-art — status line added 04:46). The existing
 `soft-watercolor-sunrise.md` was kept unchanged (the bundle's shorter version was NOT installed).
 
 **Last night's chain (03:00) failed on provider timeouts, not config.** SCOUT done, DESIGNER made the Psalm 46:1
@@ -38,7 +38,7 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
 1. ~~NIGHT4CHRIST has NO model~~ **FIXED 04:42 PST: all 10 agents now run `anthropic/claude-fable-5-2`** (owner asked for
    the best models, quality first). Set with `scripts/station-models.mjs set all claude-fable-5-2 --provider anthropic`
    (snapshot `model-snapshots/2026-11-26T12-42-08-449Z__before-set-all.json`, backups
-   `agent.{save,roster}.json.bak-20261126-044208-models` and `.bak-1795696928470`), save rev **5576**, integrity
+   `agent.{save,roster}.json.bak-20261126-044208-models` and `.bak-1795696928470`), save rev **5576** (now **5577** after the 04:46 fixes), integrity
    CONSISTENT, script probe OK, plus a 2-turn tool test through the real adapter. reasoningEffort/approvalMode unchanged.
    Undo: `node scripts/station-models.mjs revert`. **Reload StarNet tabs.** Why Fable, measured 04:3x (total test
    spend ~$0.04): on this station's OpenAI wire (chat/completions) `gpt-6.2-astra`/`gpt-6.2-sol` cannot call tools at
@@ -54,9 +54,7 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
    one provider; the Anthropic balance is not readable by API (check the console); the station fallback chain
    (haiku-5.5, gemini-3-flash-preview, gpt-5-mini) runs on OpenRouter, which has **$6.32 left of $45** — top up.
    Gemini 3.8 Flash was not tested or used (Fable outranks it).
-3. **Style conflict:** gothic-blackletter-faith puts lettering IN the image; DESIGNER's new manual says "one wordless
-   master image". Decide which wins for that style (or retire it).
-4. **QC_EDITOR's context has no Etsy-rules block** (installed exactly as sent; it has its own 3 rule lines). Add or keep.
+3. ~~Style conflict (gothic vs wordless master)~~ and 4. ~~QC_EDITOR has no Etsy-rules block~~ — both FIXED. **Three fixes applied 04:46 PST (owner-approved), rev 5577:** QC_EDITOR context now starts with the shared Etsy-rules block (copied from SCOUT); DESIGNER manual step 2 has the "lettering: in-art" exception; `gothic-blackletter-faith.md` now has `status: trial` + `lettering: in-art (exception to wordless master)`; HARVEST routine says "KJV scripture wall art" (no NIV). Backups `agent.{save,roster}.json.bak-20261126-044623-fixes`, `cron.jobs.json.bak-20261126-044623-harvest-kjv`, `webdesigner/styles/{gothic-blackletter-faith,index}.md.bak-20261126-044623`.
 5. Look at SCOUT's 11-26 09:00 run (first run on the new dossier + live Apify cap) and the 11-27 03:00 chain.
 6. Decide on `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
 7. Publish "Verses for Hard Days" on etsy.com; approve or reject Outbox items (137 pending, none ever approved).
@@ -65,8 +63,8 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
    `~/.claude/settings.json.bak-20261125-pre-kling-removal` (it holds the Kling key).
 10. 8 of 10 agents still get the "AUTHORITY — FULL POWER" block (approvalMode full); moving them to `ask` is yours.
 11. Do **not** publish PUBLISHER's NIV set-of-3 draft (no NIV permission; KJV only).
-12. HARVEST's routine prompt still says "KJV/NIV scripture wall art"; the `etsy-rules` skill still says
-    `deliverable_note` is broken headless (it isn't). Routine/skill edits — yours.
+12. ~~HARVEST's routine prompt says "KJV/NIV"~~ FIXED 04:46 (only that wording; model/schedule unchanged). The `etsy-rules`
+    skill's `deliverable_note` note is marked FIXED (Claude Code side).
 
 Crash recovery (done 2026-11-26 00:33): Termux:Boot test reboot passed — newest-but-one field-notes section.
 
