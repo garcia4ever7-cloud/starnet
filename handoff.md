@@ -1,6 +1,7 @@
-# StarNet handoff — read this first (updated 2026-11-26 05:45 PST)
+# StarNet handoff — read this first (updated 2026-11-26 08:40 PST)
 
-Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — do not push until the owner decides. Live data: `~/.local/share/StarNet/workspaces/`.
+Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — push only with the owner's yes for that push
+(08:40: yes for the three docs commits). Live data: `~/.local/share/StarNet/workspaces/`.
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
 
 ## Current state (checked live 04:29, re-checked 05:00, read-only)
@@ -9,7 +10,12 @@ Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIE
 - Routines ON (next run): SCOUT daily 09:00 · Etsy pipeline chain 03:00 (11-27) · HARVEST Tue 10:00 (12-01) ·
   Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
 - Agent config: integrity CONSISTENT, `agent.save.json` `_saveRevision` 5577 (05:00).
-- **Models (04:42): all 10 agents on `anthropic/claude-fable-5-2`** (was: NIGHT4CHRIST empty, 7× openai gpt-5,
+- **Models (08:32, owner's yes): split.** Fable 5.2: NIGHT4CHRIST, DESIGNER, QC_EDITOR, PUBLISHER. Opus 5.5
+  (`anthropic/claude-opus-5-5`): SCOUT, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER. Rev **5583**, integrity
+  CONSISTENT, save/roster/live agree. Routine pins: SCOUT `7b22107c` + Weekly Income Scan `d22650c8` → anthropic/
+  claude-opus-5-5; chain lead `ebc4f07d` → anthropic/claude-fable-5-2 (model and provider changed; nothing else).
+  Backups `*.bak-20261126-opus-split` (save, roster, cron). Undo: CLAUDE.md "Where we left off — 08:40".
+- Earlier — **Models (04:42): all 10 agents on `anthropic/claude-fable-5-2`** (was: NIGHT4CHRIST empty, 7× openai gpt-5,
   PUBLISHER gemini-3.5-flash, SCOUT gemini-flash-lite). Backups `agent.{save,roster}.json.bak-20261126-044208-models`;
   undo `node scripts/station-models.mjs revert`. Details and the measured model limits: CLAUDE.md item 1.
   Re-checked 05:00: Fable on all 10 in save, roster and `GET /api/runtime/agent`.
@@ -20,7 +26,7 @@ Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIE
 - Git: branch `feat/harness-backend`, pushed to `origin/feat/harness-backend-station-20261124`. Always push explicitly
   to that branch (`git push origin HEAD:refs/heads/feat/harness-backend-station-20261124`); never force; never push
   `origin/feat/harness-backend` (it diverged, 5,382 remote-only commits). Remote tip `2acc52622` (05:00, 0/0).
-  The 05:20 docs-fix commit is LOCAL ONLY (owner: repo is public, don't push).
+  08:40: the 05:20 docs fix, the 05:45 caps note and the 08:40 model-split note pushed with the owner's yes.
 
 ## Done today (2026-11-26, PST)
 1. 00:33: Termux:Boot crash recovery tested — reboot brought StarNet up on its own.
@@ -64,8 +70,8 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
    for cheap models. On Fable (~100× gemini-flash-lite) the 11-30 routines likely cost ~$0.20–0.70 and stop on the cap
    [Likely]; the chain's Fable workers may hit $0.50 [Guessing; worker spend vs chain cap not checked]. Raise caps or
    keep cheaper models.
-2. **Routine model pins:** chain 03:00 lead gemini-3-flash-preview; SCOUT 09:00 and HARVEST Tue 10:00
-   gemini-flash-lite-latest. Proposed claude-fable-5-2 — needs a yes (and decision 1 first).
+2. ~~**Routine model pins.**~~ **DONE 08:32 (owner's yes):** chain lead → Fable 5.2; SCOUT and HARVEST routines →
+   Opus 5.5; 6 agents → Opus 5.5 (see Current state).
 3. **OpenRouter $6.32 of $45** (re-read 05:00) — it carries the fallback chain (haiku-5.5, gemini-3-flash-preview,
    gpt-5-mini). Top up or not.
 4. **Anthropic balance:** all 10 agents now depend on it; not readable by API — check the console.
@@ -74,7 +80,7 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
    ("…allows when I so . so do it"), `cd_28` ("…what to work on nextI…"), `cd_12` ("i want to talk to commander");
    NIV lines `cd_15`, `cd_20`, `cd_21` contradict KJV-only; `cd_4` "ask me before making changes" fights unattended work.
 7. **Repo is public** (GitHub API 05:00) — make it private? 45 gitleaks findings to review either way. Nothing is
-   pushed until this is decided.
+   pushed until this is decided. [08:40: owner said yes to pushing the three docs commits; the privacy question stays open.]
 8. **Kling key backup** `~/.claude/settings.json.bak-20261125-pre-kling-removal` (mode 600) still holds the key — delete.
 9. `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
 10. Publish "Verses for Hard Days" by hand; 137 Outbox items pending; never publish the NIV set-of-3.
@@ -96,9 +102,10 @@ timeouts). Providers answer normally since. Cause [Likely]: transient provider/n
 ## Exact next steps
 0. ~~Decide the caps~~ done 05:45 (decision 1).
 1. Reload the StarNet tab. Confirm the Commander shows claude-fable-5-2 (no "no model selected").
-2. After 09:20: read SCOUT's 09:00 run in `runs.jsonl` (first run on the new dossier + live Apify cap).
+2. After 09:20: read SCOUT's 09:00 run in `runs.jsonl` (first run on the new dossier + live Apify cap, and first on
+   Opus 5.5 — check `usd` against the $1.00 cap).
 3. After 11-27 03:30: read the chain run (first on Fable workers); QC_EDITOR should answer "VERDICT: PASS/CHANGES";
    check `usd` per run against the $2.00 lead cap and the $2.00 worker pool.
 4. 11-30 (Mon) 09:00: the three null/null routines run on NIGHT4CHRIST's model (now Fable), $1.00 cap each — check
-   for budget stops. 12-01 (Tue) 10:00: HARVEST (gemini-flash-lite pin).
+   for budget stops. 12-01 (Tue) 10:00: HARVEST (now Opus 5.5 pin).
 5. Work the owner decisions above only with a yes.

@@ -2,13 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where we left off — 2026-11-26, 08:40 PST (model split, owner's yes)
+
+**Models split 08:32 PST.** Fable 5.2 (`anthropic/claude-fable-5-2`) stays on NIGHT4CHRIST, DESIGNER, QC_EDITOR,
+PUBLISHER. **Opus 5.5 (`anthropic/claude-opus-5-5`)** now on SCOUT, HARVEST, STORYWRITER, DIRECTOR, PRODUCER,
+COPYWRITER (`scripts/station-models.mjs set <id> claude-opus-5-5 --provider anthropic`, one per agent; each live probe
+OK). Opus passed the 2-turn tool test through the real adapter at high and medium effort before the change. Save rev
+5577 → **5583**, integrity CONSISTENT; save, roster and `GET /api/runtime/agent` agree; only `model` changed per agent.
+**Routine pins** (via `POST /api/cron/update`, model **and** provider — a Claude id under `provider: gemini` would not
+run): SCOUT `7b22107c` and Weekly Income Scan `d22650c8` gemini/gemini-flash-lite-latest → **anthropic/claude-opus-5-5**;
+chain lead `ebc4f07d` gemini/gemini-3-flash-preview → **anthropic/claude-fable-5-2**. Field diff of all 11 routines:
+nothing else changed (caps, schedules, enabled, nextRunAt, grants). The chain's `state: error` predates the change
+(11-26 03:00 failures). The three 11-30 routines pin nothing → NIGHT4CHRIST's model (Fable).
+Backups: `agent.save.json`, `agent.roster.json`, `cron.jobs.json` `.bak-20261126-opus-split`; snapshots
+`model-snapshots/2026-11-26T16-32-*__before-set-<id>.json`. **Undo:** per agent
+`node scripts/station-models.mjs set <id> claude-fable-5-2 --provider anthropic` (NOT `revert` — it undoes only the
+last set, COPYWRITER); routines: the same patch with the old model/provider (`gemini-flash-lite-latest` ×2,
+`gemini-3-flash-preview`; provider `gemini`). Owner said yes to pushing the docs commits (2026-11-26 08:40).
+
 ## Where we left off — 2026-11-26, 05:15 PST (re-checked live 05:00, read-only)
 
 **Live 05:00 PST:** sidecar 29630 up (health ok, app 200), integrity CONSISTENT, `_saveRevision` **5577**, **all 10 agents
 `anthropic/claude-fable-5-2`** in save, roster and `GET /api/runtime/agent`; `.spend-pending/` empty; git tip **`2acc52622`**
 = `origin/feat/harness-backend-station-20261124` (0/0), only `sidecar/cron-orchestrator.js` modified. Six commits went
 up on 11-25/26: `8557798db` `95370d285` (11-25 22:02, pushed 11-26 04:32), `eb9e67100` `5ec382504` `7fe7bd3d1` `2acc52622`.
-The newest docs-fix commit (11-26 ~05:20) is **local only — not pushed** (owner: the repo is public).
+The newest docs-fix commit (11-26 ~05:20) was local only until 08:40, when the owner said yes to the push.
 **Start at `handoff.md`.** The text below is the 04:30 write-up, kept for its detail.
 
 **New agent dossiers are INSTALLED and verified (2026-11-26 04:17 PST).** All 10 agents (NIGHT4CHRIST, SCOUT,
@@ -52,7 +70,8 @@ HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue,
    any setting and `gpt-5.4`/`gpt-5.5` only with reasoning off; `gpt-5.2` and `o3` work with tools+vision+reasoning;
    `gemini-3.1-pro-preview` answers 429 (no quota on this key); `claude-opus-5-5` and `claude-fable-5-2` pass
    tools+vision and a 2-turn tool exchange. Fable 5.2 = $10/$50 per Mtok (cache read $1).
-2. **Routines still pin cheaper models (routine changes need the owner's yes):** chain 03:00 lead
+2. **DONE 2026-11-26 08:32 PST (owner's yes):** chain lead → Fable, SCOUT and HARVEST routines → Opus 5.5; 6 agents
+   moved to Opus 5.5 — see "Where we left off — 08:40" above. Was: ~~**Routines still pin cheaper models (routine changes need the owner's yes):**~~ chain 03:00 lead
    `gemini/gemini-3-flash-preview`; SCOUT 09:00 and HARVEST Tue 10:00 `gemini/gemini-flash-lite-latest`. Proposed:
    all three → `anthropic/claude-fable-5-2`. The three 11-30 routines pin nothing, so they now use Fable. Workers the
    chain dispatches (SCOUT, DESIGNER, QC_EDITOR, PUBLISHER) already use their roster model (Fable).
