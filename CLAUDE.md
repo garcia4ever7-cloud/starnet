@@ -436,6 +436,7 @@ bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_
 **Still uncommitted (other sessions' work, deliberately left out):** the Apify per-run cap (`sidecar/hostquota.js`,
 `mcp/translate.js`, `tools/builtin/web.js`, `test/hostquota-run-cap.test.js`, its `test/fast.list` line, `qa/bugs/f050e860`
 + its `qa/BUGS.md` rows, the SCOUT section of the field notes), `sidecar/cron-orchestrator.js`, `sidecar/index.js`, and
-untracked files (Etsy preflight scripts/tests, `chat*`, assessment notes). **Pre-existing gap on the pushed branch:**
-`test/fast.list` names `test/domain-task-workspace-file.test.js` and `test/etsy-preflight.test.js`, never committed
-(since `003d25c0d`, 2026-11-18), so `test-list-runner` fails on a clean checkout.
+untracked files (`chat*`, assessment notes and others). **Fixed 2026-11-26 (owner's request):** `test/fast.list` had named
+`test/domain-task-workspace-file.test.js` and `test/etsy-preflight.test.js` since `003d25c0d` (2026-11-18) but neither was
+committed, so `test-list-runner` failed on a clean checkout. Both are now committed, with `scripts/etsy-preflight.mjs` and
+`scripts/etsy-dryrun.mjs`, which the Etsy test imports; verified on a clean checkout (55 + 225 + 12 assertions OK).

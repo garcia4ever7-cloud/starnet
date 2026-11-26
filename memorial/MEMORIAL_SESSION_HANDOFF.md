@@ -183,6 +183,11 @@ Owner supplied 4 watercolour dawns (`~/storage/downloads/lord lead the wY/`, 102
   real secret values on this station: 0 hits. Clean worktree checkout of `3210676cb`: qa-bugs-register, qa-bugs,
   source-text-integrity, memorial-layouts, memorial-gallery (120) all OK; `test-list-runner` fails ONLY on the
   pre-existing fast.list gap (two never-committed tests since `003d25c0d`), same on the old tip `ac84b52a2`.
+  **Gap closed 2026-11-26 (owner: "commit the two missing test files and push"):** committed
+  `test/domain-task-workspace-file.test.js`, `test/etsy-preflight.test.js` and the two scripts the Etsy test imports
+  (`scripts/etsy-preflight.mjs`, `scripts/etsy-dryrun.mjs`, all unchanged since 2026-11-17). Clean checkout of
+  `37cd53878` + those 4 files, `sidecar/index.js` at its committed version: 55 / 225 / 12 assertions OK, and all three
+  steps green through `scripts/run-test-list.mjs`. Secret scan: 0.
 Not done: nobody has watched it with sound or on a TV.
 
 ## 0. Where everything is (quick index)
