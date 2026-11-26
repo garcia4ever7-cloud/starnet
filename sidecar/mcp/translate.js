@@ -244,7 +244,8 @@
            too (the station cannot know whether a failed call already started an actor). Read-only connector
            tools match no rule and are not metered. Fails closed; see sidecar/hostquota.js. */
         if (o.quota && typeof o.quota.consumeTool === 'function') {
-          const q = o.quota.consumeTool(connectorId, mcpTool.name);
+          // ctx.runId is host-minted (makeCapCtx), never model-supplied: it keys the PER-RUN cap (hostquota.js).
+          const q = o.quota.consumeTool(connectorId, mcpTool.name, ctx && ctx.runId);
           if (q && q.ok === false) throw new Error(q.error || ('daily cap reached for ' + q.host));
         }
         const res = await call(mcpTool.name, args || {}, ctx);   // ctx (runId/emit) lets the manager emit connector_required

@@ -988,6 +988,7 @@ test/studio-pipeline-advance.test.js
 test/audio-finish.test.js
 test/headless-tools-granted.test.js
 test/headless-dispatch.test.js
+test/hostquota-run-cap.test.js
 test/dispatch-handoff-race.test.js
 test/orchestration-worker-pool.test.js
 test/deliverable-manifest.test.js

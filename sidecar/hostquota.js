@@ -39,6 +39,16 @@
 
 const DEFAULT_LIMITS = Object.freeze({ 'apify.com': 8 });
 
+/* PER-RUN CAP (2026-11-25). The daily cap bounds the TEAM; nothing bounded ONE RUN. SCOUT's routine prompt said
+   "scrape at most 3 shops this run" and a live run (93e8cc89) launched 8 in batches of three, spending the whole
+   team's day in four minutes — the limit was prose, so it held only while a model chose to obey it (the same
+   defect the daily cap was written to close). Keyed by the same counter names as the daily limits, counted per
+   host-minted runId, held in memory (a run does not outlive the process). 0 switches a counter's per-run cap off.
+   A call with NO runId is bounded by the daily cap only: there is no run to count against, and inventing a shared
+   bucket would lock every such caller out after three calls for the life of the process. */
+const DEFAULT_RUN_LIMITS = Object.freeze({ 'apify.com': 3 });
+const MAX_TRACKED_RUNS = 512;   // bounded: the oldest run is forgotten first; a live run is never that old
+
 /* The CONNECTOR door. Keyed '<connectorId>:<substring of the tool name>'; only the two tools that START a
    billable Apify actor run are listed. `counter: 'apify.com'` makes them share the HTTP door's budget, so the
    owner's eight is eight in total and not eight per route. Deliberately a substring match: the projected tool
@@ -86,6 +96,20 @@ function makeHostQuota(deps) {
   const limits = (deps.limits && typeof deps.limits === 'object' && Object.keys(deps.limits).length)
     ? deps.limits : DEFAULT_LIMITS;
   const toolLimits = (deps.toolLimits && typeof deps.toolLimits === 'object') ? deps.toolLimits : DEFAULT_TOOL_LIMITS;
+  const runLimits = (deps.runLimits && typeof deps.runLimits === 'object') ? deps.runLimits : DEFAULT_RUN_LIMITS;
+  const perRun = new Map();   // runId -> { '<counter>': attempts }
+
+  function runLimitFor(key) { const n = Number(runLimits[key]); return n > 0 ? Math.floor(n) : 0; }
+  function runUsed(runId, key) { const row = perRun.get(runId); return row ? (Number(row[key]) || 0) : 0; }
+  function runBump(runId, key) {
+    let row = perRun.get(runId);
+    if (!row) {
+      if (perRun.size >= MAX_TRACKED_RUNS) perRun.delete(perRun.keys().next().value);
+      row = {}; perRun.set(runId, row);
+    }
+    row[key] = (Number(row[key]) || 0) + 1;
+    return row[key];
+  }
 
   function load() {
     // A MISSING file is a fresh day, not a failure. An UNREADABLE/corrupt file is a failure, and fails closed.
@@ -107,17 +131,17 @@ function makeHostQuota(deps) {
     return { ok: used < limit, host: key, used, limit };
   }
 
-  function consume(hostname) {
+  function consume(hostname, runId) {
     const key = matchLimit(limits, hostname);
     if (!key) return { ok: true, host: hostname, used: 0, limit: 0 };
-    return consumeCounter(key, limits[key]);
+    return consumeCounter(key, limits[key], runId);
   }
 
   /* THE CONNECTOR DOOR. An MCP tool that starts a billable third-party run draws on the SAME daily counter as
      the HTTP door, so the owner's cap cannot be doubled by switching routes. A tool matching no rule is a
      no-op: read-only Apify tools (get-dataset-items, get-actor-run) must stay free, or the cap would block an
      agent from collecting work already paid for. */
-  function consumeTool(connectorId, toolName) {
+  function consumeTool(connectorId, toolName, runId) {
     const cid = String(connectorId || '').toLowerCase();
     const tname = String(toolName || '').toLowerCase();
     for (const rule of Object.keys(toolLimits)) {
@@ -129,12 +153,25 @@ function makeHostQuota(deps) {
       const cfg = toolLimits[rule] || {};
       const limit = Number(cfg.limit) > 0 ? Number(cfg.limit) : 0;
       if (!limit) continue;
-      return consumeCounter(String(cfg.counter || rule), limit);
+      return consumeCounter(String(cfg.counter || rule), limit, runId);
     }
     return { ok: true, host: cid + ':' + tname, used: 0, limit: 0 };
   }
 
-  function consumeCounter(key, limit) {
+  function consumeCounter(key, limit, runId) {
+    /* PER-RUN CAP FIRST, and a refusal here does NOT touch the daily counter: the call never leaves, so it
+       cannot have started a billable run, and charging the team's day for it would let one looping run burn
+       all eight by being refused. Counted like the daily cap — per ATTEMPT that was let through. */
+    const rid = (typeof runId === 'string' && runId) ? runId : '';
+    const runLimit = rid ? runLimitFor(key) : 0;
+    if (runLimit) {
+      const usedThisRun = runUsed(rid, key);
+      if (usedThisRun >= runLimit) {
+        return { ok: false, host: key, used: usedThisRun, limit: runLimit, scope: 'run',
+          error: key + ' is capped at ' + runLimit + ' request' + (runLimit === 1 ? '' : 's') + ' per RUN by the station (a hard rail, not a guideline); this run has used '
+            + usedThisRun + '. Do not retry and do not route around it — nothing further will start in this run. Record what you already have and finish.' };
+      }
+    }
     const day = localDayKey(now());
     let state;
     try { state = load(); }
@@ -149,10 +186,12 @@ function makeHostQuota(deps) {
     counts[key] = used + 1;
     try { fs.writeFileSync(file, JSON.stringify({ day, counts }), { mode: 0o600 }); }
     catch (e) { return { ok: false, host: key, used, limit, error: 'daily-quota file unwritable (' + ((e && e.message) || e) + ') — refusing rather than spending uncounted' }; }
-    return { ok: true, host: key, used: used + 1, limit };
+    const out = { ok: true, host: key, used: used + 1, limit };
+    if (runLimit) { out.runUsed = runBump(rid, key); out.runLimit = runLimit; }
+    return out;
   }
 
-  return { consume, consumeTool, peek, limits, toolLimits };
+  return { consume, consumeTool, peek, limits, toolLimits, runLimits };
 }
 
-module.exports = { makeHostQuota, parseLimits, DEFAULT_LIMITS, DEFAULT_TOOL_LIMITS, localDayKey, matchLimit };
+module.exports = { makeHostQuota, parseLimits, DEFAULT_LIMITS, DEFAULT_TOOL_LIMITS, DEFAULT_RUN_LIMITS, localDayKey, matchLimit };

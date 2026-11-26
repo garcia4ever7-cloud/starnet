@@ -903,7 +903,7 @@
            billable actor run. Fails CLOSED (see sidecar/hostquota.js for why this is not a hook). A host with
            no configured limit is not counted and this is a no-op. */
         if (deps.hostQuota && typeof deps.hostQuota.consume === 'function') {
-          const q = deps.hostQuota.consume(u.hostname);
+          const q = deps.hostQuota.consume(u.hostname, ctx && ctx.runId);   // runId keys the per-run cap
           if (q && q.ok === false) throw new Error(q.error || ('daily request cap reached for ' + q.host));
         }
 

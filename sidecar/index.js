@@ -2183,6 +2183,13 @@ const hostQuota = require('./hostquota.js').makeHostQuota({
   limits: (() => {
     const parsed = require('./hostquota.js').parseLimits(ENV('HOST_DAILY_LIMITS'));
     return Object.keys(parsed).length ? parsed : require('./hostquota.js').DEFAULT_LIMITS;
+  })(),
+  /* PER-RUN CAP — at most 3 Apify actor runs in any ONE run (2026-11-25, run 93e8cc89 launched 8). Tunable with
+     HOST_RUN_LIMITS="apify.com=3". An absent or unparseable value keeps the default (a typo never reads as
+     "no rail"); only an explicit apify.com=0 switches the per-run cap off, leaving the daily cap in force. */
+  runLimits: (() => {
+    const parsed = require('./hostquota.js').parseLimits(ENV('HOST_RUN_LIMITS'));
+    return Object.keys(parsed).length ? parsed : require('./hostquota.js').DEFAULT_RUN_LIMITS;
   })()
 });
 

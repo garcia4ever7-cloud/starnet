@@ -4,11 +4,11 @@
 One tracked file per bug under `qa/bugs/`; this is only the index. File a new bug with
 `node scripts/qa/bugs.mjs --new --title "..." --surface <surface>`.
 
-**19** open (open+claimed) of 229 total — 1 P0 · 3 P1 · 15 P2
+**20** open (open+claimed) of 230 total — 1 P0 · 3 P1 · 16 P2
 
 Engineering status is separate from delivery and customer recovery. Legacy rows without origin are not a customer census.
 
-User/owner reports: **107** · source fixed: **91** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **104**.
+User/owner reports: **108** · source fixed: **91** · installer verified: **6** · customer confirmed: **1** · still reported failing: **2** · recovery unconfirmed: **105**.
 
 | Report | Family | Source | Installer | Customer |
 | --- | --- | --- | --- | --- |
@@ -74,6 +74,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | [Mac boot guard reports shared specialty catalog load failure](bugs/2f156837-mac-boot-guard-reports-shared-specialty-catalog.md) | boot-integrity | wontfix | unverified | persists |
 | [Customer requests accounting for credits consumed during Mac boot trouble](bugs/abd75bb4-credit-usage-during-mac-boot-failure.md) | account-usage-correlation | open | unverified | unconfirmed |
 | [Customer cannot explain idle behavior and unexpectedly high usage](bugs/acb47320-idle-usage-customer-unexplained.md) | work-and-spend-truth | open | unverified | unconfirmed |
+| [Per-run Apify scrape limit was prompt-only: a routine run launched 8 actor runs against a 3-per-run instruction](bugs/f050e860-per-run-apify-scrape-limit-was-prompt-only-a-rou.md) | host-quota-rail | open | not-applicable | unconfirmed |
 | [Repeated project verification reportedly consumes overnight budget](bugs/f8d479d9-repeated-project-verification-reportedly-consume.md) | autonomous-completion-and-cost | open | unverified | unconfirmed |
 | [Zoho Mail bootstrap tool reportedly requires undiscoverable account](bugs/54564ff9-zoho-mail-bootstrap-tool-reportedly-requires-und.md) | connector-schema-projection | open | unverified | unconfirmed |
 | [Customer reports unusable visibility without build or platform details](bugs/6bb9d2a1-visibility-failure-without-diagnostics.md) | uncorrelated-visibility | open | unverified | unconfirmed |
@@ -258,6 +259,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | P1 | wontfix | onboarding | [Mac boot guard reports shared specialty catalog load failure](bugs/2f156837-mac-boot-guard-reports-shared-specialty-catalog.md) | release-0112-finalprep-0911 | — |
 | P2 | open | autonomy | [Customer requests accounting for credits consumed during Mac boot trouble](bugs/abd75bb4-credit-usage-during-mac-boot-failure.md) | release-0120-prep-0915 | — |
 | P2 | open | autonomy | [Customer cannot explain idle behavior and unexpectedly high usage](bugs/acb47320-idle-usage-customer-unexplained.md) | reliability-followup | — |
+| P2 | open | autonomy | [Per-run Apify scrape limit was prompt-only: a routine run launched 8 actor runs against a 3-per-run instruction](bugs/f050e860-per-run-apify-scrape-limit-was-prompt-only-a-rou.md) | fix/apify-per-run-cap | — |
 | P2 | open | autonomy | [Repeated project verification reportedly consumes overnight budget](bugs/f8d479d9-repeated-project-verification-reportedly-consume.md) | agent/reliability-audit-0919 | — |
 | P2 | open | channels | [Zoho Mail bootstrap tool reportedly requires undiscoverable account](bugs/54564ff9-zoho-mail-bootstrap-tool-reportedly-requires-und.md) | agent/reliability-audit-0919 | — |
 | P2 | open | onboarding | [Customer reports unusable visibility without build or platform details](bugs/6bb9d2a1-visibility-failure-without-diagnostics.md) | release-0120-prep-0915 | — |
@@ -357,7 +359,7 @@ User/owner reports: **107** · source fixed: **91** · installer verified: **6**
 | Surface | Open |
 | --- | --- |
 | channels | 1 |
-| autonomy | 4 |
+| autonomy | 5 |
 | providers | 4 |
 | safecell | 1 |
 | sessions | 3 |
