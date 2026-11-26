@@ -1,8 +1,9 @@
 # STATION FIELD NOTES
 
 Hard-won facts about **this** station (Android/Termux, phone-only) that cost real time or real money
-to learn. Read this before re-investigating anything below. Last updated **2026-10-25** (Higgsfield
-integration complete + Refit module extracted; see §11 for new video generation expansion).
+to learn. Read this before re-investigating anything below. ~~Last updated **2026-10-25** (Higgsfield
+integration complete + Refit module extracted; see §11 for new video generation expansion).~~ [Stale as of 2026-11-26:
+entries run to 2026-11-26, newest at the end; the Higgsfield tool never worked as first integrated — see §13b.]
 
 Scope: operational truth about the live runtime + repo gates. Code architecture lives in `CLAUDE.md`
 and `CODE_MAP.md`; the owner's business brief lives in `CLAUDE_CODE_ETSY_PROJECT.md`.
@@ -51,8 +52,10 @@ even though a routine run does not get it. Do not use that endpoint to predict w
 - **Live data is NOT in the repo.** It is `~/.local/share/StarNet/workspaces/`.
 - **Always launch via `~/start-starnet.sh`** (sources keys, wake-lock, heap cap, crash-restart loop).
   It has an already-running guard and exits 0 if the port is live.
-- **Restart that works:** `kill <launcher-pid>` then `kill <node-pid>`, confirm port dead, then
-  `nohup ~/start-starnet.sh > <log> 2>&1 &` and poll `/api/health`. Came up in ~3s.
+- ~~**Restart that works:** `kill <launcher-pid>` then `kill <node-pid>`, confirm port dead, then
+  `nohup ~/start-starnet.sh > <log> 2>&1 &` and poll `/api/health`. Came up in ~3s.~~ [Stale as of 2026-11-26: count
+  `.spend-pending` first (§13h) and relaunch detached with `setsid`; when Claude Code runs it, only through the clean
+  `env -i` form — see the 2026-11-26 section and the CLAUDE.md cheat sheet.]
 - **API auth header is `x-starnet-token`** (legacy alias `x-skynet-token`). **Never `Authorization: Bearer`** —
   that always 403s even with a correct token.
 - **Token source of truth is `STARNET_API_TOKEN` in `~/.config/starnet/env`.** The file
@@ -2430,5 +2433,115 @@ checked before the daily counter (a refused call spends nothing from the 8). Bot
 (`mcp/translate.js`, `tools/builtin/web.js`). Tunable: `STARNET_HOST_RUN_LIMITS="apify.com=N"` (`=0` = off).
 It applies to EVERY run, attended or not — an owner asking one run for 5 scrapes gets 3 unless that is raised.
 Replay of the real 8-call sequence: old code 8 reached Apify, new code 3. `test/hostquota-run-cap.test.js`
-(42 assertions, in `test/fast.list`). **Uncommitted; backups `*.bak-20261125-apify-run-cap`; the running sidecar
-still has the old modules until it is restarted.**
+(42 assertions, in `test/fast.list`). ~~**Uncommitted; backups `*.bak-20261125-apify-run-cap`; the running sidecar
+still has the old modules until it is restarted.**~~ [Stale as of 2026-11-26: committed `8557798db` (not pushed) and
+LIVE since the 22:18 PST restart — see the next section.]
+
+## 2026-11-26 — evening: Apify per-run cap live, clean restart, SCOUT's budget cause, a skill fix, Termux:Boot prepared
+
+All read live; no spend. Commands and the owner's to-do list: CLAUDE.md ("Where we left off", cheat sheet, "2026-11-26 evening").
+
+- **Apify per-run cap is LIVE.** Committed `8557798db` (code, test, bug record) and `95370d285` (these notes), not
+  pushed. Loaded by the 22:18 PST restart: sidecar 17906 started 22:18:44, after `hostquota.js` (09:29:50).
+  `hostquota-run-cap` 42 OK, `headless-dispatch` 102 OK; `test:fast` one step at a time: 1,007 green / 12 red, the same
+  12 known reds; the gate run itself stopped at step 304 (`ledger-reconcile`, intermittent `2ba9cd3e`).
+- **Restart trap.** A 22:03 PST relaunch from a Claude Code Bash call gave the sidecar Claude's environment:
+  `LD_PRELOAD` = the Termux syscall shim (mapped into the sidecar — the §12a hang-instead-of-crash defect),
+  `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE` and ~10 more. `start-starnet.sh` sources the env
+  file but never clears inherited variables, and a `!` command runs inside Claude too. Fixed 22:18 by relaunching
+  through `env -i` keeping only `ANDROID_*`/`TERMUX*`/`BOOTCLASSPATH`/`LANG` (+ HOME, PATH, PREFIX, TMPDIR) — without the
+  Android variables `termux-wake-lock` fails silently. Verified: 0 `LD_PRELOAD`, 0 `CLAUDE*`, shim not in
+  `/proc/<pid>/maps`, 64 variables, all provider keys present. Launcher 17889.
+- **SCOUT routine `7b22107c` budget stops explained** (`runs.jsonl` `recoveryAttempts` + `ledger.jsonl`): de5fd5fd
+  (11-18, `rate_limit`), 26303d84 (11-23, `overloaded`) and 0ba79d7e (11-25, `overloaded`) each fell back on the first
+  call from gemini-flash-lite to `anthropic/claude-haiku-5.5` on OpenRouter (reasoning effort high): $0.011–0.013 per
+  turn vs $0.006 on Gemini, over 15–25 turns of mostly `get-dataset-items` re-reads (~80K tokens re-sent per turn).
+  Apify itself is ~$0.002 per scrape and not in the $0.25. Prompt shortened 2026-11-25; Run Now 93e8cc89 on Gemini: 12
+  turns, $0.0718 (8 scrapes — now capped at 3). The 2026-11-26 09:00 PST run is the first real test.
+- **Headless delegation works one level deep** (§16); the stale §1 lines are struck through.
+- **NIGHT4CHRIST's `etsy-pipeline-handoff-via-airtable` skill, step 5 fixed** via `POST /api/agent-skills/manage`
+  (`patch`), read back from StarNet (not withheld). A direct SKILL.md edit would not stick: the skill store re-renders
+  that file from its record on every save. Backups: `~/.local/share/StarNet/skill-backups/`.
+- **The backup chain is NOT empty:** 3 OpenRouter slugs (haiku-5.5 » gemini-3-flash-preview » gpt-5-mini), `saved:true`.
+- **Anthropic direct balance:** last recorded "too low" (§21, 11-04); not re-probed — unknown.
+- **`sidecar/cron-orchestrator.js` is still uncommitted** (studio stage prompt; live since 11-22).
+- **Termux:Boot prepared, not active.** Termux is the F-Droid build (`TERMUX_APP__APK_RELEASE=F_DROID`, 0.119.0-beta.2),
+  so Termux:Boot must come from F-Droid; it is not installed. `~/.termux/boot/start-starnet`: wake lock → 30 s →
+  network wait ≤90 s → skip if a launcher runs → `bash ~/starnet-up.sh`; log `~/.local/state/starnet/boot.log`. The
+  old `10-starnet.sh` (started the launcher with no receipt check) is at `~/.termux/10-starnet.sh.bak-20261126`.
+- **Money (ledger):** lifetime $139.67 (October $115.66, November $24.01); NIGHT4CHRIST $110.83 (79%, 44 budget
+  stops), DESIGNER $13.92, SCOUT $4.54. Today $1.46 of the $25 day rail.
+- **Blueprint sets:** v1 `Download/starnet-blueprints-20261126/` (Library `blueprint-20261126-01…08`, Outbox project
+  `blueprints-20261126`); r2 `Download/starnet-blueprints-20261126-r2/` (11 sheets; Library `blueprint-20261126-r2-09…11`).
+
+## 2026-11-26 00:47 PST — crash recovery done and tested: Termux:Boot test reboot passed
+
+Read-only check after the test reboot; nothing restarted, no paid runs.
+
+- **Crash recovery is DONE.** Termux:Boot 0.8.1 from F-Droid installed; battery set to Unrestricted for Termux and
+  Termux:Boot (owner-reported). Verified here: `pm list packages` now lists `com.termux.boot`. Not verifiable from
+  Termux: the version number and the battery setting (`dumpsys`/`cmd package dump` unavailable).
+- **Test reboot 2026-11-26 00:33 PST passed.** `~/.local/state/starnet/boot.log`: boot start 00:33:25 → network yes →
+  DOWN, starting → UP http://127.0.0.1:8787 (pid 29630) → boot end 00:34:19. No manual step.
+- **Process tree after boot:** `bash ~/start-starnet.sh` 29400 (parent init) → `node sidecar/index.js` 29630 and
+  `omniroute serve` 29422 → `omniroute (v16.3.8)` 29443. Launcher loop present, not a bare node.
+- **Live state:** `/api/health` ok; OmniRoute :20128 answers (307 on `/`, AUTH_002 on unauthenticated `/v1/models`);
+  `/api/cron` enabled, not halted, healthy, last tick 00:47:18 PST; 11 routines, 6 ON — Etsy pipeline chain next
+  11-26 03:00, Etsy Scout daily research 11-26 09:00, Quality Gate / Scripture Art Concept Queue / Print Kit Readiness
+  11-30 09:00, Weekly Income Opportunity Scan 12-01 10:00 (all PST, 0 consecutive failures). Production ARMED
+  (2026-11-21T08:32:28Z, unattributed). `.spend-pending/` empty. Spend: $1.46 in the trailing 24 h vs $25 day rail
+  (the day pool is a trailing 24 h window, `ledger.js` `usdForDay`, not a calendar day); lifetime $139.67, 2,516 runs.
+  `agent-config-integrity` CONSISTENT.
+- **Logs since boot:** the post-boot sidecar segment holds only the usual banner, connectors (exa, airtable, apify up),
+  boot reconcile (5 disabled routines skipped) and the Node `localStorage` ExperimentalWarning — no errors. Every line is
+  written twice (launcher `tee -a` + the log redirect) — cosmetic, pre-existing. OmniRoute boot log clean (started in
+  14.7 s).
+- **Date correction:** the section above headed "2026-11-26 — evening" was written 2026-11-25 ~22:45 PST (the 22:18
+  restart and `~/.termux/boot/start-starnet`, 11-25 22:43, predate this reboot).
+
+## 2026-11-26 04:30 PST — agent dossiers installed and verified; 03:00 chain failed on provider timeouts
+
+**What changed.** The owner's 18-part dossier bundle was installed for all 10 agents at 04:17 PST. Only
+`docs.{identity,purpose,context,manual}` changed (plus NIGHT4CHRIST's mirror in `doc.agent` and its
+`doc.agent.systemPrompt`). `[[ETSY RULES]]` expands into the context of NIGHT4CHRIST, SCOUT, DESIGNER and PUBLISHER;
+`[[STUDIO RULES]]` into STORYWRITER, DIRECTOR, PRODUCER and COPYWRITER. QC_EDITOR and HARVEST have their own short rule
+lines and no shared block (as sent). `_saveRevision` 5574 → 5575; save and roster both stamped `1795695438440`.
+Backups in the workspaces dir: `agent.save.json.bak-20261126-041644` (1,088,103 B), `agent.roster.json.bak-20261126-041644`
+(150,760 B), `webdesigner/styles.bak-20261126-041644/`. Integrity CONSISTENT; re-verified 04:24 (10/10 PASS: new identity
+line, full rule blocks, no `[[…]]`, no NIV except "never NIV"/"never published", no old ask-before-scraping or
+status-word lines).
+
+**Hand recipe (works while the sidecar runs; nothing restarts).** The roster `system` is
+`composeSystemPrompt()` (`frontend/app/app.js:350`): `identity.trim()` + crew + foundation + persona + approval +
+`\n\nYOUR PURPOSE (purpose.md):\n` + purpose + `\n\nABOUT YOUR COMMANDER & THEIR WORLD (context.md):\n` + context +
+`\n\nSTANDING ORDERS (operating-manual.md) — always follow these:\n` + manual + commander dossier + FORK. So:
+1. Gate: no run in progress, `.spend-pending/` empty. Back up both files.
+2. For each agent, rebuild the old identity prefix and the old purpose/context/manual tail from the CURRENT docs and
+   check they match the live roster `system` exactly (prefix + one unique match). Stop if any differs.
+3. Splice: new identity + the untouched middle + new tail + the untouched end. Specialists keep no `systemPrompt` in
+   the save (the tab recomposes); the hero does (`doc.agent.systemPrompt`) — set it too.
+4. Write the save atomically with `doc._saveRevision` +1 and `doc.updatedAt` / top-level `updatedAt` / `savedAt` /
+   `requestUpdatedAt` = now; then `POST /api/roster` `{agents:[all 10, only system changed], updatedAt: now}`.
+5. Verify both files, run `scripts/agent-config-integrity.mjs`, and tell the owner to reload tabs (a stale tab's
+   roster push would win on timestamp; its save would land in a conflict file).
+There is no GET route that returns roster prompt text (`/api/runtime/agent` gives id/name/model/provider only), so
+prompt checks read `agent.roster.json`, which the sidecar writes on every accepted push.
+
+**Style library.** `webdesigner/styles/` has 2 styles. `index.md` rewritten from the bundle; STYLE-2 filled from
+`gothic-blackletter-faith.md` (status "trial" is inferred — the file has none), STYLE-3/4 rows deleted. The existing
+`soft-watercolor-sunrise.md` (4,412 B) was kept; the bundle's version was not installed. Open: gothic puts lettering in
+the art, but DESIGNER's manual now says "one wordless master image".
+
+**03:00 chain failure (diagnosis, nothing changed).** Run `a9c37d84` (gemini-3-flash-preview) dispatched SCOUT (done)
+and DESIGNER (openai gpt-5, Psalm 46:1 kit, done 03:05, $0.12). QC_EDITOR (openai gpt-5) then hit
+`failureStage provider_stream / timeout` four times, fell back through claude-haiku-5.5, gemini-3-flash-preview and
+gpt-5-mini (all timeouts), and 6 of 7 `image_analyze` calls failed at ~55 s → `fetch failed (ERR_HTTP2_STREAM_ERROR)`.
+`cron-driver.js` `finishFire` treats the transient worker error as a failed fire, so the whole chain auto-retried at
+03:20 (13 turns + a SCOUT run, ~$0.10), 03:28 and 03:32 (gemini `rate_limit`, then OpenRouter timeouts, $0). Endpoints
+answered normally at 04:29 (OpenRouter 200, OpenAI 401, Gemini 403 unauthenticated, all < 2 s). Cause [Likely]:
+transient provider/network streaming failure, not configuration.
+
+**NIGHT4CHRIST has no model.** Save `doc.agent.model` = `""`, roster `model: null`, provider `openai` → the app shows
+"no model selected for OPENAI". It last ran gpt-5 on 11-25 15:22. The chain pins its own model, but the three
+11-30 09:00 routines (Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan) show `null/null` in
+`/api/cron` and will use the agent's own (empty) model. Owner decision; proposal in CLAUDE.md "Where we left off".

@@ -2,6 +2,62 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where we left off — 2026-11-26, 04:30 PST (checked live, read-only)
+
+**New agent dossiers are INSTALLED and verified (2026-11-26 04:17 PST).** All 10 agents (NIGHT4CHRIST, SCOUT,
+DESIGNER, QC_EDITOR, PUBLISHER, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER) got new identity/purpose/context/
+manual text from the owner's 18-part bundle: shared `## Etsy team rules` / `## Studio rules` blocks, KJV-only, standing
+approval from `agent/etsy-creative-brief.md`, owner-only list, Apify 3/run 8/day, done-tests and reply line. Written by
+hand to BOTH files: `agent.save.json` `_saveRevision` 5574 → **5575**, stamp `1795695438440`, plus a full-roster
+`POST /api/roster` (accepted, count 10). Only the four doc sections changed. Models, providers, approvalMode, skills,
+routines, foundation/personality/AUTHORITY/FORK text are untouched. Re-verified 04:24: 10/10 PASS, integrity CONSISTENT.
+Prompts shrank (DESIGNER 36,160 → 9,286 chars; NIGHT4CHRIST 26,134 → 12,148); the Studio four grew (~8.1–8.5k) because
+each carries the full Studio rules. Method and recipe: newest section of `STATION_FIELD_NOTES.md`.
+Backups (workspaces dir, never commit): `agent.save.json.bak-20261126-041644` (1,088,103 B),
+`agent.roster.json.bak-20261126-041644` (150,760 B), `webdesigner/styles.bak-20261126-041644/` (3 files).
+**Reload any open StarNet tab before using it:** an old tab can push the old prompts back to the roster (the save is
+protected by `_saveRevision`; the roster only by its timestamp).
+
+**Style library** (`webdesigner/styles/`): 2 styles. `index.md` rewritten from the bundle (rows:
+soft-watercolor-sunrise active; gothic-blackletter-faith marked "trial" — the file has no status line). The existing
+`soft-watercolor-sunrise.md` was kept unchanged (the bundle's shorter version was NOT installed).
+
+**Last night's chain (03:00) failed on provider timeouts, not config.** SCOUT done, DESIGNER made the Psalm 46:1
+five-ratio kit (openai gpt-5, 03:02), then QC_EDITOR (openai gpt-5) hit `provider_stream timeout` ×4 and every fallback
+(haiku-5.5, gemini-3-flash-preview, gpt-5-mini) → `fetch failed (ERR_HTTP2_STREAM_ERROR)`. The lead run ended "done"
+but cron counted it failed and auto-retried the whole chain at 03:20/03:28/03:32 (gemini rate_limit, then OpenRouter
+timeouts; last error 03:34). Providers answer normally since. No sidecar log lines after 03:34.
+
+**Station now:** sidecar 29630, OmniRoute 29422/29443, health ok, app 200, cron healthy, production ARMED
+(2026-11-21, unattributed), 0 pending receipts. Routines ON: SCOUT daily 09:00; chain 03:00 (next 11-27);
+HARVEST Tue 10:00 (next 12-01); Quality Gate Draft, Scripture Art Concept Queue, Print Kit Readiness Plan (11-30 09:00).
+**Git:** this wrap-up commit plus `8557798db` + `95370d285` pushed to `feat/harness-backend-station-20261124`;
+`sidecar/cron-orchestrator.js` still uncommitted (owner decision).
+
+**Waiting on the owner:**
+1. **NIGHT4CHRIST has NO model** (provider `openai`, model empty — the app says "no model selected for OPENAI"). It last
+   ran gpt-5 on 11-25 15:22. This breaks chat AND the three 11-30 09:00 routines, which use the agent's own model
+   (`null/null` in `/api/cron`). The chain is safe (it pins gemini-3-flash-preview). Pick a model in the app.
+2. Model changes proposed 2026-11-26 (none applied): NIGHT4CHRIST → gemini-3-flash-preview (or gpt-5 for chat
+   quality); PUBLISHER gemini-3.5-flash → gemini-3-flash-preview; DIRECTOR/PRODUCER/COPYWRITER gpt-5 → gpt-5-mini; keep
+   SCOUT flash-lite, DESIGNER/QC_EDITOR/STORYWRITER gpt-5. Gemini 3.8 Flash for SCOUT/PUBLISHER: not until a free probe
+   passes (it timed out at 90 s in the OmniRoute probe, `STATION_FIELD_NOTES.md` §18; no row in `prices.js`).
+3. **Style conflict:** gothic-blackletter-faith puts lettering IN the image; DESIGNER's new manual says "one wordless
+   master image". Decide which wins for that style (or retire it).
+4. **QC_EDITOR's context has no Etsy-rules block** (installed exactly as sent; it has its own 3 rule lines). Add or keep.
+5. Look at SCOUT's 11-26 09:00 run (first run on the new dossier + live Apify cap) and the 11-27 03:00 chain.
+6. Decide on `sidecar/cron-orchestrator.js` (live since 11-22, uncommitted, no test).
+7. Publish "Verses for Hard Days" on etsy.com; approve or reject Outbox items (137 pending, none ever approved).
+8. Money: ledger lifetime **$139.67** vs the $60 capital ceiling — enforce or not.
+9. Security: jail `shell.exec` (P0 `cd082d49`); review the 45 gitleaks findings (the repo is public); delete
+   `~/.claude/settings.json.bak-20261125-pre-kling-removal` (it holds the Kling key).
+10. 8 of 10 agents still get the "AUTHORITY — FULL POWER" block (approvalMode full); moving them to `ask` is yours.
+11. Do **not** publish PUBLISHER's NIV set-of-3 draft (no NIV permission; KJV only).
+12. HARVEST's routine prompt still says "KJV/NIV scripture wall art"; the `etsy-rules` skill still says
+    `deliverable_note` is broken headless (it isn't). Routine/skill edits — yours.
+
+Crash recovery (done 2026-11-26 00:33): Termux:Boot test reboot passed — newest-but-one field-notes section.
+
 **Rule 1 — Owner's top goal:** StarNet's agents run the Etsy shop on their own with minimal owner
 support. Prefer fixes that keep agents working unattended over ones that need the owner to tap or
 approve.
@@ -35,7 +91,7 @@ You are my advisor, not my assistant. Your job is accuracy, not agreement. Follo
 node sidecar/index.js          # run the sidecar directly against LIVE state (Node core modules only — no install needed)
 npm run dev:seed:keep          # the real dev loop — scratch workspace from dev/fixtures/seed-workspace/, SKYNET_DEV=1
 npm ci                         # install deps (desktop shell / dev tooling only)
-npm run test:fast              # the merge gate — 1,018 steps from test/fast.list via scripts/run-fast-tests.mjs (counted 2026-11-25)
+npm run test:fast              # the merge gate — 1,019 steps from test/fast.list via scripts/run-fast-tests.mjs (counted 2026-11-26)
 npm run test:fast -- <substr>  # filter test:fast to steps whose path contains <substr>
 node test/<name>.test.js       # run one test file standalone (plain node, no framework — requires test/_assert.js)
 npm run test:http              # live sidecar HTTP/E2E suite (test/http.list)
@@ -56,7 +112,7 @@ There is no general linter/formatter (`lint:evidence-secrets` only scans QA evid
 
 `engines` says `>=18`, but use **Node 22** — it matches CI and the release train. `test:fast` is the merge gate for everything; additionally run `test:http` whenever you touch routes, streaming, persistence, providers, tools, schedules, or channels.
 
-For the file-by-file layout (`sidecar/`, `frontend/app/`, `shared/`, `test/`, `qa/`), read `CODE_MAP.md` first — it is kept current and this file does not duplicate it. `docs/BRAIN.md` is the designated 5-minute orientation. `sidecar/index.js` is ~17k lines and the file most merges conflict in — reference it by symbol or by a literal string to grep for, never by line number, which drifts within days.
+For the file-by-file layout (`sidecar/`, `frontend/app/`, `shared/`, `test/`, `qa/`), read `CODE_MAP.md` first — ~~it is kept current~~ [2026-11-26: its per-area numbers date from 2026-07; a dated live-numbers note now sits at its top] — this file does not duplicate it. `docs/BRAIN.md` is the designated 5-minute orientation (same caveat: reconciled 2026-08-03). `sidecar/index.js` is ~~~17k~~ 24,564 lines (counted 2026-11-26) and the file most merges conflict in — reference it by symbol or by a literal string to grep for, never by line number, which drifts within days.
 
 ## Project laws
 
@@ -109,6 +165,7 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 - **Ten agents exist** (live roster, 2026-11-24): NIGHT4CHRIST (`agent`, Commander), SCOUT (research), DESIGNER (`webdesigner`, product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), and the studio crew STORYWRITER, DIRECTOR, PRODUCER, QC_EDITOR (`qceditor`), COPYWRITER. The GPT-4o Independent Reviewer (`gpt4o_reviewer`) is **designed but not in the roster** — see its section below.
 - **approvalMode — historical snapshot 2026-11-24, not current state** (live source: `agent.roster.json` / `node scripts/agent-config-integrity.mjs`): `full` on 8 — agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor; `ask` on 2 — producer, copywriter. Only `'full'` and `'ask'` exist; anything else normalizes to `ask`. **An `ask` agent in a cron run never stalls** — an ungranted consent-gated call is denied immediately (`sidecar/permissions.js`, `SILENCE`); unattended capability for `ask` agents comes from routine `unattendedGrants` and the Workshop grant, not from waiting. Full Access allows before even the hardline floor (`permissions.js` `full-power`), and answering "Full access" on any permission card permanently flips that agent to `full` (`persistAgentFullAccess`) — that is how modes drift without a doc trail. Older docs saying SCOUT/DESIGNER/PUBLISHER are `ask` (`STATION_FIELD_NOTES.md` §1, §16 table) are stale.
+- **Agent dossiers (2026-11-26, revision 5575):** every agent's four docs were replaced by the owner's bundle — shared Etsy/Studio rule blocks, KJV only, the creative brief is standing approval, owner-only list, Apify 3 per run / 8 per day. To change them again use the app's dossier editor in ONE tab, or the hand recipe in the newest `STATION_FIELD_NOTES.md` section (both files, revision +1, full-roster POST, then reload tabs).
 - **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval. The same applies to commits, paid generation (Higgsfield MCP credits are the owner's Plus wallet), and StarNet/OmniRoute restarts: each needs the owner's explicit yes for that action, and one approval does not carry over to the next.
 - **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and never run `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. Inspect a file before editing it, leave unrelated working-tree changes exactly as found (never fold them into your own edit), and ask before expanding scope beyond what the owner approved. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room. Verified by one real cron run: the `skill.view` error is gone.
@@ -119,7 +176,7 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 **NEW — 2026-11-19**: Added `100-repo-evaluation` skill in `.claude/skills/100-repo-evaluation/SKILL.md` (three-phase repository evaluation framework, adapted from Nate Herk's "I Tried 100+ Github Repos for Claude").
 - **Security-review plugin** (`~/.claude/plugins/cache/claude-plugins-official/security-guidance/2.0.20/hooks/llm.py`): reviews commits via LLM. Requires `ANTHROPIC_API_KEY`; model names `anthropic/claude-opus-5-5` (primary) and `anthropic/claude-sonnet-5-5` (fallback) — unprefixed names fail with HTTP 400. OmniRoute (`localhost:20128`) has no anthropic provider connection configured, so reviews go direct to `api.anthropic.com`. The plugin is NOT restarted by `start-starnet.sh`; restart it manually after env changes.
-- **DESIGNER's reusable art-style library** lives in StarNet at `webdesigner/styles/` — see the `etsy-rules` skill's `styles.md`.
+- **DESIGNER's reusable art-style library** lives in StarNet at `webdesigner/styles/` — see the `etsy-rules` skill's `styles.md`. [2026-11-26: 2 styles — soft-watercolor-sunrise (active, default) and gothic-blackletter-faith (trial); `index.md` now uses the bundle's name/status/look/best-for table and new-style template.]
 - **Two scoped side missions are written up but deliberately not started**: jailing `shell.exec`'s filesystem access, and locking NIGHT4CHRIST/HARVEST from Full Access to Ask. See `STATION_FIELD_NOTES.md` §9 "Side missions" before picking either up — plan mode first.
 
 ## Hard-won rules (2026-10-26) — read before touching providers, spend, or the live station
@@ -157,7 +214,7 @@ The deliverable store, `agent.save.json`, skills and notebooks are all read at b
 - **Fall through to another provider ONLY on exhausted credit, never on a broken request** — otherwise a bug in provider A quietly starts spending on provider B and the real error is never seen. Kling `code 1102` / HTTP 402 means empty wallet; `1201` means your request is wrong.
 - **Preflight cost where the API offers it** (Higgsfield `get_cost: true` returns credits and submits nothing). Cheapest known real video: Higgsfield `seedance_2_0_mini`, 720p/5s/9:16, **5 credits**; 480p/4s is 2.
 - **Higgsfield has two wallets.** The MCP tools spend the owner's Plus credits; the platform REST API (`platform.higgsfield.ai`, what StarNet uses) does **not** — its usage appears in no balance or ledger visible here. Treat REST usage as spend of unknown size against an account this station cannot read.
-- **~~The direct Anthropic account has no balance.~~ CORRECTED 2026-10-27 — it is funded and works.** Probed with a real 1-token call to `claude-haiku-5-5`: HTTP 200, `stop_reason: max_tokens`, usage recorded. A full NIGHT4CHRIST run on its roster model `claude-sonnet-5-5` also completed (`reason=done`). So `anthropic` is a usable provider again — but **mind the price**: that one-word run cost **$0.098**, because the station's system prompt + memory recall dominate the input, not the reply. OpenRouter remains the cheaper lane (balance was $5.93 of $35 on 2026-10-27; check `GET https://openrouter.ai/api/v1/credits`). The studio pipeline still reads `STUDIO_PROVIDER` / `STUDIO_MODEL`.
+- **~~The direct Anthropic account has no balance.~~ ~~CORRECTED 2026-10-27 — it is funded and works.~~** [Stale as of 2026-11-26: `STATION_FIELD_NOTES.md` §21 (2026-11-04) later recorded "credit balance too low", and nothing has probed it since (a probe spends) — treat the balance as unknown. No agent is on `anthropic` now.] The 2026-10-27 check: probed with a real 1-token call to `claude-haiku-5-5`: HTTP 200, `stop_reason: max_tokens`, usage recorded. A full NIGHT4CHRIST run on its roster model `claude-sonnet-5-5` also completed (`reason=done`). So `anthropic` is a usable provider again — but **mind the price**: that one-word run cost **$0.098**, because the station's system prompt + memory recall dominate the input, not the reply. OpenRouter remains the cheaper lane (balance was $5.93 of $35 on 2026-10-27; check `GET https://openrouter.ai/api/v1/credits`). The studio pipeline still reads `STUDIO_PROVIDER` / `STUDIO_MODEL`.
 - **OpenRouter cannot generate video at all** — 0 of 466 models output video.
 
 ## OmniRoute — routing rules (condensed from `STATION_FIELD_NOTES.md` §14/§14a)
@@ -192,7 +249,7 @@ Gotcha: `billing`/`auth`/`rate_limit` carry `shouldFallback: false` but `shouldR
 
 `reason=done` is NOT proof a model works — that is the documented failure where a model writes tool syntax as prose and the harness runs nothing. A candidate is only acceptable if a real `POST /api/run` against a real agent emits **both `agent.tool_call` and `agent.tool_result`**. The run stream is NDJSON of `{name, payload}` — not `{type, ...}`.
 
-**⚠️ Routing drift — check live state, not this file.** The live roster (2026-11-20) has all agents on `codex`/`openai`/`gemini` providers — NOT the `anthropic` primaries this section describes — and `GET /api/fallback/chain` returned `{"chain":[],"saved":true}` (an empty chain was persisted and beats the env default). **Before any session that touches spend or providers, check `node scripts/station-models.mjs list` and `GET /api/fallback/chain`.** This is the fourth recorded instance of model routing drifting out from under the written design.
+**⚠️ Routing drift — check live state, not this file.** The live roster (2026-11-20) has all agents on `codex`/`openai`/`gemini` providers — NOT the `anthropic` primaries this section describes — ~~and `GET /api/fallback/chain` returned `{"chain":[],"saved":true}` (an empty chain was persisted and beats the env default).~~ [Stale as of 2026-11-26: the live chain is 3 OpenRouter slugs — `anthropic/claude-haiku-5.5` » `google/gemini-3-flash-preview` » `openai/gpt-5-mini`, `saved:true`; roster re-checked: openai gpt-5 ×8, gemini ×2. Because the primaries are not openrouter, the chain acts as a cross-provider fallback: SCOUT's scheduled runs moved to haiku whenever Gemini refused — see "2026-11-26 evening".] **Before any session that touches spend or providers, check `node scripts/station-models.mjs list` and `GET /api/fallback/chain`.** This is the fourth recorded instance of model routing drifting out from under the written design.
 
 ## GPT-4o Independent Reviewer — reviewer restrictions (2026-11-18)
 
@@ -252,13 +309,25 @@ bash ~/starnet-up.sh         # Quick check: says UP or DOWN, and starts StarNet 
 
 **Open in Chrome:** `http://127.0.0.1:8787`
 
-⚠️ After a phone reboot nothing restarts StarNet — install Termux:Boot app; `~/.termux/boot/10-starnet.sh` is written but inert until then.
+⚠️ After a phone reboot nothing restarts StarNet until the Termux:Boot app is installed — from **F-Droid**, because Termux here is the F-Droid build (`TERMUX_APP__APK_RELEASE=F_DROID`). ~~`~/.termux/boot/10-starnet.sh` is written but inert until then.~~ [2026-11-26: replaced by `~/.termux/boot/start-starnet` — wake lock → 30 s → wait ≤90 s for network → skip if a launcher already runs → `bash ~/starnet-up.sh` (which refuses to start with receipts pending); log `~/.local/state/starnet/boot.log`. The old script is backed up as `~/.termux/10-starnet.sh.bak-20261126`.]
 
 ⚠️ **Never `kill` the node process to restart it** — that is a clean shutdown, so `start-starnet.sh` exits with it instead of reviving it. Kill the launcher too and relaunch detached:
 
 ```bash
 cd ~ && setsid nohup bash ~/start-starnet.sh >> ~/.local/state/starnet/launcher.out 2>&1 < /dev/null &
 ```
+
+From the owner's own Termux tab that line is clean. **When Claude Code runs a restart (only with the owner's yes) it
+must use a clean environment** — on 2026-11-26 a relaunch from Claude's shell passed its `LD_PRELOAD` shim and
+`CLAUDE_*` session variables into the sidecar. Count `.spend-pending` first, stop the launcher and then its sidecar by
+exact PID, wait for the port to close, then:
+
+```bash
+mapfile -t KEEP < <(env | grep -E '^(ANDROID_[A-Za-z_]*|TERMUX[A-Za-z_]*|BOOTCLASSPATH|DEX2OATBOOTCLASSPATH|SYSTEMSERVERCLASSPATH|EXTERNAL_STORAGE|LANG)='); env -i "${KEEP[@]}" HOME=$HOME PATH=$PREFIX/bin PREFIX=$PREFIX TMPDIR=$PREFIX/tmp SHELL=$PREFIX/bin/bash $PREFIX/bin/bash -l -c 'cd ~ && setsid nohup bash ~/start-starnet.sh >> ~/.local/state/starnet/launcher.out 2>&1 < /dev/null &'
+```
+
+Keep the `ANDROID_*`/`TERMUX*`/`BOOTCLASSPATH` variables: the launcher's `termux-wake-lock` fails silently without
+them. Afterwards `/proc/<sidecar>/environ` must show no `LD_PRELOAD` and no `CLAUDE*` variables.
 
 ### 🩺 "StarNet isn't working" — check in this order
 
@@ -319,14 +388,14 @@ may reply 200 but change nothing.
 ### 🧪 Tests
 
 ```bash
-npm run test:fast    # The merge gate — 1,018 steps (can stop at step 304: qa/bugs/2ba9cd3e is INTERMITTENT on this
+npm run test:fast    # The merge gate — 1,019 steps (can stop at step 304: qa/bugs/2ba9cd3e is INTERMITTENT on this
                      # device; step by step 2026-11-26: 1,007 green / 12 red, all pre-existing — handoff §1b/§1c)
 npm run test:http    # Live sidecar HTTP/E2E suite (run whenever you touch routes, streaming,
                      # persistence, providers, tools, schedules, or channels)
 npm test             # test:fast + test:http
 ```
 
-**Test harness rules (learned 2026-11-25, `qa/bugs/2c50b150`, `qa/bugs/7e750ab7` — fixes UNCOMMITTED, see
+**Test harness rules (learned 2026-11-25, `qa/bugs/2c50b150`, `qa/bugs/7e750ab7` — fixes ~~UNCOMMITTED~~ committed + pushed in `27d9397fe` on 2026-11-26, see
 `memorial/MEMORIAL_SESSION_HANDOFF.md` §1a):**
 - **Run tests with credentials stripped** — tests copy `process.env` into the sidecars they spawn, and a test
   sidecar that outlives its test keeps whatever keys you had:
@@ -389,11 +458,11 @@ These claim "PRODUCTION READY" or "COMPLETE" but are false artifacts (owner repo
 - `KLING_`, `KNIGHT_DASHBOARD`, `ORCHESTRATION_`, `OUTBOX_READY`
 - `VIDEO_DELIVERY_COMPLETE`, `VIDEO_PLAYBACK_*`
 
-The Knight video they describe was a **fake placeholder** (1,056 bytes). Trust `CLAUDE.md` and `STATION_FIELD_NOTES.md` over everything else. Also: the old note about the Anthropic console account being empty is **corrected** — it is now funded and responding.
+The Knight video they describe was a **fake placeholder** (1,056 bytes). Trust `CLAUDE.md` and `STATION_FIELD_NOTES.md` over everything else. ~~Also: the old note about the Anthropic console account being empty is **corrected** — it is now funded and responding.~~ [Stale as of 2026-11-26: see the Money section — balance unknown since 2026-11-04.]
 
 ## Production arm/disarm state (current)
 
-Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. **Production is ARMED** as of `2026-11-21T08:32:28.502Z` (`{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`), verified live via `GET /api/production/status`. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
+Check `~/.local/share/StarNet/workspaces/.production-arm.json` before trusting any armed/disarmed claim. **Production is ARMED** as of `2026-11-21T08:32:28.502Z` (`{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`), verified live via `GET /api/production/status`; re-checked 2026-11-26 22:45 PST — still armed, file unchanged. Arm/disarm with `POST /api/production/arm {"armed":true|false}`. The gate code is intact; only the switch was flipped, so the control remains available. A refusal is deliberately invisible (no `runs.jsonl` row, `consecutiveFailures` stays 0, no cron notification) — if work stops, check this file first.
 
 Historical: on `2026-11-20T07:03:24.171Z` production was DISARMED (`by":"unattributed"`), then re-armed on `2026-11-21T08:32:28.502Z`. The 2026-11-20 DISARMED record is a historical snapshot, not current state — the live file wins.
 
@@ -433,10 +502,41 @@ watercolour backgrounds — StarNet's own AI art), per-card `"background"`, ligh
 with the photo on its own rising layer; tests 120/120. Demo film is in Central Outbox **and** WORK → DELIVERABLES
 (the owner looks there — put films in both). Also: runner credential scrub (`scripts/run-test-list.mjs` `stepEnv`),
 bug `2ba9cd3e`. Higgsfield `upscale_image` repaints — do not use it (`STATION_FIELD_NOTES.md` §3).
-**Still uncommitted (other sessions' work, deliberately left out):** the Apify per-run cap (`sidecar/hostquota.js`,
+**Still uncommitted (other sessions' work, deliberately left out):** [2026-11-26 22:00 PST: the Apify cap files, its test, its `fast.list` line, the `f050e860` record and `qa/BUGS.md` rows, and the field-notes SCOUT section are now committed in `8557798db` + `95370d285` (not pushed); only `sidecar/cron-orchestrator.js` and the untracked files remain.] the Apify per-run cap (`sidecar/hostquota.js`,
 `mcp/translate.js`, `tools/builtin/web.js`, `test/hostquota-run-cap.test.js`, its `test/fast.list` line, `qa/bugs/f050e860`
 + its `qa/BUGS.md` rows, the SCOUT section of the field notes), `sidecar/cron-orchestrator.js`, `sidecar/index.js`, and
 untracked files (`chat*`, assessment notes and others). **Fixed 2026-11-26 (owner's request):** `test/fast.list` had named
 `test/domain-task-workspace-file.test.js` and `test/etsy-preflight.test.js` since `003d25c0d` (2026-11-18) but neither was
 committed, so `test-list-runner` failed on a clean checkout. Both are now committed, with `scripts/etsy-preflight.mjs` and
 `scripts/etsy-dryrun.mjs`, which the Etsy test imports; verified on a clean checkout (55 + 225 + 12 assertions OK).
+
+### 2026-11-26 evening — what changed (all checked live; nothing pushed)
+- **Apify per-run cap LIVE.** `sidecar/hostquota.js` refuses a 4th billable Apify call in one run (counted per
+  host-minted runId; a refusal does not spend the team's daily 8). Committed `8557798db`, field notes `95370d285`;
+  NOT pushed. Loaded by the 22:18 PST restart (sidecar start time later than the file). Tests: `hostquota-run-cap`
+  42 OK, `headless-dispatch` 102 OK; full `test:fast` step by step 1,007 green / 12 red — the same 12 known reds.
+- **Clean restart.** A 22:03 PST relaunch from Claude Code's shell leaked the shim + `CLAUDE_*` vars into StarNet; the
+  22:18 relaunch used the `env -i` recipe above (cheat sheet) and was verified clean (launcher 17889, sidecar 17906).
+- **NIGHT4CHRIST's `etsy-pipeline-handoff-via-airtable` skill, step 5 fixed** through StarNet's own route
+  (`POST /api/agent-skills/manage`, action `patch`): DESIGNER/PUBLISHER are `full`; an ask agent's consent-gated call
+  is denied at once in a headless run, never left stalling. Read back from `GET /api/agent-skills?agent=agent&body=1`
+  (not withheld, guard `allow`). Backups: `~/.local/share/StarNet/skill-backups/`. A hand edit of SKILL.md would not
+  stick — the store re-renders that file from its own record.
+- **SCOUT budget stops (11-18/23/25) explained:** each scheduled run got `rate_limit`/`overloaded` from Gemini on its
+  first call and the fallback chain moved it to `claude-haiku-5.5` on OpenRouter (reasoning effort high), at
+  $0.011–0.013 per turn vs $0.006 on Gemini; the old prompt then spent 15–25 turns re-reading Apify datasets. The
+  prompt was shortened 2026-11-25 (Run Now on Gemini: 12 turns, $0.072); the 11-26 09:00 run is the first real test.
+  Look at `recoveryAttempts` and `provider/model` in `runs.jsonl` before blaming a prompt.
+- **`sidecar/cron-orchestrator.js` is still uncommitted** (studio stage prompt "do this stage yourself"; live since
+  11-22). `lint-determinism` flags `Date.now` only in COMMITTED code (`cron-orchestrator.js:305/:536`,
+  `cron-orchestration-tasks.js:67`, `deliverable-manifest.js:757`), not in this edit.
+- ~~**Termux:Boot prepared, not active**~~ [2026-11-26: installed and tested — a test reboot at 00:33 PST brought StarNet up on its own; see the top section.]
+- **Money:** StarNet ledger lifetime $139.67 (October $115.66, November $24.01; NIGHT4CHRIST $110.83 = 79%, 44 budget
+  stops). Today's day rail $25; per-routine caps $0.10–$0.50.
+- **Blueprint sets (PNG):** v1 — `Download/starnet-blueprints-20261126/` (8 sheets), Library ids
+  `blueprint-20261126-01`…`-08`, Outbox project `blueprints-20261126`. r2 — `Download/starnet-blueprints-20261126-r2/`
+  (11 sheets: the 8 redrawn + 9 money map, 10 Etsy shop board, 11 fix-it sheet), Library ids
+  `blueprint-20261126-r2-09`…`-11` (sheets 1–8 r2 are in Downloads only). Files in
+  `workspaces/agent/workshop/blueprints-20261126{,-r2}/`. The drawing code lived in a session scratchpad and may be gone.
+- **Field notes:** the stale §1 delegation lines, the 2026-10-25 "production ready" sections and the §13c restart
+  recipe are struck through with dated notes (`95370d285`); headless delegation works one level deep (§16).

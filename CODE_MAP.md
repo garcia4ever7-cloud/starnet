@@ -3,6 +3,11 @@
 Real structure of the StarNet harness, grounded against trunk. Numbers are approximate and
 drift — trust `wc -l` over this file. Start at [docs/BRAIN.md](docs/BRAIN.md) if you're new.
 
+> **Live numbers, checked 2026-11-26** (the per-area figures below date from 2026-07-06): `sidecar/index.js` 24,564
+> lines · 352 `.js` files under `sidecar/` · 55 built-in tools · 223 `frontend/app/*.js` modules · 1,204 test files in
+> `test/` · `test:fast` 1,019 steps · desktop version 0.12.5 (`package.json`, `tauri.conf.json`, `Cargo.toml`). On the
+> owner's phone station, read `CLAUDE.md` first.
+
 > The previous CODE_MAP.md was a June-era single-agent→multi-agent refactor plan for
 > world.js; that refactor shipped. This file replaced it.
 
@@ -21,7 +26,7 @@ Dev entry: `node dev/seed.js --keep` — materializes a pre-onboarded scratch wo
 | Area | Files | Role |
 | --- | --- | --- |
 | Agent loop | `loop.js` (~460) | `runAgentLoop()` — messages-array while-loop; tool-call accumulation + arg repair; stateless between runs |
-| Server | `index.js` (~6.5k) | HTTP+SSE, `/api/run` and every other route, static frontend, event emission. THE hotfile — most merges conflict here |
+| Server | `index.js` (~~~6.5k~~ 24,564 on 2026-11-26) | HTTP+SSE, `/api/run` and every other route, static frontend, event emission. THE hotfile — most merges conflict here |
 | Providers | `providers/` | `factory.js` + anthropic, openrouter, openai-compatible, gemini, codex (ChatGPT OAuth + token store) |
 | Capability | `capability/` | station layout → tool allowlist: `resolve.js`, `capGate.js`, `registry.js` (CAP_REGISTRY), `toolsets.js`, `office.js` |
 | Tools | `tools/` (14) | registry + web/browser/computer/desktop/fs/notebook/recall/skills/image/spotify/shell… Tool surface must never exceed wired reality |
@@ -61,13 +66,13 @@ catalog). Never rename/remove an event or field.
 
 ## src-tauri/ — desktop shell
 
-Tauri 2; version in `tauri.conf.json` + `Cargo.toml` (0.2.2). NSIS + dmg; embedded node
+Tauri 2; version in `tauri.conf.json` + `Cargo.toml` (~~0.2.2~~ 0.12.5 on 2026-11-26). NSIS + dmg; embedded node
 binary; platform keyring; updater → GitHub Releases `androoAGI/starnet-releases`
 `latest.json`. Workspace data root: `%APPDATA%\Roaming\ai.skynet.harness\workspaces`.
 
 ## test/ (~409 files) + gates
 
-- `npm run test:fast` — THE merge gate: ~364 steps from `test/fast.list` via
+- `npm run test:fast` — THE merge gate: ~~~364~~ 1,019 steps (2026-11-26) from `test/fast.list` via
   `scripts/run-fast-tests.mjs`.
 - `npm run test:http` — HTTP/e2e. `npm test` = test:fast + test:http.
   (The old `validate` / `test:world` steps were retired 2026-07-24: both were Phase-0.0 wrappers

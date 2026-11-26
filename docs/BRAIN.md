@@ -3,6 +3,10 @@
 **The 5-minute orientation for any agent session (Claude, Codex, or human) opening this repo.**
 Last full reconciliation: **2026-08-03** (grounded against the Phase 0–8 cleanup candidate, not doc claims).
 
+> **Checked 2026-11-26 on the owner's phone station:** `CLAUDE.md` IS tracked in this repo (not untracked maintainer
+> tooling) and is the file to read first here; the `.claude/skills/` named below (`starnet-task-doctrine` and the
+> others) do not exist in this checkout; `test:fast` is 1,019 steps and `sidecar/index.js` is 24,564 lines.
+
 ## What this is
 
 **StarNet** — a real, local-first AI-agent harness wrapped in a living pixel-art space
@@ -111,7 +115,7 @@ not the authority boundary.
    (frontend/backend), `starnet-verify` before claiming done, `starnet-merge-ritual` to
    integrate. They encode the locked judgment; they win over anything conflicting in older
    docs.
-3. **Gate:** `npm run test:fast` (509 manifest-owned steps as of 2026-08-03) green before merge. Sidecar/route
+3. **Gate:** `npm run test:fast` (~~509 manifest-owned steps as of 2026-08-03~~ 1,019 steps on 2026-11-26) green before merge. Sidecar/route
    changes also owe the 56-suite `npm run test:http`. Live-app verification via
    `node dev/seed.js --keep` (pre-onboarded workspace, no ceremony) + preview/CDP DOM
    round-trips (canvas screenshots time out — see MISTAKES.md).

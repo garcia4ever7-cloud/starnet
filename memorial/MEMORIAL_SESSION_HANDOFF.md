@@ -7,6 +7,12 @@ Outbox Play button (§3e); then, at the owner's request, a long detour fixing th
 gate) — inventory in §1a; **committed 2026-11-26 in `27d9397fe` and pushed** (with §1b/§1c: `b7c04e867`, `3210676cb`). Previous update: earlier 2026-11-25 (commits
 pushed, studio fix live). Before that: 2026-11-24, session ea68579f.
 
+> **2026-11-26 evening (a later session; nothing in `memorial/` changed):** §1c is the current state — all memorial
+> work is committed and pushed (through `37cd53878`). The bodies of §1, §1a and §1b describe earlier states ("HEAD still
+> `a951b8967`", runner fix "REVERTED", sidecar 5766); keep them as history. StarNet ran as launcher 17889 /
+> sidecar 17906 after a clean 22:18 PST restart [2026-11-26 04:30: now sidecar 29630 after the Termux:Boot test reboot]. Still open from §6: watch and listen to the films, choose the default
+> music, the `memorial_render` agent tool, the act-break bug record, the private photo renders, price/revision policy.
+
 ## 1a. What session d2ab07f3 left uncommitted (2026-11-25 evening) — NOW COMMITTED in `27d9397fe` and PUSHED 2026-11-26
 
 Nothing below is committed or pushed. HEAD is still `a951b8967` on `feat/harness-backend`.
