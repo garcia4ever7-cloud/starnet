@@ -22,6 +22,9 @@
    (an hour-long tick), so only the force-fired beats run there; boot 2 ticks every 40 ms with a 1 ms away threshold and
    a 1 ms beat interval, so every tick in which a beat may fire asks the pre-spend gate. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const fs = require('fs');

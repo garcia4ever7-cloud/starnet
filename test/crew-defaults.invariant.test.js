@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/crew-defaults.invariant.test.js — LEANER CREW DEFAULTS (cost lanes W3.3 + W3.4, approved by Andrew 2026-11-08).
 
    ONE switch, STARNET_CREW_DEFAULTS, ships off. With it on ('lean'):

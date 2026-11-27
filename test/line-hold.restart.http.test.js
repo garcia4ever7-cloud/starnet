@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/line-hold.restart.http.test.js — A HELD JOB SURVIVES A REAL RESTART (line-hold lane, S3; invariant restart-keeps-the-hold).
 
    One real sidecar over a temp workspace, booted TWICE, with a local OpenAI-compatible model standing in for the provider. A work line

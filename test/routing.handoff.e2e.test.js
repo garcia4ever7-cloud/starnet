@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* routing.handoff.e2e — SEND TO on a real sidecar (2026-10-10). LINE A's OUTBOX sends to LINE B's INBOX (a pointer on the OUTBOX,
    compiled into plan.sendTo — never a belt). A job sent down LINE A (POST /api/routing/sample with its line) delivers on A as
    always; the sidecar's handoff runner then starts LINE B's OWN job: a line-jobs record on B saying where it came from, A's record

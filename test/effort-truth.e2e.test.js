@@ -24,6 +24,9 @@
    LEG checks what the lead model reads: a lead hands a class-high worker on that model a task (team.dispatch), and the receipt
    its next request carries back as the tool result names the effort the worker's request carried (none), never the dial. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');

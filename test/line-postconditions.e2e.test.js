@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* Real scheduled/Run Now entries, actual host acceptance checks and durable LineJobs. Only provider bytes are
  * synthetic. An unmet caller contract must not buy a downstream hop or publish an OUTBOX/SEND TO result. */
 const assert = require('node:assert/strict');

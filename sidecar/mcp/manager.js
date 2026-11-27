@@ -47,6 +47,8 @@
        model was told it timed out, and retried. Still configurable exactly as before: deps.timeoutMs (the host
        wiring) and a per-connector cfg.timeoutMs (normalizeTimeout, clamped 1s..10min) both win over this. */
     const timeoutMs = deps.timeoutMs || 120000;
+    // PHONE PORT: the host's Apify cap (sidecar/hostquota.js), handed to every connector tool def; null = no cap
+    const quota = deps.quota || null;
     // The registry's per-tool timer must sit ABOVE the connector's own request timeout, so the client's timer (which
     // cleans its pending entry and names its budget) always fires first. Without it a connector tool inherited the
     // host's 30s fast-tool default and every longer per-connector timeout was silently capped at 30s.
@@ -697,7 +699,7 @@
       if (!c || configIssue(c) || (c.state !== 'up' && c.state !== 'cached')) return [];
       const bound = (toolName, args, ctx) => call(c.id, toolName, args, ctx);   // ctx rides through for connector_required + the run's abort signal
       const defTimeoutMs = (c.timeoutMs || timeoutMs) + REGISTRY_SLACK_MS;
-      const defs = (c.tools || []).map(t => makeToolDef({ connectorId: c.id, label: c.label, mcpTool: t, call: bound, localProcess: c.transportKind === 'stdio', timeoutMs: defTimeoutMs }));
+      const defs = (c.tools || []).map(t => makeToolDef({ connectorId: c.id, label: c.label, mcpTool: t, call: bound, localProcess: c.transportKind === 'stdio', timeoutMs: defTimeoutMs, quota: quota }));
       /* The resources/prompts tools are projected ONLY for a server that actually publishes them, so a
          tools-only connector's catalogue is byte-identical to before — nobody pays schema bytes for a
          primitive their server does not serve. They ride the same projection as tools, which is why they

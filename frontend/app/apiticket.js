@@ -12,7 +12,9 @@
 (function (root) {
   'use strict';
   const DOMAIN = 'starnet-ticket-v1';
-  const KINDS = { file: { method: 'GET', ttl: 5 * 60 * 1000 }, run: { method: 'GET', ttl: 10 * 60 * 1000 },
+  const KINDS = { file: { method: 'GET', ttl: 5 * 60 * 1000 },
+    /* PHONE PORT: central Outbox original retrieval (id-addressed) + studio render streaming; same 5-minute cap as 'file' */
+    artifact: { method: 'GET', ttl: 5 * 60 * 1000 }, studio: { method: 'GET', ttl: 5 * 60 * 1000 }, run: { method: 'GET', ttl: 10 * 60 * 1000 },
     view: { method: 'GET', ttl: 10 * 60 * 1000 },
     sse: { method: 'GET', ttl: 2 * 60 * 1000 }, save: { method: 'POST', ttl: 2 * 60 * 1000 },
     plugin: { method: 'GET', ttl: 12 * 60 * 60 * 1000 } };
@@ -92,6 +94,9 @@
 
   // ---- ticket mint (mirrors sidecar/apitickets.js mint) ----
   const scopeFile = (agent, relPath) => 'file\n' + String(agent || 'agent') + '\n' + String(relPath || '');
+  // PHONE PORT: the server derives the same scopes from the ACTUAL request (sidecar/apitickets.js scopeArtifact / scopeStudio)
+  const scopeArtifact = (agent, id) => 'artifact\n' + String(agent || '') + '\n' + String(id || '');
+  const scopeStudio = (projectId, fileName) => 'studio\n' + String(projectId || '') + '\n' + String(fileName || '');
   const scopeRun = (agent, runId) => 'run\n' + String(agent || '') + '\n' + String(runId || '');
   const scopeView = (agent, dir) => 'view\n' + String(agent || '') + '\n' + String(dir || '');
   const scopePlugin = (id, digest) => 'plugin\n' + String(id || '') + '\n' + String(digest || '');
@@ -173,6 +178,17 @@
   /* sign(url): turn a SERVER-built open URL (a deliverable's openUrl: '/api/file?agent=&path=' or
      '/workshop-run/<agent>/<runId>/<path>') into a ticketed, absolute-on-desktop URL. Any other URL comes back
      unchanged (never guess a scope). A stray legacy ?token= is stripped — it must never ride a URL again. */
+  // PHONE PORT: an <img>/<video>/link carries no X-StarNet-Token header, so the Outbox's original-file and studio links need tickets
+  function artifactUrl(agentId, id) {
+    const agent = agentId || 'agent', aid = String(id || '');
+    const t = mint('artifact', scopeArtifact(agent, aid));
+    return base() + '/api/artifact?id=' + encodeURIComponent(aid) + '&agent=' + encodeURIComponent(agent) + (t ? '&ticket=' + encodeURIComponent(t) : '');
+  }
+  function studioUrl(projectId, fileName) {
+    const proj = String(projectId || ''), file = String(fileName || '');
+    const t = mint('studio', scopeStudio(proj, file));
+    return base() + '/api/studio-file?project=' + encodeURIComponent(proj) + '&file=' + encodeURIComponent(file) + (t ? '&ticket=' + encodeURIComponent(t) : '');
+  }
   function sign(url) {
     const raw = String(url || '');
     if (!raw || raw.charAt(0) !== '/') return raw;
@@ -181,6 +197,8 @@
     u.searchParams.delete('token');
     // a project-scoped file keeps its project (the server resolves the path inside it; the ticket scope is agent+path)
     if (u.pathname === '/api/file') { const project = u.searchParams.get('project'); return fileUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('path') || '') + (project ? '&project=' + encodeURIComponent(project) : ''); }
+    if (u.pathname === '/api/artifact') return artifactUrl(u.searchParams.get('agent') || 'agent', u.searchParams.get('id') || '');   // PHONE PORT
+    if (u.pathname === '/api/studio-file') return studioUrl(u.searchParams.get('project') || '', u.searchParams.get('file') || ''); // PHONE PORT
     const m = /^\/workshop-run\/([^/]+)\/([^/]+)\/(.+)$/.exec(u.pathname);
     if (m && m[1] !== '~t') {
       let agent, rid, rel;
@@ -193,8 +211,8 @@
   // Reuse the byte-tested digest for content verification when WebCrypto is unavailable.
   const sha256Text = text => Array.from(sha256(utf8(String(text))), b => b.toString(16).padStart(2, '0')).join('');
 
-  const api = { fileUrl, runUrl, viewUrl, pluginUrl, draftUrl, appUrl, sseUrl, saveBeaconUrl, sign, mint, sha256Text,
-    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeRun, scopeView, scopePlugin, scopeDraft, scopeApp, SCOPE_SSE, SCOPE_SAVE, KINDS } };
+  const api = { fileUrl, runUrl, viewUrl, pluginUrl, draftUrl, appUrl, sseUrl, saveBeaconUrl, sign, mint, sha256Text, artifactUrl, studioUrl,
+    _test: { sha256, hmacSha256, utf8, b64url, mintWith, scopeFile, scopeRun, scopeView, scopePlugin, scopeDraft, scopeApp, SCOPE_SSE, SCOPE_SAVE, KINDS, scopeArtifact, scopeStudio } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.ApiTicket = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

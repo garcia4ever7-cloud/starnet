@@ -46,8 +46,39 @@
     return src.map(normalizePrecondition).filter(Boolean).slice(0, 8);
   }
 
+  /* PHONE PORT (b0dcc0b2c, generic half). A tool's argument schema is `schema`; `parameters` is the OpenAI WIRE spelling
+     registry.wireFormat() produces. makeTool reads only def.schema, so a def written with `parameters:` shipped an EMPTY
+     schema — the model was told the tool takes no arguments and host validation passed everything (four phone studio
+     tools did this for months). Fail loudly at registration instead. */
+  function assertSchemaKey(def) {
+    if (def.parameters === undefined) return;
+    throw new Error('tool "' + (def.name || '<unnamed>') + '": declare arguments as `schema`, not `parameters`. '
+      + '`parameters` is the wire spelling emitted by registry.wireFormat(); makeTool reads only def.schema, so '
+      + 'this would ship an empty schema — the model would be told the tool takes no arguments and host-side '
+      + 'validation would silently pass everything.');
+  }
+
+  /* PHONE PORT (825ee4b62): a tool MUST declare a top-level string `name`. Two phone studio tools (video.kling,
+     image_upscale_kling) put their identity in `properties.id` / `id`, so makeTool built a tool named undefined — stored
+     as tools["undefined"], uncallable, and (video.kling) with its write/consent/network attributes silently downgraded.
+     Fail loudly at construction instead. */
+  function assertToolName(def) {
+    if (typeof def.name === 'string' && def.name) return;
+    const foreignId = def.properties && typeof def.properties === 'object' && def.properties.id;
+    throw new Error('tool ' + (foreignId ? '"' + String(foreignId) + '"' : '<unnamed>')
+      + ': a tool must declare a top-level `name` (string).'
+      + (foreignId
+        ? ' This def puts its identity in `properties.id`, which is not this registry\'s contract: makeTool'
+          + ' reads def.name, def.scope and def.requiresConsent at the TOP level. Registering it would key the'
+          + ' tool as "undefined" AND silently downgrade it to scope:read/requiresConsent:false. Port it to'
+          + ' { name, description, schema, scope, requiresConsent, run } — see tools/builtin/video-probe.js.'
+        : ' Without it registry.register stores the tool under the key "undefined".'));
+  }
+
   function makeTool(def) {
     def = def || {};
+    assertSchemaKey(def);
+    assertToolName(def);
     return {
       name: def.name,
       description: def.description || '',
@@ -80,5 +111,5 @@
     };
   }
 
-  return { makeTool, normalizePrecondition, normalizePreconditions };
+  return { makeTool, assertSchemaKey, assertToolName, normalizePrecondition, normalizePreconditions };   // PHONE PORT: the two registration guards are exported (tests)
 });

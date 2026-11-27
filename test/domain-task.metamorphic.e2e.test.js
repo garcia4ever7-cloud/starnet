@@ -25,6 +25,9 @@
    zero tools; its row carries onlyHost. An onlyHost that is not a host starts no worker. A bounded:true worker runs at
    most 3 tool calls, and its summary and row read 'bounded read (requested by lead)'. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const { SidecarFixture } = require('./helpers/sidecar-fixture.js');

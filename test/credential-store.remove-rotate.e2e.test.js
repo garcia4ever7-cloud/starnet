@@ -1,3 +1,6 @@
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/credential-store.remove-rotate.e2e.test.js — doneMeans 1: a provider key removed or rotated in Settings leaves
    every consumer at once (credential-store lane, step S2; family B1, credential sources).
 

@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/routine-delivery.session-return.e2e.test.js — a routine's return to the session it came from is a row of the station's own
    transcript BEFORE it is a page command (turn identity, commit 10; design §10 "Session return").
 

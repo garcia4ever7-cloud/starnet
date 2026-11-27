@@ -639,7 +639,9 @@ const PROVIDER_HOST = /openrouter\.ai\/api|api\.openai\.com|api\.groq\.com|gener
 const HOST_ALLOWED = [
   ['sidecar/providers/registry.js', /./], ['sidecar/providers/anthropic.js', /^\s*const DEFAULT_BASE = /], ['sidecar/providers/gemini.js', /^\s*const DEFAULT_BASE = /],
   ['sidecar/providers/openrouter.js', /^\s*const BASE = /], ['sidecar/realtime-voice.js', /^const OPENAI_REALTIME_URL = /],
-  ['sidecar/tools/builtin/image.js', /^\s*const (?:DEFAULT_OR_URL|DEFAULT_OPENAI_IMAGE_URL) = /]
+  ['sidecar/tools/builtin/image.js', /^\s*const (?:DEFAULT_OR_URL|DEFAULT_OPENAI_IMAGE_URL) = /],
+  // PHONE PORT: openai_image_generate's one default constant (the same Images API image.js names); index.js passes providerRuntimeBaseUrl('openai')
+  ['sidecar/tools/builtin/openai-image.js', /^\s*const DEFAULT_BASE_URL = /]
 ];
 const JWT_CLAIM = /\['https:\/\/api\.openai\.com\/(?:auth|profile)'\]/;
 /* EVERY PLACE A PROVIDER CREDENTIAL LEAVES: a provider adapter built (selectProvider) or a credential header written. Each has a
@@ -658,6 +660,9 @@ const DIALERS = {
   'sidecar/embed.js embedOpenAI': 'the embedder: embedderFor\'s pair',
   'sidecar/embed.js embedGemini': 'the embedder: embedderFor\'s pair',
   'sidecar/media-service.js ttsSynthKeyed': 'TTS\'s OpenRouter, Gemini and OpenAI legs (section 4)',
+  // PHONE PORT: the two ported studio dialers
+  'sidecar/tools/builtin/openai-image.js postGenerate': 'openai_image_generate: index.js hands it providerRuntimeKey(\'openai\') and providerRuntimeBaseUrl(\'openai\') — the store\'s pair',
+  'sidecar/video-providers.js tryKling': 'the studio Kling leg: KLING_API_KEY from the sidecar environment (Kling is no registry provider; skipped when unset)',
   'sidecar/media-service.js sttTranscribe': 'STT\'s Groq and OpenAI legs (section 4)',
   'sidecar/media-service.js transcribeAudioBuffer': 'STT\'s OpenRouter leg (section 4)',
   'sidecar/realtime-voice.js createCall': 'Live Voice (section 4)',

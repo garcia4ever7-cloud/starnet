@@ -17,6 +17,9 @@
         runs as the unrouted fallback agent, never through alpha or beta; saving the line again routes it again.
    In test/http.list (a child-process boot test does not gate test:fast). */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const fs = require('node:fs');

@@ -1098,6 +1098,8 @@ const StationUI = typeof document === 'undefined' ? {} : (() => {
     mywork: { label: 'MY WORK', first: 'deliverables', tabs: [
       { id: 'tasks', k: 'tasks', label: 'TASKS', tip: 'Planned work you track — chats and routines live in COMMS' },
       { id: 'deliverables', k: 'deliverables', label: 'DELIVERABLES', tip: 'Everything your crew finished, with its files' },
+      // PHONE PORT: the cross-agent artifact manifest (GET /api/outbox) — previews, QC and the Commander's approval
+      { id: 'centraloutbox', k: 'centraloutbox', label: 'CENTRAL OUTBOX', tip: "Every agent's registered deliverables — previews, quality and your approval" },
       { id: 'recipes', k: 'marketplace', label: 'RECIPES', tip: 'Ready-made jobs to start',
         is: () => typeof Marketplace !== 'undefined' && Marketplace.currentTab && Marketplace.currentTab() === 'recipes',
         open: () => { if (typeof App !== 'undefined' && App.openRecipes) App.openRecipes(); } }
@@ -12640,6 +12642,10 @@ const StationUI = typeof document === 'undefined' ? {} : (() => {
     // the same reason the dossier does: a never-moved window is CSS-centred, so a content-fit box would re-centre
     // itself every time a card's details drawer opens — the row you just clicked would slide out from under you.
     // The `dlv` class owns that height; the card list scrolls inside it.
+    /* PHONE PORT — CENTRAL OUTBOX: every agent's REGISTERED deliverables (GET /api/outbox), four separate state axes,
+       ticketed original-file retrieval. Key 'centraloutbox', NOT 'outbox': 'outbox' is already this build's alias for
+       DELIVERABLES' TO REVIEW section, and reusing it would silently shadow one surface with the other. */
+    centraloutbox: ['CENTRAL OUTBOX',     body => { if (typeof Outbox !== 'undefined') Outbox.mount(body); }, { console: true, className: 'obx-win' }],
     deliverables:['DELIVERABLES',         body => {
       if (typeof Deliverables !== 'undefined') Deliverables.mount(body);
       // TO REVIEW (the old OUTBOX): finished runs waiting for your verdict, above the library — hidden when none

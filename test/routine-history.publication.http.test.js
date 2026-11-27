@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* Real host admission, routine execution, channel transport, strict publication and
    restart recovery. Only the provider/Telegram network, one filesystem failure and
    the restarted child's wall clock are controlled. No durable receipts are rewritten. */

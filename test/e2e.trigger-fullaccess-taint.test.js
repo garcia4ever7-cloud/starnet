@@ -13,6 +13,9 @@
         tool -> FULL POWER NEVER ASKS (owner decision 2026-11-19; 0.15.2/0.15.3 asked once per command here): no approval
         card is raised, and the command runs (the echo output reaches the model). */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const path = require('path');

@@ -209,6 +209,13 @@ put('neutral', 'uploads into the station', [ex('/api/attachments')]);
 put('neutral', 'app updates are verified by signature before they install (src-tauri update_verify)', [ex('/api/update/prepare'),
   ex('/api/update/cancel')]);
 
+/* ---------------------------------------------------------------- PHONE PORT (pipeline + production gate) */
+put('desk', 'arming paid production lets unattended runs spend (disarming, its other half, never asks)', [ex('/api/production/arm')]);
+put('neutral', 'the Commander\'s verdict or a reviewer\'s QC on an Outbox row: data about a deliverable, no tool or reach', [ex('/api/outbox/approval'), ex('/api/outbox/qc')]);
+put('neutral', 'indexes a file that already exists in an agent workspace (realpath-jailed); creates or moves nothing', [ex('/api/deliverables/register')]);
+put('neutral', 'starts or advances the studio pipeline: each stage is an ordinary /api/run under the station\'s caps, gate and consent broker',
+  [ex('/api/studio/assignment'), "POST qsplit '/api/studio/project'"]);
+
 /* ---------------------------------------------------------------- the census */
 const OPEN = {};
 

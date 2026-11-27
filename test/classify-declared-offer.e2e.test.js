@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 // Lane T9s, through a REAL sidecar: the page's own answer to "is this a task?" (Classify.isTaskDirective with the agent's last
 // turn, exactly as chat.js sends it on POST /api/run) decides whether the run carries tool definitions on the provider wire.
 //   a result line, then "ok"           -> chat: one request, no tool definitions

@@ -160,7 +160,10 @@ function checkAll(list, label) {
     + lineBytes(r.off) + ' -> ' + lineBytes(r.on) + ' bytes | kept their JSON: ' + (r.fallbacks.join(', ') || 'none'));
   A.ok(r.fallbacks.length <= catalog.length * 0.05, 'ON: nearly every station tool has a signature (' + r.fallbacks.length + ' of ' + catalog.length + ' keep their JSON: ' + r.fallbacks.join(', ') + ')');
   A.ok(r.onBytes <= r.jsonBytes * 0.7, 'ON: the catalogue\'s parameter text is at least 30% smaller (' + r.jsonBytes + ' -> ' + r.onBytes + ')');
-  for (const name of r.fallbacks) A.ok(/additionalProperties/.test(Sig.why(clone(catalog.find(t => t.function.name === name).function.parameters))), 'ON: ' + name + ' keeps its JSON for a stated reason (' + Sig.why(clone(catalog.find(t => t.function.name === name).function.parameters)) + ')');
+  /* PORT (phone pipeline): image_quality_check's `images` is deliberately anyOf (a path string OR {path, target...}) — the phone
+     hardened it to accept the shapes models really send (STATION_FIELD_NOTES §4). Its fallback is that anyOf, named here. */
+  const PORT_ANYOF_OK = new Set(['image_quality_check']);
+  for (const name of r.fallbacks) A.ok((PORT_ANYOF_OK.has(name) && /anyOf/.test(Sig.why(clone(catalog.find(t => t.function.name === name).function.parameters)))) || /additionalProperties/.test(Sig.why(clone(catalog.find(t => t.function.name === name).function.parameters))), 'ON: ' + name + ' keeps its JSON for a stated reason (' + Sig.why(clone(catalog.find(t => t.function.name === name).function.parameters)) + ')');
 }
 
 // ---- C. the notation, on the fixed list -----------------------------------------------------------------------------------

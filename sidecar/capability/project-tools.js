@@ -102,6 +102,12 @@ function projectStation(agent, origin, role, facts) {
   if (ownerTrusted || unattendedGrants.indexOf('workbench') >= 0) add(stationWithObject(station, agentId, 'workbench'), ownerTrusted ? 'owner-dm' : 'routine-grant');
   if (ownerTrusted || unattendedGrants.indexOf('connectors') >= 0) add(stationWithConnectors(station, agentId, connectorIds), ownerTrusted ? 'owner-dm' : 'routine-grant');
   if (ownerTrusted) add(stationWithObject(station, agentId, 'orchestrator'), 'owner-dm');
+  /* UNATTENDED DELEGATION GRANT (PHONE PORT, 2026-10-27) — the OBJECT half of letting a SCHEDULED lead delegate: a
+     routine the Commander granted 'orchestrator' resolves the orchestrator object for its run, bay rooms included.
+     THE DEPTH FENCE is on this line: never for a delegated worker (delegatedBy / parentRunId), so a worker never
+     holds team.dispatch and max delegation depth stays 1 structurally. The consent half is permissions.js
+     dispatchAutonomy (exact tool names). */
+  if (unattendedGrants.indexOf('orchestrator') >= 0 && !role.delegatedBy && !origin.parentRunId) add(stationWithObject(station, agentId, 'orchestrator'), 'routine-grant');
   // a group chat's LEAD may stand in a bay room (router.stationFor), which bypasses composeOffice: confer the kit directly
   if (role.lead && Array.isArray(origin.groupTools)) add(stationWithObject(station, agentId, 'orchestrator'), 'group-lead');
   /* FULL POWER is capability authority: every execution object family and every configured connector. The

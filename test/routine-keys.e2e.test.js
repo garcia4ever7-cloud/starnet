@@ -18,6 +18,9 @@
    Plus the auth seam: no launch token / a foreign Origin is refused, and no route echoes the key.
    Run via `npm run test:http` (child-process boots). */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const fs = require('fs');

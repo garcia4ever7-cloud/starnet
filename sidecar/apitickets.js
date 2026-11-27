@@ -35,6 +35,10 @@ const KINDS = Object.freeze({
   view: Object.freeze({ method: 'GET', maxTtlMs: 10 * 60 * 1000, once: false }),   // ONE workspace folder rendered in the BROWSER window (page + its relative assets)
   sse: Object.freeze({ method: 'GET', maxTtlMs: 2 * 60 * 1000, once: true }),      // one EventSource CONNECT (a live stream outlives it)
   save: Object.freeze({ method: 'POST', maxTtlMs: 2 * 60 * 1000, once: true }),    // one unload beacon
+  // PHONE PORT — central Outbox: retrieve ONE registered artifact BY ID (scoped to viewer + manifest id, never a path the
+  // requester chose), and stream ONE studio render (scoped to project + file). Same 5-minute cap as 'file'.
+  artifact: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false }),
+  studio: Object.freeze({ method: 'GET', maxTtlMs: 5 * 60 * 1000, once: false }),
   // ONE approved plugin's UI files at ONE exact code digest (a plugin window's iframe + its relative assets). Long
   // enough to outlive a working session with the window open (lazy assets load late); an edit to the plugin
   // changes its digest, so every ticket for the old code dies with it.
@@ -43,6 +47,9 @@ const KINDS = Object.freeze({
 
 function b64url(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function scopeFile(agent, relPath) { return 'file\n' + String(agent || 'agent') + '\n' + String(relPath || ''); }
+// PHONE PORT: a ticket minted for the Commander cannot be replayed as PUBLISHER, and one for one artifact cannot fetch another
+function scopeArtifact(agent, id) { return 'artifact\n' + String(agent || '') + '\n' + String(id || ''); }
+function scopeStudio(projectId, fileName) { return 'studio\n' + String(projectId || '') + '\n' + String(fileName || ''); }
 function scopeRun(agent, runId) { return 'run\n' + String(agent || '') + '\n' + String(runId || ''); }
 function scopeView(agent, dir) { return 'view\n' + String(agent || '') + '\n' + String(dir || ''); }
 function scopePlugin(id, digest) { return 'plugin\n' + String(id || '') + '\n' + String(digest || ''); }
@@ -136,6 +143,9 @@ function apiTicketClaim(req) {
   if ((m === 'GET' || m === 'HEAD') && p === '/api/file') return { kind: 'file', scope: scopeFile(q.get('agent') || 'agent', q.get('path') || ''), ticket };
   if (m === 'GET' && p === '/api/channels/events') return { kind: 'sse', scope: SCOPE_SSE, ticket };
   if (m === 'POST' && p === '/api/save') return { kind: 'save', scope: SCOPE_SAVE, ticket };
+  // PHONE PORT: central Outbox original-file retrieval (id-addressed) and studio render streaming (project + file)
+  if ((m === 'GET' || m === 'HEAD') && p === '/api/artifact') return { kind: 'artifact', scope: scopeArtifact(q.get('agent') || 'agent', q.get('id') || ''), ticket };
+  if ((m === 'GET' || m === 'HEAD') && p === '/api/studio-file') return { kind: 'studio', scope: scopeStudio(q.get('project') || '', q.get('file') || ''), ticket };
   return null;
 }
 
@@ -175,5 +185,5 @@ function splitViewTicket(rawPath) { return splitPrefixTicket(VIEW_PREFIX, rawPat
 
 module.exports = {
   KINDS, SKEW_MS, mint, verify, parse, replayGuard, apiTicketClaim, splitRunTicket, splitViewTicket, splitPluginTicket, splitPrefixTicket,
-  scopeFile, scopeRun, scopeView, scopePlugin, scopeDraft, scopeApp, SCOPE_SSE, SCOPE_SAVE, message
+  scopeFile, scopeRun, scopeView, scopePlugin, scopeDraft, scopeApp, SCOPE_SSE, SCOPE_SAVE, message, scopeArtifact, scopeStudio
 };

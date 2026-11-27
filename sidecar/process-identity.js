@@ -94,7 +94,8 @@ function parseProcStat(text) {
 
 function makeProcessIdentity(deps) {
   const d = deps || {};
-  const platform = String(d.platform || (typeof process !== 'undefined' ? process.platform : ''));
+  // TERMUX FIX: Node on Termux reports 'android'; its /proc/<pid>/stat is the Linux one, so treat it as linux.
+  const platform = ((p) => (p === 'android' ? 'linux' : p))(String(d.platform || (typeof process !== 'undefined' ? process.platform : '')));
   const timeoutMs = Number(d.timeoutMs) > 0 ? Number(d.timeoutMs) : DEFAULT_TIMEOUT_MS;
   const env = d.env || (typeof process !== 'undefined' ? process.env : {});
   let spawnSync = d.spawnSync;

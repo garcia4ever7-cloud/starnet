@@ -55,7 +55,8 @@ const { makeCredits } = require('./credits.js');   // managed-credit backend ada
 const { makeTierList } = require('./tierlist.js');   // editorial model tier list from the linked cloud (picker badges)
 const { makeCreditsLink } = require('./credits-link.js');   // device-pairing client + durable link config (inert unless STARNET_CLOUD_URL is set)
 const limitsRegistry = require('./limits-registry.js');
-const budgetCaps = require('./budgetcaps.js');   // pure resolve(env,overrides) + validate patch — SETTINGS→Budget (P0-2)
+const budgetCaps = require('./budgetcaps.js');
+const productionGate = require('./production-gate.js');   // PHONE PORT: pure — may an UNATTENDED PAID run start? (owner-armed)   // pure resolve(env,overrides) + validate patch — SETTINGS→Budget (P0-2)
 const fallbackChain = require('./fallbackchain.js');   // pure resolve(env,saved) + validate patch — SETTINGS→Models fallback chain (P0-3)
 const voiceChatRoute = require('./voice-chat-route.js');   // pure planner — SETTINGS→Models voice chat model (a spoken turn's own model)
 const { makeConcurrencyGate } = require('./concurrency.js');
@@ -78,6 +79,25 @@ const { makeRegistry, outputBudgetFor, outputWindowFor, attachResultScrub } = re
 const { makeOutputArtifacts, isParkedOutputPath } = require('./output-artifacts.js');
 const RunPaths = require('./run-paths.js');   // the ONE per-run path object every tool reads (ctx.paths)
 const { makeWebTools, makePoliteScheduler } = require('./tools/builtin/web.js');
+// PHONE PORT — CENTRAL OUTBOX (deliverable manifest) + its consumer tools + the video verifier they share
+const { makeDeliverableManifest, QC: QC_STATES, APPROVAL: APPROVAL_STATES } = require('./deliverable-manifest.js');
+const OutboxTools = require('./tools/builtin/outbox.js');          // outbox_list / outbox_read (id-addressed, read-only)
+const VideoProbeTools = require('./tools/builtin/video-probe.js'); // video.inspect: ffprobe facts by manifest id
+const videoVerify = require('./video-verify.js');                  // proves a video is real before it can be KEPT
+const { verifyVideoFile } = videoVerify;
+// PHONE PORT — CHRISTIAN STORY STUDIO video pipeline (POST /api/studio/assignment drives it to completion)
+const orchestration = require('./project-orchestration.js');   // blueprint/workflow state
+const { orchestrateNextAgent, runPipelineToCompletion, setApiToken, setClock: setStudioPipelineClock } = require('./cron-orchestrator.js');
+orchestration.setClock(() => Date.now());   // PORT: the composition root injects the clock (lint-determinism)
+setStudioPipelineClock(() => Date.now());
+// PHONE PORT: the print and studio tools (see THE PRINT AND STUDIO TOOLS in runOnceCore)
+const { makePrintPrepTools } = require('./tools/builtin/print-prep.js');
+const { makeMockupComposeTools } = require('./tools/builtin/mockup-compose.js');
+const { makeImageQcTools } = require('./tools/builtin/image-qc.js');
+const { makeStockImageTools } = require('./tools/builtin/stock-image.js');
+const { makeVectorExportTools } = require('./tools/builtin/vector-export.js');
+const { makeHiggsfieldTools } = require('./tools/builtin/higgsfield.js');
+const { makeOpenAIImageTools } = require('./tools/builtin/openai-image.js');
 const { makeWebReader } = require('./tools/builtin/webreader.js');
 const { makeBrowserTools, _internals: browserInternals } = require('./tools/builtin/browser.js');
 // ONE reader for the whole sidecar (lazy: no Chrome until the first bot-walled fetch actually needs
@@ -1090,7 +1110,22 @@ const NIGHTSHIFT_AGENT = String(ENV('NIGHTSHIFT_AGENT') || 'agent').trim() || 'a
 // Stage 2: the lead's team.dispatch awaits full worker agent-loops (minutes), so it CANNOT inherit the 30s
 // fast-tool timeout (CAPS.toolTimeoutMs) or it always times out before a real worker returns. Give it the same
 // ≈8-min single-run worst-case bound; env-tunable. Per-worker spend is still capped by ORCH_PER_WORKER.
-const ORCH_DISPATCH_TIMEOUT_MS = num(ENV('DISPATCH_TIMEOUT_MS'), CRON_MAX_RUN_MS);
+/* THE CRON LEASE MUST OUTLIVE THE TOOL CALL (PHONE PORT of dispatch-budget.js, live run c1bce71a). Upstream derived the
+   dispatch budget AS CRON_MAX_RUN_MS, so its backstop (budget + 900s approval hold + 60s = 1440s) TIED the open-call
+   lease window (3 x 480s = 1440s): a stalled dispatch on a scheduled run could be reclaimed as a dead lease — its
+   completed workers' results discarded and the routine re-armed to pay again — instead of timing out honestly.
+   The budget is now DERIVED from that window (default 420s); an explicit STARNET_DISPATCH_TIMEOUT_MS still wins,
+   and a value that breaks the invariant is said out loud at boot. The same two constants go to the driver
+   (toolStaleMs) and the tools (approvalHoldMaxMs), so the three numbers cannot drift apart again. */
+const dispatchBudget = require('./dispatch-budget.js');
+const CRON_TOOL_STALE_MS = num(ENV('CRON_TOOL_STALE_MS'), 3 * CRON_HEARTBEAT_STALE_MS);   // the cron-driver default, made explicit
+const ORCH_APPROVAL_HOLD_MS = 900000;                                                        // orchestration.js's default, made explicit
+const ORCH_DISPATCH_TIMEOUT_MS = dispatchBudget.dispatchBudgetMs({ override: ENV('DISPATCH_TIMEOUT_MS'), staleMs: CRON_TOOL_STALE_MS, holdMs: ORCH_APPROVAL_HOLD_MS });
+if (!dispatchBudget.leaseOutlivesTool(ORCH_DISPATCH_TIMEOUT_MS, CRON_TOOL_STALE_MS, ORCH_APPROVAL_HOLD_MS)) {
+  console.warn('[dispatch] DISPATCH_TIMEOUT_MS=' + ORCH_DISPATCH_TIMEOUT_MS + 'ms + ' + ORCH_APPROVAL_HOLD_MS + 'ms approval hold + '
+    + dispatchBudget.REGISTRY_HEADROOM_MS + 'ms registry headroom does NOT fit inside the open-call lease window (' + CRON_TOOL_STALE_MS
+    + 'ms). A stalled team.dispatch on a SCHEDULED run will be reclaimed as a dead lease instead of timing out honestly.');
+}
 const CRON_DEFAULT_MODEL = String(ENV('DEFAULT_MODEL') || '').trim();
 const CRON_PERSONA = 'You are an autonomous STARNET station agent running a SCHEDULED routine — no human is watching. '
   + 'Carry out the task with your REAL tools (web search/read, files, memory); ground every factual claim in what the '
@@ -1794,6 +1829,51 @@ function applyBudgetCaps() {
 }
 budgetOverrides = loadBudgetOverrides();
 applyBudgetCaps();
+
+/* ---- OWNER-AUTHORIZED PRODUCTION (PHONE PORT of ac6382d1a + da18e7614, 2026-11-26). See sidecar/production-gate.js for
+   the rule and why it is orthogonal to the budget caps above: budget bounds HOW MUCH an unattended run may spend, this
+   decides WHETHER it may start at all. Enforced in exactly one place (runOnceCore's admission block).
+   Read from disk ON EVERY RUN, not cached at boot, so arming or disarming takes effect on the next run with no restart.
+   Fail-closed: an unreadable or malformed state file resolves to DISARMED (production-gate.readArmState). The file name
+   and shape are the 0.12.5 station's, so the live arm state carries over unchanged at cutover. */
+const PRODUCTION_ARM_FILE = path.join(WORKSPACES, '.production-arm.json');
+function productionArmState() {
+  let raw = null;
+  // ENOENT = never set (a legitimate "default"). Any other failure resolves through the MALFORMED branch: DISARMED either
+  // way, but "never armed" and "your arm state is damaged" stay distinguishable.
+  try { raw = JSON.parse(fs.readFileSync(PRODUCTION_ARM_FILE, 'utf8')); }
+  catch (e) { raw = (e && e.code === 'ENOENT') ? null : { __unreadable: String((e && e.code) || (e && e.message) || e) }; }
+  return productionGate.readArmState(raw, process.env.STARNET_PRODUCTION_ARMED);
+}
+// APPEND-ONLY history of authorization changes beside the single current-state record. Best-effort: a failure to append
+// never blocks the arm/disarm itself (refusing to record is not a reason to refuse to stop production).
+const PRODUCTION_ARM_LOG = path.join(WORKSPACES, '.production-arm.log.jsonl');
+function appendProductionArmHistory(rec) {
+  try {
+    fs.mkdirSync(WORKSPACES, { recursive: true });
+    // PORT (v0.15.4 persist policy): no bare append — the whole (tiny) log is replaced durably with the new line added
+    let prior = '';
+    try { prior = fs.readFileSync(PRODUCTION_ARM_LOG, 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) throw e; }
+    if (prior && !prior.endsWith('\n')) prior += '\n';
+    writeFileDurable({ fs, path }, PRODUCTION_ARM_LOG, prior + JSON.stringify(rec) + '\n');
+  } catch (e) { failNote('production.armHistory', e); }
+}
+function saveProductionArm(armed, who) {
+  // `by` is a free-text LABEL (sanitised, bounded), never an authority claim: every /api route rides one shared token, so
+  // the host cannot tell the owner's click from any other token-holder's POST. Nothing claimed => 'unattributed'.
+  const claimed = String(who == null ? '' : who).replace(/[^\w .@:-]/g, '').trim().slice(0, 64);
+  const rec = { armed: !!armed, at: new Date().toISOString(), by: claimed || 'unattributed' };
+  try {
+    fs.mkdirSync(WORKSPACES, { recursive: true });
+    writeFileDurable({ fs, path }, PRODUCTION_ARM_FILE, JSON.stringify(rec));
+    appendProductionArmHistory(rec);
+    return { ok: true, rec };
+  } catch (e) {
+    // never report success for an authorization change that did not persist
+    console.warn('[production-gate] persist failed:', (e && e.message) || e);
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
 
 /* ---- P0-3 fallback-chain persistence (SETTINGS → Models). The ordered "if the primary model fails, try these
    next" list was env-only (SKYNET_FALLBACK_MODELS) — nothing but that env var ever set it. Now it persists in a
@@ -2939,6 +3019,50 @@ const workshopStore = makeWorkshopStore({
   onCorrupt: (key, file) => quarantineCorrupt(file, 'workshop'),
   warn: (...args) => console.warn.apply(console, args)
 });
+/* CENTRAL OUTBOX ARTIFACT MANIFEST (PHONE PORT of ac6382d1a and its fixes). The shared, read-only index that lets a
+   finished deliverable cross the per-agent workspace boundary WITHOUT widening the fs jail (DESIGNER -> PUBLISHER /
+   QC_EDITOR). Metadata only; the bytes never move. Rooted at WORKSPACES/.deliverables — the SAME place as the 0.12.5
+   station, so its existing rows (and every approval/QC verdict on them) carry over unchanged. `workspaceRootOf` is the
+   same per-agent root the fs jail uses; the one exception is the studio pipeline's pseudo-producer 'studio', whose
+   renders live in $HOME/outbox/<projectId>/. Every floor inside deliverable-manifest.js applies to both. */
+const OUTBOX_STUDIO_OWNER = 'studio';
+const STUDIO_OUTBOX_ROOT = path.join(require('node:os').homedir(), 'outbox');
+const deliverableManifest = makeDeliverableManifest({
+  fs: fs, path: path, crypto: crypto, now: () => Date.now(),
+  root: path.join(WORKSPACES, '.deliverables'),
+  workspaceRootOf: (agentId) => (String(agentId || '') === OUTBOX_STUDIO_OWNER
+    ? STUDIO_OUTBOX_ROOT
+    : path.join(WORKSPACES, String(agentId || 'agent')))
+});
+/* WHO A NEW DELIVERABLE IS SHARED WITH (PHONE PORT). The Commander always; DESIGNER -> PUBLISHER + QC_EDITOR (the Etsy
+   bridge); the studio crew with each other. Everyone else shares with the Commander ONLY. Read-only in every case. */
+const OUTBOX_COMMANDER = 'agent';
+const OUTBOX_STUDIO = ['storywriter', 'director', 'producer', 'qceditor'];
+function outboxShareFor(agentId) {
+  const who = String(agentId || '');
+  const out = new Set([OUTBOX_COMMANDER]);
+  if (who === 'webdesigner') { out.add('publisher'); out.add('qceditor'); }
+  if (OUTBOX_STUDIO.indexOf(who) >= 0) for (const a of OUTBOX_STUDIO) out.add(a);
+  if (who === OUTBOX_STUDIO_OWNER) for (const a of OUTBOX_STUDIO) out.add(a);
+  out.delete(who);
+  return Array.from(out);
+}
+// The PROJECT a deliverable belongs to, from the path the producer used: a studio project id wins; else the deepest
+// directory under outbox/; else 'general' (honest "uncategorised").
+function outboxProjectIdFor(files) {
+  for (const f of (files || [])) {
+    const segs = String(f).split(/[\\/]/).filter(Boolean);
+    const studio = segs.find(x => /^proj-\d+-[a-z0-9]+$/.test(x));
+    if (studio) return studio;
+  }
+  for (const f of (files || [])) {
+    const segs = String(f).split(/[\\/]/).filter(Boolean);
+    segs.pop();
+    const meaningful = segs.filter(x => x !== 'outbox' && x !== '.');
+    if (meaningful.length) return meaningful[meaningful.length - 1];
+  }
+  return 'general';
+}
 const deliverableStore = makeDeliverableStore({
   fs: fs, path: path, workspaces: WORKSPACES, writeDurable: writeFileDurable,
   onRecover: (key, file) => console.warn('[deliverables] recovered ' + file + ' from .bak last-known-good.'),
@@ -8098,6 +8222,26 @@ function mcpStdioIsolationError(cfg) {
   }
   return '';
 }
+/* TEAM-WIDE DAILY + PER-RUN CAP on Apify actor runs (PHONE PORT of hostquota.js + 8557798db, 2026-11-26). The owner's
+   "max 8 Apify runs/day including failures" and "at most 3 per run" lived only as prose in SCOUT's skills, so they held
+   only while a model chose to obey them (live run 93e8cc89 launched 8 in one run). ONE counter file for the station.
+   Fails CLOSED (a host module, not a fail-open hook). Tunable: STARNET_HOST_DAILY_LIMITS="apify.com=8",
+   STARNET_HOST_RUN_LIMITS="apify.com=3"; an unparseable value keeps the default (a typo never reads as "no rail").
+   Same file name as the 0.12.5 station, so today's count carries over at cutover. */
+/* THE HOST'S OWN HANDOFF FILES (PHONE PORT). One file per lead→worker dispatch, written into the LEAD's outbox
+   (WORKSPACES/<lead>/outbox, the same folder the 0.12.5 station writes) from the row team.dispatch returned. */
+const handoffStore = require('./handoff-store.js').makeHandoffStore({
+  fs: fs, path: path, now: () => Date.now(),
+  dir: (agentId) => path.join(WORKSPACES, String(agentId || 'agent').replace(/[^A-Za-z0-9_-]/g, '') || 'agent', 'outbox'),
+  write: (f, text) => writeFileDurable({ fs, path }, f, text)
+});
+const HostQuota = require('./hostquota.js');
+const hostQuota = HostQuota.makeHostQuota({
+  fs: fs, file: path.join(WORKSPACES, '.host-daily-quota.json'), now: () => Date.now(),
+  write: (f, text) => writeFileDurable({ fs, path }, f, text),
+  limits: (() => { const parsed = HostQuota.parseLimits(ENV('HOST_DAILY_LIMITS')); return Object.keys(parsed).length ? parsed : HostQuota.DEFAULT_LIMITS; })(),
+  runLimits: (() => { const parsed = HostQuota.parseLimits(ENV('HOST_RUN_LIMITS')); return Object.keys(parsed).length ? parsed : HostQuota.DEFAULT_RUN_LIMITS; })()
+});
 const connectors = makeConnectorManager({
   makeTransport: (cfg) => {
     if (connectorStorageError) throw new Error(connectorStorageError);
@@ -8121,6 +8265,8 @@ const connectors = makeConnectorManager({
   // MCP connector calls get their OWN budget (120s), not the 30s fast-tool default: a connector write that is cut
   // off at 30s still lands remotely (h1 audit 2026-09-22). Per-connector timeoutMs still overrides it.
   clock: { now: () => Date.now() }, timeoutMs: MCP_CALL_TIMEOUT_MS,
+  // PHONE PORT: the connector door is the one that actually bills (mcp:apify) — it shares hostQuota's counter
+  quota: hostQuota,
   schemaCache: connectorSchemaCacheStore,
   validateConfig: cfg => cfg && cfg.transportKind === 'stdio' ? mcpStdioIsolationError(cfg) : '',
   /* A Safe Cell stdio connector's container is readied before EVERY connect — configure, Reload, a lazy start and
@@ -9155,6 +9301,7 @@ const cronDriver = makeCronDriver({
   tickMs: CRON_TICK_MS,                                    // a sweep gap far past the tick period (a sleep) gives live leases that time back
   // NS-0 lease heartbeat: reclaim on stale-heartbeat, not fixed wall-clock age (a live long run fires exactly once).
   heartbeatStaleMs: CRON_HEARTBEAT_STALE_MS, stalenessMult: CRON_STALENESS_MULT, durableHeartbeatMs: CRON_DURABLE_HEARTBEAT_MS,
+  toolStaleMs: CRON_TOOL_STALE_MS,                         // PHONE PORT: the SAME open-call window the dispatch budget is derived from
   maxParallel: CRON_MAX_PARALLEL,                          // G4.4 global concurrency cap: at most N cron runs in-flight; the rest defer
   defaultTz: CRON_HOST_TZ,                                 // boot-frozen host tz: a tz-less schedule fires on LOCAL wall-clock (G4.1)
   identityForAgent: (agentId) => cronIdentityFor(agentId),
@@ -14881,6 +15028,9 @@ const ROUTES = [
   { m: 'GET', qsplit: '/api/line-jobs', h: handleLineJobsList },
   { m: ['GET', 'POST', 'DELETE'], rx: LINE_JOB_RX, h: handleLineJobId },
   { m: 'GET', exact: '/api/budget/status', h: handleBudgetStatus },
+  // PHONE PORT: OWNER-AUTHORIZED PRODUCTION (production-gate.js), beside the budget routes it is orthogonal to
+  { m: 'GET', exact: '/api/production/status', h: handleProductionStatus },
+  { m: 'POST', exact: '/api/production/arm', h: handleProductionArm },
   { m: 'GET', exact: '/api/usage/providers', h: handleUsageProviders },
   { m: 'GET', qsplit: '/api/credits', h: handleCredits },   // 404s (no surface) unless managed credits are configured
   { m: 'GET', qsplit: '/api/credits/linkable', h: handleCreditsLinkable },   // {available} — is device linking offered (STARNET_CLOUD_URL set + not already configured)?
@@ -15076,6 +15226,17 @@ const ROUTES = [
   { m: 'GET', qsplit: '/api/deliverables', h: handleDeliverablesList },
   { m: 'POST', exact: '/api/deliverables/cleanup-preview', h: handleDeliverablesCleanupPreview },
   { m: 'POST', exact: '/api/deliverables/cleanup', h: handleDeliverablesCleanup },
+  { m: 'POST', exact: '/api/deliverables/register', h: handleDeliverableRegister },
+  // PHONE PORT — CHRISTIAN STORY STUDIO: create a project + run the pipeline, read its status, advance one stage, stream its files
+  { m: 'POST', exact: '/api/studio/assignment', h: handleStudioAssignment },
+  { m: 'GET', qsplit: '/api/studio/project', h: handleStudioProjectStatus },
+  { m: 'POST', qsplit: '/api/studio/project', h: handleStudioProjectAdvance },
+  { m: ['GET', 'HEAD'], prefix: '/api/studio-file', h: serveStudioFile },   // PHONE PORT (fbc370ebb): index an already-written file
+  // PHONE PORT — CENTRAL OUTBOX: id-addressed original retrieval, the Commander's feed, and the two judgment writers
+  { m: ['GET', 'HEAD'], prefix: '/api/artifact', h: serveArtifact },
+  { m: 'POST', exact: '/api/outbox/approval', h: handleOutboxApproval },
+  { m: 'POST', exact: '/api/outbox/qc', h: handleOutboxQc },
+  { m: 'GET', prefix: '/api/outbox', h: serveOutbox },
   { m: 'POST', exact: '/api/deliverables/cleanup-undo', h: handleDeliverablesCleanupUndo },
   { m: 'POST', exact: '/api/deliverables/clear', h: handleDeliverablesClear },
   { m: 'POST', exact: '/api/deliverables/clear-undo', h: handleDeliverablesClearUndo },
@@ -17064,6 +17225,41 @@ function effectiveLimitsStatus() {
   return limitsRegistry.effective({ env: ENV, classes: Array.from(classes), active: activeRuntimeKnobs(), runtimeSaved: runtimeKnobs,
     runtimeBootSaved, budget: effectiveCaps, budgetSaved: budgetOverrides, readback });
 }
+/* GET /api/production/status — is live paid production authorized, and what exactly is gated? (PHONE PORT)
+   Reports the RESOLVED state plus its source: "disarmed by default" and "disarmed on record" are different facts. */
+function handleProductionStatus(req, res) {
+  const st = productionArmState();
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({
+    ok: true, armed: st.armed, source: st.source, note: st.note, by: st.by || '', at: st.at || '',
+    gates: 'metered runs with no human present (surface=autonomous, not an owner-trusted channel)',
+    neverGated: ['interactive runs', 'unmetered/free-model runs', 'owner-trusted channel (Telegram owner DM)', 'script-only routines', 'Commander-started workshop shift/implement'],
+    unaffected: ['routine definitions', 'routine enabled/nextRunAt state', 'budget caps'],
+    refusalCode: productionGate.CODE, failureCode: 'production_disarmed',
+    armWith: 'POST /api/production/arm {"armed":true}'
+  }));
+}
+/* POST /api/production/arm { armed: true|false, by?: label } — the owner's authorization switch. Takes effect on the NEXT
+   run with no restart. Strict: `armed` must be a real boolean. */
+async function handleProductionArm(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (e) { return json(400, { error: 'bad json' }); }
+  const v = productionGate.validateArmPatch(body);
+  if (!v.ok) return json(400, { error: v.error });
+  /* PORT (v0.15.4 route-authority law): ARMING raises authority, so a person at this computer confirms it (desk proof),
+     like every other raise on this build. DISARMING only takes authority away and never asks. An already-armed station
+     re-arming changes nothing and does not ask either. */
+  if (v.armed === true && productionArmState().armed !== true) {
+    if (!deskGate(req, res, 'production-arm', 'production:arm')) return;
+  }
+  const saved = saveProductionArm(v.armed, body.by);
+  if (!saved.ok) return json(500, { error: 'could not persist the authorization change: ' + saved.error });
+  /* 2f5f3486c: stdout is the trace that survives a lost arm-state file, so it prints the RECORDED label (already
+     sanitised and defaulted to 'unattributed'), marked unverified — never a hardcoded "by owner". */
+  console.log('[production-gate] ' + (v.armed ? 'ARMED' : 'DISARMED')
+    + ' at ' + saved.rec.at + ' (recorded by: ' + saved.rec.by + ' — unverified)');
+  return handleProductionStatus(req, res);   // echo the fresh state from one round-trip
+}
 function handleBudgetStatus(req, res) {
   const accounting = ledger.health();
   const known = accounting.complete && accounting.durable;
@@ -18247,6 +18443,9 @@ function deskWords(action, d) {
     case 'toolset-on': return { title: 'StarNet — turn a toolset back on', verb: 'Turn it on',
       summary: 'Turn the ' + (o.label || 'toolset') + ' toolset back on?\n\nEvery agent can use its tools again'
         + (o.tools ? ' (' + o.tools + (o.more ? ' and ' + o.more + ' more' : '') + ')' : '') + ', within each agent\'s own approval setting, until you switch it off again in Connectors › Tools.' };
+    // PHONE PORT: arming paid production is an authority RAISE (unattended runs may then spend); disarming never asks
+    case 'production-arm': return { title: 'StarNet — arm paid production', verb: 'Arm production',
+      summary: 'Arm paid production?\n\nScheduled routines and other unattended runs may then spend money on metered models, within your spending limits, until you disarm it.' };
     case 'quit': return { title: 'StarNet — stop this station', verb: 'Stop it',
       summary: 'Stop this StarNet station now?\n\nEvery run, routine and loop stops. A station kept running by pm2 or another service manager starts again on its own.' };
     // the census's spend routes (handleBudgetCaps, handleBudgetResume, handleBudgetSettle; a restored backup or a reset too)
@@ -19617,11 +19816,33 @@ function cronStateSnapshot(now) {
   // `inFlightRunId` (additive, review 5.3): WHICH fire holds the lease, a settlement still waiting to persist included (it is not on the
   // record yet) — the page holds that fire's session busy (autosessions.js stillFiring), never an older fire of a routine running again.
   const scheduler = schedulerState();
+  /* WILL THE NEXT FIRE ACTUALLY RUN? (PHONE PORT of da18e7614 + c0a1d0096). enabled + nextRunAt describe the SCHEDULE,
+     not whether the production gate will let the fire start — on the phone a disarmed station showed "next routine: 5h"
+     for eight days while every fire was refused. COMPUTED BY CALLING THE GATE with the run path's own inputs (the
+     routine's resolved provider, billing.policyOf for metering, surface 'autonomous'), never by re-deriving its rule.
+     SCRIPT-ONLY ROUTINES FIRST: runOnceCore returns at the noAgent exit before the gate, so they genuinely run at $0. */
+  const arm = productionArmState();
+  let blockedCount = 0;
+  const gateFor = (job) => {
+    try {
+      if (job.noAgent === true) return { blocked: false, code: '', because: 'script-only: returns before provider admission' };
+      const provider = normalizeProvider(cronProviderFor(job) || '');
+      const metered = !!billing.policyOf(provider).ledgerMetered;
+      const v = productionGate.decide({ armed: arm.armed, metered: metered, surface: 'autonomous' });
+      return v.allow ? { blocked: false, code: '', because: v.because } : { blocked: true, code: v.code || '', because: v.because };
+    } catch (e) {
+      failNote('cron.gateVerdict', e);   // a failure to JUDGE is never reported as runnable
+      return { blocked: null, code: '', because: 'unknown' };
+    }
+  };
   const jobs = (Array.isArray(cronJobs) ? cronJobs : []).map(j => {
     if (!j || !j.id) return j;
     const lease = cronDriver.leases.get(j.id);
+    const gate = (j.enabled !== false) ? gateFor(j) : null;
+    if (gate && gate.blocked === true) blockedCount++;
     return Object.assign({}, j, (lease && !lease.settlement) ? { inFlight: true } : {}, lease ? { inFlightRunId: String(lease.runId || '') } : {}, { wire: routineWireRow(j), nextFireAt: SchedulerState.nextFireOf(scheduler, j) },   // null wire: a script-only routine
-      cronScriptStale(j) ? { scriptChanged: true } : {});   // review2 #3: its script is not the one the desk's yes was for
+      cronScriptStale(j) ? { scriptChanged: true } : {},   // review2 #3: its script is not the one the desk's yes was for
+      gate ? { gateBlocked: gate.blocked, gateCode: gate.code, gateBecause: gate.because } : {});
   });
   // `armSet` (additive, org P16): the Commander has set the switch at least once — enabled:false + armSet:true is an explicit
   // OFF (a save keeps it off); armSet:false is a switch never set (the first save turns it on)
@@ -19629,6 +19850,10 @@ function cronStateSnapshot(now) {
     degraded: cronDegraded ? { quarantinePath: cronDegraded.quarantinePath, since: cronDegraded.since,
       ...(cronDegraded.publicationReadOnly ? { readOnly: true, reason: cronDegraded.reason } : {}) } : null,
     maxConsecutiveFailures: CRON_MAX_CONSECUTIVE_FAILURES,
+    // PHONE PORT: the authorization half of "is my station working". blockedJobs = enabled routines whose next fire the
+    // gate would refuse as things stand (0 when armed). `by` is a recorded LABEL, never evidence of who acted.
+    production: { armed: arm.armed, source: arm.source, note: arm.note, by: arm.by || '', at: arm.at || '',
+                  refusalCode: productionGate.CODE, blockedJobs: blockedCount },
     // the delivery backlog ceiling the driver defers new runs at (cron-store) — the panel quotes it, never a copy
     maxPendingDeliveries: cronStore.MAX_PENDING_DELIVERIES };
 }
@@ -20479,6 +20704,9 @@ async function handleCronRun(req, res) {
       // Run Now must exercise the REAL unattended posture, grant included — otherwise "test it now" would
       // prove a capability set the scheduled fire does not get (the whole point of this route).
       unattendedGrants: Array.isArray(job.unattendedGrants) ? job.unattendedGrants.slice() : [],
+      /* PHONE PORT — PER-ROUTINE SPEND CEILING: the routine's own maxCostUsd rides as routineCapUsd, which runOnceCore folds into the run's LOWER-ONLY ceiling
+         LOWER-ONLY (never raises the station's PER RUN) and which bounds the lead plus every worker it starts. */
+      ...((Number(job.maxCostUsd) > 0 && isFinite(Number(job.maxCostUsd))) ? { routineCapUsd: Number(job.maxCostUsd) } : {}),
       // SOP recipes: Run Now is held to the same host-checked acceptance contract as the scheduled fire.
       postconditions: (job.meta && job.meta.postconditions != null) ? job.meta.postconditions : undefined,
       preloadSkills: Array.isArray(job.skills) ? job.skills.slice() : [], requiredPreloads: true, cronScript: job.script || null, cronScriptDigest: job.scriptDigest || null,
@@ -20761,7 +20989,7 @@ async function runWorkshopShift(agentId, opts) {
       key: key, model: model, system: cronSystemFor(id), stationEvidence: true,   // the persona's observed half rides the run context (dossierWithGoals)
       messages: [{ role: 'user', content: prompt }],
       agentId: id, isTask: true, emit: emit, signal: signal,
-      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', trigger: 'schedule', provider: provider, broadcast: !!o.broadcast,
+      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', gateAsInteractive: o.gateAsInteractive === true, trigger: 'schedule', provider: provider, broadcast: !!o.broadcast,
       reflect: true,   // a workshop shift builds real things; its lessons outlive the shift (see the reflect note on /api/run)
       // B5 parity (2026-07-06 audit): a bay-docked agent's workshop shift runs with ITS bay room's objects,
       // never the default office — the same station contract as routed channel messages and cron fires. (Read above, before the claim.)
@@ -20815,7 +21043,7 @@ async function runWorkshopShift(agentId, opts) {
       ledgerUnattendedHold('', { source: 'cron', jobId: o.cronJobId ? String(o.cronJobId) : undefined, agentId: id, runId: runId }, Object.assign({}, chainHold, { ledger: Object.assign({ phase: 'free-chain' }, chainHold.ledger) }));
       chained = { fired: false, reason: chainHold.binding };
     } else {
-      try { chained = await runImplementBuild(id, runId, { emit: emit, broadcast: !!o.broadcast }); }
+      try { chained = await runImplementBuild(id, runId, { emit: emit, broadcast: !!o.broadcast, gateAsInteractive: o.gateAsInteractive === true }); }
       catch (e) { chained = { fired: false, reason: 'chain-crashed: ' + ((e && e.message) || e) }; }
     }
     if (chained && chained.reason === 'built') {
@@ -21003,7 +21231,7 @@ async function runImplementBuild(agentId, sourceRunId, opts) {
       key: key, model: model, system: cronSystemFor(id), provider: provider, stationEvidence: true,   // the persona's observed half rides the run context (dossierWithGoals)
       messages: [{ role: 'user', content: prompt }],
       agentId: id, isTask: true, emit: (typeof o.emit === 'function' ? o.emit : function () {}), signal: signal,
-      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', trigger: 'directive', broadcast: !!o.broadcast,
+      runId: runId, streamId: 'workshop-' + runId, surface: 'autonomous', gateAsInteractive: o.gateAsInteractive === true, trigger: 'directive', broadcast: !!o.broadcast,
       reflect: true,
       station: room.station   // read above, before the queued row
     });
@@ -21590,6 +21818,690 @@ async function handleDeliverablesCleanupPreview(req, res) {
   const all = await deliverableRows(); const targetIds = new Set(p.targets.map(r => r.id));
   json(200, { ok: true, statuses: p.statuses, fingerprint: p.fingerprint, targets: p.targets, protected: all.filter(r => !targetIds.has(r.id)), note: 'Cleanup removes library metadata only; deliverable files are never deleted by this bulk action.' });
 }
+/* ==== PHONE PORT: verbatim from phone HEAD index.js (Christian Story Studio pipeline + studio -> Outbox bridge) ==== */
+// ---- CHRISTIAN STORY STUDIO: Multi-Agent Video Production Pipeline ----
+
+// Register orchestration project outputs with deliverableStore
+async function registerOrchestrationOutputs(projectId, blueprint) {
+  try {
+    const outboxDir = path.join(require('node:os').homedir(), 'outbox', projectId);
+
+    // Check if all agents have completed
+    const allComplete = blueprint.outputs.storywriter && blueprint.outputs.director
+      && blueprint.outputs.producer && blueprint.outputs.qceditor;
+    if (!allComplete) return; // Pipeline not finished — nothing to judge yet
+
+    // A missing outbox is NOT an early return: a finished pipeline with no video file is
+    // precisely the prose-only failure this guard exists to report. verifyVideoFile()
+    // reports that as 'file-missing' and it lands as a FAILED row below.
+
+    // A video only earns 'kept' if video-verify.js can prove it is real footage. A
+    // placeholder is recorded as 'failed' WITH its reason rather than skipped — an
+    // unattended run has to surface the problem, and registering nothing taught the
+    // owner nothing.
+    const videoFile = path.join(outboxDir, 'video.mp4');
+    const verdict = verifyVideoFile(videoFile);
+    const row = {
+      id: 'studio:' + projectId + ':video',
+      agentId: 'studio',
+      runId: projectId,
+      title: 'Christian Story Studio Video',
+      source: 'studio',
+      status: verdict.ok ? 'kept' : 'failed',
+      kind: 'video',
+      summary: verdict.ok
+        ? blueprint.userPrompt.slice(0, 260)
+        : ('Video rejected: ' + verdict.reason + ' — ' + blueprint.userPrompt.slice(0, 180)),
+      // Store only path and bytes; preview/openUrl are computed by deliverableFile() on retrieval
+      files: verdict.ok ? [{ path: videoFile, bytes: verdict.bytes }] : [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    if (!verdict.ok) {
+      row.verifyReason = verdict.reason;
+      row.verifyBytes = verdict.bytes;
+    }
+    await deliverableStore.record(row, Date.now());
+
+    /* CENTRAL OUTBOX BRIDGE (2026-11-03). The row above goes to the LEGACY deliverable store; the
+       Commander's central Outbox is a different index (workspaces/.deliverables/manifest.jsonl) and until
+       now contained no studio output whatsoever — zero video rows against four rendered projects. The
+       Commander had to look in two places to see the team's work, and QC_EDITOR could not reach a video at
+       all, because $HOME/outbox/<projectId>/ is outside every agent workspace.
+
+       Registered under the pseudo-producer 'studio' (see workspaceRootOf), so the path handed to register()
+       is workspace-RELATIVE ('<projectId>/video.mp4') and every path floor in the manifest still applies.
+
+       The `verification` axis is set from verifyVideoFile()'s real verdict — a mechanical check of actual
+       bytes (bitrate floor, real footage vs placeholder), which is exactly what that axis means. `qc` and
+       `approval` are left untouched at not_reviewed/pending: a machine proving a file is real video is not
+       a reviewer judging it and is certainly not the Commander approving it. A REJECTED render is indexed
+       too, carrying its reason — the same ruling as the legacy row above ("registering nothing taught the
+       owner nothing"), and the honest way for an unattended pipeline to surface a bad render.
+
+       Fail-open: the pipeline has already finished and the legacy row is already written. */
+    try {
+      const reg = deliverableManifest.register({
+        ownerAgentId: OUTBOX_STUDIO_OWNER,
+        runId: projectId,
+        projectId: projectId,
+        shareWith: outboxShareFor(OUTBOX_STUDIO_OWNER),
+        files: [path.join(projectId, 'video.mp4')],
+        provider: (blueprint.outputs && blueprint.outputs.producer
+          && blueprint.outputs.producer.video
+          && blueprint.outputs.producer.video.provider) || null
+      });
+      if (reg && reg.ok && reg.entries.length) {
+        const entryId = reg.entries[0].id;
+        deliverableManifest.setVerification(entryId, verdict.ok ? 'passed' : 'failed',
+          verdict.ok
+            ? ('video-verify: real footage, ' + verdict.bytes + ' bytes')
+            : ('video-verify: ' + verdict.reason + ' (' + verdict.bytes + ' bytes)'));
+        /* PORT: there is no module-level emit (on the phone this call threw ReferenceError AFTER registration and was
+           swallowed, so the studio video's card never appeared). The station's SSE hub is what it meant. */
+        try { sse.broadcast('deliverable', redact({ id: 'artifact:' + entryId, agentId: OUTBOX_STUDIO_OWNER, kind: 'video',
+          title: 'video.mp4 (' + projectId + ')', room: 'office' })); } catch (e2) { failNote('outbox.register.studio.card', e2); }
+      } else if (reg && !reg.ok) {
+        failNote('outbox.register.studio', new Error(String(reg.error || 'register refused')));
+      }
+    } catch (e) { failNote('outbox.register.studio', e); }
+  } catch (e) {
+    // Log but don't fail the request if registration errors
+    console.error('[orchestration] Failed to register outputs:', e.message);
+  }
+}
+
+// POST /api/studio/assignment { prompt, duration_target?, ... }
+// Create a new story project and start the orchestration pipeline
+async function handleStudioAssignment(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  let body = {}; try { body = JSON.parse(await readBody(req, 10 << 10)) || {}; } catch (_) { body = {}; }
+
+  const userPrompt = body.prompt || body.userPrompt || '';
+  if (!userPrompt || userPrompt.length < 10) {
+    return sendJson(400, { error: 'prompt required (minimum 10 characters)' });
+  }
+
+  try {
+    // Create project ID
+    const projectId = 'proj-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    // Create blueprint and workflow
+    const blueprint = orchestration.createBlueprint(projectId, userPrompt);
+    const workflow = orchestration.createWorkflow(projectId);
+
+    // Start the workflow in 'running' state
+    workflow.status = 'running';
+    workflow.currentStage = 0;
+
+    // Save state
+    await orchestration.saveBlueprint(projectId, blueprint);
+    await orchestration.saveWorkflow(projectId, workflow);
+
+    setApiToken(API_TOKEN);  // Pass the sidecar's token to the orchestrator
+
+    // Run the WHOLE pipeline, not just the first stage. This used to call
+    // orchestrateNextAgent once, so a project ran STORYWRITER and then sat at "running"
+    // until something advanced it by hand — which made "unattended" untrue in practice.
+    //
+    // Detached on purpose: a full run is four model turns plus a video render, far longer
+    // than any sane HTTP timeout. The client gets the projectId immediately and polls
+    // GET /api/studio/project?projectId=<id>; all state is persisted atomically as it goes,
+    // so nothing depends on this response being read.
+    runPipelineToCompletion(projectId, 900000)
+      .then(async (out) => {
+        try {
+          const bp = await orchestration.loadBlueprint(projectId);
+          if (bp) await registerOrchestrationOutputs(projectId, bp);
+        } catch (swallowed) { failNote('phoneport.studioPipelineRegister', swallowed); }
+        console.log('[studio] pipeline ' + projectId + ' -> ' +
+          (out.ok ? 'complete' : ('stopped: ' + (out.failureReason || out.error || out.status))));
+      })
+      .catch(e => console.error('[studio] pipeline ' + projectId + ' threw:', e && e.message));
+
+    sendJson(200, {
+      ok: true,
+      projectId,
+      message: 'Project created; pipeline running (storywriter -> director -> producer -> qceditor)',
+      poll: '/api/studio/project?projectId=' + encodeURIComponent(projectId),
+      status: 'running'
+    });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
+}
+
+/* Resolve a studio project id from EITHER the query string or a path segment.
+   Both studio project routes are registered with `qsplit: '/api/studio/project'`, which
+   matches the bare path ONLY — yet both handlers read `url.split('/')[4]`, a path segment
+   the route can never deliver. Every call therefore 404'd ("not found") no matter how it was
+   addressed: the advance endpoint was unreachable by construction. Accept the query form the
+   route actually permits, and keep the path form working for callers that use it. */
+function studioProjectIdFrom(req) {
+  const raw = String(req.url || '');
+  const bare = raw.split('?')[0];
+  const seg = bare.split('/')[4];
+  if (seg && seg.length >= 5) return decodeURIComponent(seg);
+  const qs = raw.indexOf('?') >= 0 ? raw.slice(raw.indexOf('?') + 1) : '';
+  const params = new URLSearchParams(qs);
+  const q = params.get('projectId') || params.get('project') || params.get('id') || '';
+  return q && q.length >= 5 ? q : '';
+}
+
+// GET /api/studio/project/{id}/status
+// Get current workflow status for a project
+async function handleStudioProjectStatus(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  const projectId = studioProjectIdFrom(req);
+  if (!projectId) {
+    return sendJson(400, { error: 'Invalid project ID — pass ?projectId=<id>' });
+  }
+
+  try {
+    const workflow = await orchestration.loadWorkflow(projectId);
+    const blueprint = await orchestration.loadBlueprint(projectId);
+
+    if (!workflow || !blueprint) {
+      return sendJson(404, { error: 'Project not found' });
+    }
+
+    // Register outputs if pipeline completed
+    await registerOrchestrationOutputs(projectId, blueprint);
+
+    const nextAgent = orchestration.nextAgentForStatus(workflow);
+    const currentAgent = workflow.currentStage > 0
+      ? orchestration.AGENTS_IN_ORDER[Math.max(0, workflow.currentStage - 1)]
+      : orchestration.AGENTS_IN_ORDER[0];
+
+    sendJson(200, {
+      ok: true,
+      projectId,
+      status: workflow.status,
+      currentStage: workflow.currentStage,
+      currentAgent,
+      nextAgent,
+      attempts: workflow.attempts,
+      progress: {
+        storywriter: blueprint.outputs.storywriter?.deliverables?.length || 0,
+        director: blueprint.outputs.director?.deliverables?.length || 0,
+        producer: blueprint.outputs.producer?.deliverables?.length || 0,
+        qceditor: blueprint.outputs.qceditor?.deliverables?.length || 0
+      },
+      lastUpdate: workflow.lastUpdate
+    });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
+}
+
+// POST /api/studio/project/{id}/advance
+// Manually advance to next agent (for testing/recovery)
+async function handleStudioProjectAdvance(req, res) {
+  const sendJson = (code, obj) => respondJson(res, code, obj);
+  const projectId = studioProjectIdFrom(req);
+  if (!projectId) {
+    return sendJson(400, { error: 'Invalid project ID — pass ?projectId=<id>' });
+  }
+
+  try {
+    // 300s, matching the assignment path. At 120s the DIRECTOR stage — which reads a full
+    // screenplay before it answers — was cut off mid-generation and reported as
+    // "run exceeded 120s" for work that was progressing normally.
+    const result = await orchestrateNextAgent(projectId, 300000);
+    sendJson(result.error ? 400 : 200, { ok: !result.error, ...result });
+  } catch (e) {
+    sendJson(500, { error: e.message });
+  }
+}
+
+/* ==== PHONE PORT: verbatim from phone HEAD index.js (GET /api/studio-file) ==== */
+// GET /api/studio-file?project=<id>&file=<name> — read-only view of studio/orchestration outputs from ~/outbox/.
+// Validates the path to prevent escape and only serves files from the project's outbox directory.
+// Streams bytes with HTTP Range support for video seeking.
+async function serveStudioFile(req, res) {
+  let abs;
+  try {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const projectId = u.searchParams.get('project') || '';
+    const fileName = u.searchParams.get('file') || '';
+
+    // Validate project ID format (proj-timestamp-code)
+    if (!/^proj-\d+-[a-z0-9]+$/.test(projectId)) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+    // Validate file name (no path traversal)
+    if (!/^[\w.-]+$/.test(fileName) || fileName.includes('..') || fileName.includes('/')) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+
+    const outboxDir = path.join(require('node:os').homedir(), 'outbox', projectId);
+    abs = path.join(outboxDir, fileName);
+
+    // Ensure the resolved path is still within outbox
+    const real = path.resolve(abs);
+    const base = path.resolve(outboxDir) + path.sep;
+    if (!real.startsWith(base)) {
+      res.writeHead(403); return res.end('forbidden');
+    }
+  } catch (e) {
+    res.writeHead(403); return res.end('forbidden');
+  }
+
+  let st;
+  try { st = await fsp.stat(abs); } catch (_) { res.writeHead(404); return res.end('not found'); }
+  if (!st.isFile()) { res.writeHead(404); return res.end('not found'); }
+
+  const ext = path.extname(abs).toLowerCase();
+  const mimeType = isActiveDeliverable(abs) ? 'application/octet-stream' : (MIME[ext] || 'video/mp4');
+  const headers = {
+    'Content-Type': mimeType,
+    'Cache-Control': 'no-store',
+    // SIBLING OF THE /api/artifact XSS (2026-11-02): this route served EVERY studio file inline with MIME[ext],
+    // and agents write into ~/outbox/<projectId>/ — so a project file named *.svg or *.html would have executed
+    // in the sidecar's origin exactly like an artifact would. Same reused control, same reason.
+    'Content-Disposition': (isActiveDeliverable(abs) ? 'attachment' : 'inline') + '; filename="' + safeDownloadName(abs) + '"',
+    'X-Content-Type-Options': 'nosniff',
+    'Accept-Ranges': 'bytes',
+    'Referrer-Policy': 'no-referrer'
+  };
+
+  const range = parseRange(req.headers && req.headers.range, st.size);
+  let start = 0, end = st.size - 1, code = 200;
+  if (range && range.unsatisfiable) {
+    res.writeHead(416, { 'Content-Range': 'bytes */' + st.size, 'Accept-Ranges': 'bytes' });
+    return res.end();
+  }
+  if (range) {
+    start = range.start; end = range.end; code = 206;
+    headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + st.size;
+  }
+  headers['Content-Length'] = (end - start + 1);
+
+  if (req.method === 'HEAD') { res.writeHead(code, headers); return res.end(); }
+
+  res.writeHead(code, headers);
+  const stream = fs.createReadStream(abs, { start, end });
+  stream.on('error', () => { try { res.destroy(); } catch (swallowed) { failNote('phoneport.serveStudioFile', swallowed); } });
+  req.on('close', () => { try { stream.destroy(); } catch (swallowed) { failNote('phoneport.serveStudioFile', swallowed); } });
+  stream.pipe(res);
+}
+
+/* ==== PHONE PORT: verbatim from phone HEAD index.js (POST /api/deliverables/register) ==== */
+/* POST /api/deliverables/register — register an ALREADY-WRITTEN file as a library deliverable.
+   Built for the memorial engine, which is a real production line with no agent run behind it: its
+   films are rendered by ffmpeg from a CLI, so the artifact collector (which watches tool results)
+   never sees them and the library stayed empty. Deliberately generic so any host-side producer can
+   use it. Four refusals, each one a rule this station already learned the hard way:
+     - the path is RE-RESOLVED inside the named agent's jail with realpath, because deliverableFile()
+       resolves it the same way later; a row whose path it cannot resolve renders as a dead link.
+       realpath (not a lexical check) is what stops a symlink pointing out of the jail.
+     - a VIDEO earns status 'kept' only if video-verify.js proves real footage. Otherwise it is
+       recorded 'failed' WITH the reason rather than dropped — registering nothing teaches the owner
+       nothing, and a placeholder recorded as finished work is precisely the failure this station
+       has shipped before. Same rule, same helper as the studio bridge.
+     - bytes are measured by the HOST from the file on disk; a caller-supplied size is ignored.
+     - no filesystem write happens here. This route indexes what already exists; it never creates,
+       moves or copies a file, so it cannot be used to smuggle bytes into a workspace. */
+async function handleDeliverableRegister(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let body; try { body = JSON.parse(await readBody(req, 8192)) || {}; } catch (_) { return json(400, { ok: false, error: 'bad request' }); }
+
+  const id = String(body.id || '').trim();
+  if (!id) return json(400, { ok: false, error: 'id is required' });
+  const agentId = String(body.agentId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId)) return json(400, { ok: false, error: 'agentId must be 1-40 chars of [A-Za-z0-9_-]' });
+  // runId is REQUIRED here and must be path-safe, because it is part of the resolved location below.
+  const runId = String(body.runId || '').trim();
+  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(runId)) return json(400, { ok: false, error: 'runId is required, 1-80 chars of [A-Za-z0-9_.-]' });
+  const rel = String(body.path || '').trim();
+  if (!rel || path.isAbsolute(rel)) return json(400, { ok: false, error: 'path must be relative to the agent workspace' });
+
+  /* VALIDATE WHAT THE READER WILL RESOLVE, not what the caller typed. handleDeliverablesList passes
+     workshop=true for EVERY store-backed row, so deliverableFile() resolves a stored path as
+     `workshop/<runId>/<path>` under the agent workspace and builds the openUrl from that. Checking the
+     bare path here instead would have produced a row that passes registration and then 404s on click —
+     which is exactly what the first version of this route did. The studio bridge never hits this
+     because its own branch returns earlier. */
+  const served = path.posix.join('workshop', runId, rel.split(path.sep).join('/'));
+  let real, bytes;
+  try {
+    const base = fs.realpathSync(path.join(WORKSPACES, agentId)) + path.sep;
+    real = fs.realpathSync(path.join(WORKSPACES, agentId, served));
+    if (!real.startsWith(base)) return json(403, { ok: false, error: 'path escapes the agent workspace' });
+    const st = fs.statSync(real);
+    if (!st.isFile()) return json(400, { ok: false, error: 'path is not a regular file' });
+    bytes = st.size;
+  } catch (_) { return json(404, { ok: false, error: 'no such file at workspaces/' + agentId + '/' + served }); }
+
+  const kind = String(body.kind || 'files').trim().slice(0, 20) || 'files';
+  let status = 'kept', verifyReason = '';
+  if (kind === 'video') {
+    const verdict = verifyVideoFile(real);
+    if (!verdict.ok) { status = 'failed'; verifyReason = String(verdict.reason || 'unverified'); }
+  }
+  const summary = status === 'kept'
+    ? String(body.summary || '')
+    : ('Video rejected: ' + verifyReason + ' — ' + String(body.summary || ''));
+  const row = {
+    id, agentId, runId,
+    title: String(body.title || id), source: 'register', status, kind, summary,
+    // Mirrors the studio bridge: a file that failed verification is listed with NO playable
+    // member, so the panel cannot offer a preview of something the host just refused to vouch for.
+    files: status === 'kept' ? [{ path: rel, bytes }] : [],
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  if (status !== 'kept') { row.verifyReason = verifyReason; row.verifyBytes = bytes; }
+  try { await deliverableStore.record(row, Date.now()); }
+  catch (e) { return json(500, { ok: false, error: 'could not record deliverable: ' + ((e && e.message) || 'unknown') }); }
+  json(200, { ok: true, registered: status === 'kept', status, kind, bytes, served, verifyReason: verifyReason || undefined, row });
+}
+
+/* ==== PHONE PORT: verbatim from phone HEAD index.js (central Outbox routes) ==== */
+/* GET /api/artifact?id=<artifactId>&agent=<viewer> — CENTRAL OUTBOX RETRIEVAL OF AN ORIGINAL FILE.
+
+   Addressed BY MANIFEST ID, never by a caller-supplied path. That is the whole security posture: "Do not
+   expose arbitrary filesystem access"; the requester cannot phrase a request for a file that was not
+   published to it, and the displayed location is never the authorization. The scoped ticket
+   (apitickets 'artifact' kind, 5-minute cap) binds viewer + id, so a link for one artifact cannot fetch
+   another and a Commander link cannot be replayed as PUBLISHER.
+
+   Every retrieval re-runs the FULL floor rather than trusting the row: readFor() re-resolves the path inside
+   the owner's workspace, re-applies the realpath/symlink check, re-reads with O_NOFOLLOW, and re-hashes the
+   bytes against the registered sha256 — so a deleted, moved, swapped or EDITED original is refused (409)
+   instead of being served as though it were still the approved artifact. */
+async function serveArtifact(req, res) {
+  const deny = (code, msg) => { res.writeHead(code, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(msg); };
+  let id = '', viewer = 'agent';
+  try {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    id = String(u.searchParams.get('id') || '');
+    viewer = String(u.searchParams.get('agent') || 'agent');
+  } catch (e) { return deny(400, 'bad request'); }
+  // Shape-gate before any lookup, exactly like /api/studio-file's project-id regex: a malformed id is a 403,
+  // never a filesystem probe. '@' and ':' are the id's own separators; nothing else may appear.
+  if (!id || id.length > 300 || !/^[A-Za-z0-9_.:@-]+$/.test(id)) return deny(403, 'forbidden');
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(viewer)) return deny(403, 'forbidden');
+
+  /* VIDEO IS STREAMED (2026-11-24). A <video> element plays and seeks with HTTP Range requests; the buffered
+     path below answers every one of them by reading and hashing the whole file into memory, and it has no
+     Range at all. So a video row — and any file over the whole-file ceiling (a 3–7 minute memorial film is
+     60–120 MB) — goes through openFor(): same access floor, sha256 re-checked before sending. Its one weaker
+     guarantee (an edit made DURING a stream is not caught) is spelled out on openFor in deliverable-manifest.js.
+     Every other file, and every refusal, is answered below exactly as before. */
+  const pre = deliverableManifest.get(viewer, id);
+  if (pre && /^video\//.test(String(pre.mime || ''))) return serveArtifactStream(req, res, viewer, id, deny);
+  const got = deliverableManifest.readFor(viewer, id);
+  if (!got.ok && /EFBIG/.test(String(got.error || ''))) return serveArtifactStream(req, res, viewer, id, deny);
+  if (!got.ok) {
+    const why = String(got.error || '');
+    // An unpublished id and a nonexistent id are the SAME answer on purpose — a 404-vs-403 difference would
+    // let a caller enumerate which artifacts exist in workspaces it cannot read.
+    if (/no deliverable/.test(why)) return deny(404, 'not found');
+    if (/checksum mismatch/.test(why)) return deny(409, 'artifact changed since registration');
+    if (/missing|unreadable/.test(why)) return deny(410, 'artifact no longer available');
+    return deny(403, 'forbidden');
+  }
+  const row = got.row;
+  /* ACTIVE CONTENT NEVER RENDERS INLINE (security review, 2026-11-02 — stored XSS, real on this station).
+     The first version of this route sent `inline` with the artifact's own declared mime. The manifest's type
+     map includes image/svg+xml and DESIGNER really ships SVG (the first product was "PNG/SVG" scripture
+     pages), so an agent-produced deliverable opened from the Outbox would have executed <script> in the
+     sidecar's OWN origin — the origin holding the master API token. nosniff does not help: it stops type
+     SNIFFING, and the declared type is already the scriptable one.
+
+     THE ROOT CAUSE WAS NOT THE HEADER, IT WAS BUILDING A PARALLEL FILE SERVER. /api/file already solved this
+     with file-response.js `isActiveDeliverable()` (.html/.htm/.xhtml/.js/.mjs/.cjs/.svg/.xml/.xsl/.xslt/.wasm)
+     -> force application/octet-stream + attachment + a strict CSP. This route now REUSES that exact control
+     instead of a second opinion, so one list governs every file-serving path and widening it can never leave
+     one route behind. */
+  const active = isActiveDeliverable(String(row.filename || ''));
+  const headers = {
+    // Neutralise the TYPE too, not just the disposition — a browser handed octet-stream cannot be talked
+    // into executing it, which is strictly stronger than attachment alone.
+    'Content-Type': active ? 'application/octet-stream' : (row.mime || 'application/octet-stream'),
+    'Content-Length': String(got.buf.length),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Disposition': (active ? 'attachment' : 'inline')
+      + '; filename="' + String(row.filename || 'artifact').replace(/[^\w.-]/g, '_') + '"',
+    'X-Artifact-Sha256': String(row.sha256 || ''),
+    'X-Artifact-Version': String(row.version || 1)
+  };
+  if (active) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'";
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') return res.end();
+  return res.end(got.buf);
+}
+
+/* serveArtifactStream — /api/artifact for a file too large to read whole. Same headers and the same
+   active-content rule as the buffered path, plus HTTP Range so a video can be played and SEEKED without the
+   phone holding 100 MB per request. One `bytes=a-b` range is honoured; anything else gets the whole file. */
+async function serveArtifactStream(req, res, viewer, id, deny) {
+  const got = await deliverableManifest.openFor(viewer, id);
+  if (!got.ok) {
+    const why = String(got.error || '');
+    if (/no deliverable/.test(why)) return deny(404, 'not found');
+    if (/checksum mismatch/.test(why)) return deny(409, 'artifact changed since registration');
+    if (/missing|unreadable/.test(why)) return deny(410, 'artifact no longer available');
+    return deny(403, 'forbidden');
+  }
+  const row = got.row, size = got.size;
+  const closeFd = () => { try { fs.closeSync(got.fd); } catch (swallowed) { failNote('phoneport.serveArtifactStream', swallowed); } };
+  const active = isActiveDeliverable(String(row.filename || ''));
+  let start = 0, end = size - 1, status = 200;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+  if (m && size > 0 && !(m[1] === '' && m[2] === '')) {
+    if (m[1] === '') { start = Math.max(0, size - Number(m[2])); }
+    else { start = Number(m[1]); if (m[2] !== '') end = Math.min(size - 1, Number(m[2])); }
+    if (!(start <= end && start < size)) {
+      closeFd();
+      res.writeHead(416, { 'Content-Range': 'bytes */' + size, 'Cache-Control': 'no-store' });
+      return res.end();
+    }
+    status = 206;
+  }
+  const headers = {
+    'Content-Type': active ? 'application/octet-stream' : (row.mime || 'application/octet-stream'),
+    'Content-Length': String(end - start + 1),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Disposition': (active ? 'attachment' : 'inline')
+      + '; filename="' + String(row.filename || 'artifact').replace(/[^\w.-]/g, '_') + '"',
+    'X-Artifact-Sha256': String(row.sha256 || ''),
+    'X-Artifact-Version': String(row.version || 1)
+  };
+  if (status === 206) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
+  if (active) headers['Content-Security-Policy'] = "sandbox; default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'";
+  let stream = null;
+  try {
+    res.writeHead(status, headers);
+    if (req.method === 'HEAD' || size === 0) { closeFd(); return res.end(); }
+    /* From here the STREAM owns the fd (autoClose): it closes it on end, on error and on destroy. Nothing
+       below may close it again — by then the number can belong to another request's file or socket
+       (independent review, 2026-11-24: the first version closed it a second time in the error handler). */
+    stream = fs.createReadStream(null, { fd: got.fd, start: start, end: end, autoClose: true });
+  } catch (e) {
+    if (!stream) closeFd();
+    try { res.destroy(); } catch (swallowed) { failNote('phoneport.serveArtifactStream', swallowed); }
+    return;
+  }
+  stream.on('error', () => { try { res.destroy(); } catch (swallowed) { failNote('phoneport.serveArtifactStream', swallowed); } });
+  res.on('close', () => { if (!stream.destroyed) stream.destroy(); });
+  stream.pipe(res);
+}
+
+/* GET /api/outbox — the Commander-facing central Outbox feed. Metadata only (never bytes): each row carries
+   its provenance, the four independent state axes, the derived lifecycle, the exact original location, and a
+   retrieval id the caller turns into a ticketed /api/artifact URL. Filters mirror the manifest's own. */
+async function serveOutbox(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  let q;
+  try { q = new URL(req.url, 'http://127.0.0.1').searchParams; } catch (e) { return json(400, { error: 'bad request' }); }
+  const viewer = String(q.get('agent') || 'agent');
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(viewer)) return json(403, { error: 'forbidden' });
+  const opts = {};
+  for (const k of ['projectId', 'owner', 'kind', 'completion', 'verification', 'qc', 'approval', 'lifecycle', 'since', 'until']) {
+    const v = q.get(k); if (v) opts[k] = v;
+  }
+  if (q.get('includeSuperseded') === '1') opts.includeSuperseded = true;
+  let rows = [];
+  try { rows = deliverableManifest.list(viewer, opts); } catch (e) { failNote('outbox.list', e); rows = []; }
+  // absolutePath is for DISPLAY ("exact original file location") and is explicitly NOT an access mechanism:
+  // /api/artifact ignores any path a caller sends and resolves from the row itself.
+  const out = rows.map(r => Object.assign({}, r, {
+    // Resolved by the manifest's own injected workspaceRootOf, NOT rebuilt here — the local rebuild was wrong
+    // for the 'studio' pseudo-producer (root $HOME/outbox), so four live rows advertised a path that does not
+    // exist on disk. See deliverable-manifest.absolutePathOf().
+    absolutePath: deliverableManifest.absolutePathOf(r),
+    retrieve: '/api/artifact?id=' + encodeURIComponent(r.id) + '&agent=' + encodeURIComponent(viewer)
+  }));
+  return json(200, { ok: true, viewer: viewer, count: out.length, rows: out });
+}
+
+/* THE JUDGMENT WRITERS (2026-11-10). deliverable-manifest.js has carried setQc() and setApproval() since the
+   Central Outbox landed, lifecycleOf() derives state from them, and frontend/app/outbox.js already renders the
+   pills — but NOTHING ever called them. Measured on the live station before this change:
+       approval {"pending": 53}          <- every row, 100%, permanently
+       qc       {"not_reviewed": 51, "needs_review": 2}
+       verification {"passed": 17, "unverified": 35, "failed": 1}
+   The one axis the HOST sets mechanically worked; the two that need a caller were dead. These two routes are
+   that caller.
+
+   WHY TWO ROUTES AND NOT ONE. The module keeps qc and approval deliberately separate — "QC passing is a quality
+   opinion, approval is a business decision" — and they answer to different authorities. Merging them into one
+   endpoint with an `axis` field would blur exactly the distinction the data model exists to preserve.
+
+   WHY THERE IS NO TOOL FOR THESE. Every /api route rides the x-starnet-token gate, so a caller holding the token
+   IS the Commander. An agent has no token (secrets never reach the renderer or a run), so it cannot reach these.
+   Exposing approval as a TOOL would hand an agent the power to approve its own output, which is the single thing
+   the four-axis model was built to prevent. Deliberately absent, not overlooked.
+
+   The module keeps its own invariants and this layer does not duplicate them: statuses are enum-checked there,
+   setQc REFUSES a reviewer equal to the artifact's owner, and patch() appends a new JSONL line so every earlier
+   verdict stays on disk as the audit trail. */
+/* THE ID GATE. Copied deliberately from /api/artifact, including its refusal to distinguish "does not exist"
+   from "not visible to you": a 404-vs-403 difference would let a token-holder enumerate which artifacts exist
+   in workspaces it cannot read. Resolution goes through the VIEWER-SCOPED get(), never through patch()/
+   setApproval() directly — those search the whole manifest and ignore `sharedWith`. */
+const OUTBOX_ID_RE = /^[A-Za-z0-9_.:@-]+$/;
+
+async function readJudgmentRequest(req, res, json) {
+  let body;
+  try { body = JSON.parse(await readBody(req, 4096)) || {}; }
+  catch (e) { json(400, { ok: false, error: 'bad json' }); return null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) { json(400, { ok: false, error: 'body must be a JSON object' }); return null; }
+  const id = String(body.id || '').trim();
+  if (!id || id.length > 300 || !OUTBOX_ID_RE.test(id)) { json(403, { ok: false, error: 'forbidden' }); return null; }
+  const row = deliverableManifest.get(OUTBOX_COMMANDER, id);
+  if (!row) { json(403, { ok: false, error: 'forbidden' }); return null; }   // merged with "unknown" on purpose
+  return { body, id, row, detail: String(body.detail || '').slice(0, 400) };
+}
+
+/* POST /api/outbox/approval  { id, status: 'approved'|'rejected'|'pending', detail?, by? }
+   AUTHORITY COMES FROM THE REQUEST, NEVER THE BODY. setApproval() takes a commanderId but — despite its
+   doc comment saying "the COMMANDER alone" — validates no identity whatsoever; it only checks the status
+   enum. So the Commander-only rule is enforced HERE: the approver is hardcoded to OUTBOX_COMMANDER, exactly
+   as handleProjectBless hardcodes surface:'interactive'. A `by` in the body is an audit LABEL folded into
+   the detail text, never an authority claim. */
+async function handleOutboxApproval(req, res) {
+  const json = (code, obj) => { if (!res.headersSent) res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  const parsed = await readJudgmentRequest(req, res, json);
+  if (!parsed) return;
+  const accepts = Array.from(APPROVAL_STATES);
+  const status = String(parsed.body.status || '').trim();
+  if (!APPROVAL_STATES.has(status)) return json(400, { ok: false, error: 'invalid approval status', accepts: accepts });
+
+  /* APPROVING BYTES THE HOST NEVER PROVED MUST BE DELIBERATE (2026-11-10). Measured live before this gate:
+     every one of the 53 visible rows read approval:pending, and 35 of them had verification:'unverified'
+     because the verification axis is auto-wired for studio VIDEO only — no host pass exists yet for images or
+     files. So the overwhelmingly common case was a two-tap approval of an artifact nothing had decoded, which
+     is the 1,056-byte-placeholder failure wearing a green pill.
+
+     This is a SPEED BUMP, NOT A VETO. The Commander keeps the final word — the station's rule is that spend
+     and publish decisions are the owner's — but the override has to be asked for by name and it lands in the
+     audit trail, so "approved" can never be something that happened by accident. `rejected` and `pending` are
+     deliberately NOT gated: refusing or un-deciding an unverified artifact needs no ceremony, and gating them
+     would make the safe action harder than the risky one. */
+  const needsAck = status === 'approved' && String(parsed.row.verification || '') !== 'passed';
+  if (needsAck && parsed.body.acknowledgeUnverified !== true) {
+    return json(409, {
+      ok: false,
+      error: 'this artifact has never passed host verification (verification: ' + String(parsed.row.verification || 'unverified')
+        + ') — approving it asserts quality the harness cannot prove. Re-send with acknowledgeUnverified:true to '
+        + 'approve it anyway; that override is recorded in the approval detail.',
+      verification: String(parsed.row.verification || 'unverified'),
+      needsAcknowledgement: true
+    });
+  }
+
+  /* THE HOST'S STAMPS ARE RESERVED SPACE, NOT AN APPEND (security review, 2026-11-10 — this was a real defect
+     in the first version of this gate, caught by audit and verified by replay). `parsed.detail` is ALREADY
+     clamped to 400 by readJudgmentRequest, and `patch()` clamps the stored field to 400 as well. So appending
+     the stamp and THEN truncating meant a caller who simply filled `detail` with 400 characters pushed the
+     override notice off the end — the manifest recorded `approval: approved` with the caller's own text and no
+     trace that host verification had been overridden, while the comment here claimed the opposite. The
+     manifest IS the audit trail ("the audit trail is the whole point of this index", patch()), and the panel
+     renders approvalDetail verbatim as "Commander:", so the laundered string was what the owner would read.
+     The stamps are therefore composed FIRST and the caller's portion is truncated into what is left over. */
+  const stamps = [];
+  if (needsAck) stamps.push('APPROVED WITHOUT HOST VERIFICATION (verification: ' + String(parsed.row.verification || 'unverified') + ')');
+  /* SELF-OWNED APPROVAL IS RECORDED, NOT REFUSED. OUTBOX_COMMANDER is 'agent' — NIGHT4CHRIST's own agentId —
+     so the Commander is also a producing agent, and `approvedBy === owner` cannot distinguish "the human owner
+     approved the Commander's work" from "the Commander approved its own". Refusing it would be wrong: the owner
+     legitimately acts AS 'agent' and must be able to approve that agent's deliverables. QC can refuse a
+     self-review because a reviewer is NAMED and substitutable; the Commander is not. So the asymmetry is
+     deliberate — approval records the overlap instead of blocking it. */
+  if (status === 'approved' && String(parsed.row.owner || '') === OUTBOX_COMMANDER) {
+    stamps.push('SELF-OWNED (approver is also the producing agent ' + OUTBOX_COMMANDER + ')');
+  }
+  const label = String(parsed.body.by || '').trim().slice(0, 64);
+  const caller = label ? (parsed.detail ? label + ': ' + parsed.detail : label) : parsed.detail;
+  const stamp = stamps.length ? stamps.join(' · ') : '';
+  let detail;
+  if (!stamp) detail = caller.slice(0, 400);
+  else {
+    const room = 400 - stamp.length - 3;                       // 3 = the ' — ' joiner
+    detail = (room > 0 && caller ? caller.slice(0, room) + ' — ' : '') + stamp;
+  }
+  let r;
+  try { r = deliverableManifest.setApproval(parsed.id, status, OUTBOX_COMMANDER, detail,
+    { acknowledgeUnverified: parsed.body.acknowledgeUnverified === true }); }
+  catch (e) { failNote('outbox.approval', e); return json(500, { ok: false, error: 'approval failed' }); }
+  if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the approval: ' + ((r && r.error) || 'unknown'), accepts: accepts });
+
+  console.log('[outbox] approval ' + status + ' by owner on ' + parsed.id + ' at ' + r.row.amendedAt
+    + (needsAck ? ' [UNVERIFIED-OVERRIDE]' : ''));
+  return json(200, { ok: true, id: parsed.id, row: Object.assign({}, r.row, { lifecycle: deliverableManifest.lifecycleOf(r.row) }) });
+}
+
+/* POST /api/outbox/qc  { id, status, reviewer, detail? }
+   QC is NOT the Commander's verdict — it names a third party, so this route is a privileged caller asserting
+   someone else's identity. The manifest refuses reviewer === owner, but that refusal is re-proven here so the
+   caller gets a clean 409 and an explanation rather than a generic failure string. */
+async function handleOutboxQc(req, res) {
+  const json = (code, obj) => { if (!res.headersSent) res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  const parsed = await readJudgmentRequest(req, res, json);
+  if (!parsed) return;
+  const accepts = Array.from(QC_STATES);
+  const status = String(parsed.body.status || '').trim();
+  const reviewer = String(parsed.body.reviewer || '').trim();
+  if (!QC_STATES.has(status)) return json(400, { ok: false, error: 'invalid qc status', accepts: accepts });
+  if (!isAgentId(reviewer)) return json(400, { ok: false, error: 'reviewer must be an agent id — QC names the independent reviewer, it is not the Commander\'s verdict' });
+  if (!agentRoster.has(reviewer)) return json(404, { ok: false, error: 'no such agent: ' + reviewer });
+  if (reviewer === parsed.row.owner) {
+    return json(409, { ok: false, error: 'a producer cannot QC its own artifact (' + reviewer + ' owns this one) — name an independent reviewer' });
+  }
+  let r;
+  try { r = deliverableManifest.setQc(parsed.id, status, reviewer, parsed.detail); }
+  catch (e) { failNote('outbox.qc', e); return json(500, { ok: false, error: 'qc failed' }); }
+  if (!r || !r.ok) return json(500, { ok: false, error: 'could not persist the qc verdict: ' + ((r && r.error) || 'unknown'), accepts: accepts });
+
+  console.log('[outbox] qc ' + status + ' by ' + reviewer + ' on ' + parsed.id + ' at ' + r.row.amendedAt);
+  return json(200, { ok: true, id: parsed.id, row: Object.assign({}, r.row, { lifecycle: deliverableManifest.lifecycleOf(r.row) }) });
+}
+
+
 async function handleDeliverablesCleanup(req, res) {
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
   let body; try { body = JSON.parse(await readBody(req, 4096)) || {}; } catch (_) { return json(400, { ok: false, error: 'bad request' }); }
@@ -22111,7 +23023,7 @@ async function handleWorkshopShiftNow(req, res) {
   const bus = { emit: (name, payload) => { try { lines.write(name, redact(payload)); } catch (_) {} } };
   const emit = wrapEmitDiag(makeEmitter(bus, e => { if (e) console.warn('[event]', e.kind, e.event, (e.errors || []).join(';')); }));
   let result;
-  try { result = await runWorkshopShift(agentId, { emit: emit, broadcast: true }); }
+  try { result = await runWorkshopShift(agentId, { emit: emit, broadcast: true, gateAsInteractive: true }); }   // the Commander pressed it (e5c8da4ab)
   catch (e) { result = { fired: false, reason: 'error: ' + ((e && e.message) || e) }; }
   kaOff();
   lines.write('workshop.shift.result', result);
@@ -22137,7 +23049,7 @@ async function handleWorkshopImplement(req, res) {
   const bus = { emit: (name, payload) => { try { lines.write(name, redact(payload)); } catch (_) {} } };
   const emit = wrapEmitDiag(makeEmitter(bus, e => { if (e) console.warn('[event]', e.kind, e.event, (e.errors || []).join(';')); }));
   let result;
-  try { result = await runImplementBuild(agentId, runId, { emit: emit, broadcast: true, note: body.note }); }
+  try { result = await runImplementBuild(agentId, runId, { emit: emit, broadcast: true, note: body.note, gateAsInteractive: true }); }   // the Commander pressed it (e5c8da4ab)
   catch (e) { result = { fired: false, reason: 'error: ' + ((e && e.message) || e) }; }
   kaOff();
   lines.write('workshop.implement.result', result);
@@ -24936,6 +25848,11 @@ async function runOnceCore(o) {
   // This bit is host-minted at channel ingress, never derived from text, tool output, or model state.
   const ownerTrusted = !!o.ownerTrusted;
   const accessSurface = ownerTrusted ? 'interactive' : surface;
+  /* PHONE PORT (e5c8da4ab, adapted): a Commander-started workshop shift/implement is the owner pressing a button, so the
+     PRODUCTION GATE treats it as a human being present. On the phone this widened accessSurface itself; here it feeds the
+     gate ONLY — tool projection, the consent broker and every other access decision still see the run as unattended.
+     Host-minted (handleWorkshopShiftNow / handleWorkshopImplement), never derived from text or tool output. */
+  const gateSurface = (ownerTrusted || o.gateAsInteractive === true) ? 'interactive' : surface;
   /* UNATTENDED CAPABILITY GRANT (2026-07-25): the capability families THIS run may use unattended, read off the
      durable routine record by the caller (the cron tick driver / Run Now) — never from prompt text, model
      output or Full Access. Interactive runs ignore it entirely: THE MOAT (floor-real placement) governs there,
@@ -25313,7 +26230,29 @@ async function runOnceCore(o) {
   // Everything below is wrapped so the admission slot is ALWAYS released (early-return refusals above run
   // before tryEnter; every exit below — return, throw, or the normal finish — passes through leave()).
   try {
-  if (runId) liveQuoteRuns.set(String(runId), liveQuote);   // a live run a delete must be able to find (stopQuotingRuns) and a worker's reads must be able to reach (absorb)
+  if (runId) liveQuoteRuns.set(String(runId), liveQuote);
+
+  /* ---- OWNER-AUTHORIZED PRODUCTION GATE (PHONE PORT of ac6382d1a) ----
+     Every subsystem stays AVAILABLE, but live paid production starts only on the owner's command. The ONE place it is
+     enforced: the cron tick, Run Now, /api/run, a delegated worker, the loop driver and the /v1 API all reach the model
+     through runOnceCore. It runs before managed credit, before the model is assembled and before any provider call, so a
+     refusal spends nothing (billed stays false) and the outer finally releases the slot.
+     A script-only routine returned above (the noAgent exit) before reaching this, so it runs at $0 while disarmed
+     (c0a1d0096). Settled as failureCode 'production_disarmed' (not reason 'refused', which this build's outcome vocabulary
+     reserves for a MODEL refusal); cron-store.markRun reads that code as DECLINED: no retry, no failure streak, no
+     auto-pause, the routine stays scheduled. */
+  {
+    const armState = productionArmState();
+    const verdict = productionGate.decide({ armed: armState.armed, metered: !providerUnmetered, surface: gateSurface });
+    if (!verdict.allow) {
+      refuse({ transient: false, message: verdict.reason, failureCode: 'production_disarmed',
+        errorExtra: { code: verdict.code, armSource: armState.source } });
+      console.log('[production-gate] REFUSED runId=' + runId + ' agentId=' + agentId
+        + ' surface=' + verdict.surface + ' cronJobId=' + (o.cronJobId || '-')
+        + ' because=' + verdict.because + ' armState=' + armState.source + ' usd=0');
+      return;   // nothing reserved, nothing spent; the outer finally releases the slot
+    }
+  }   // a live run a delete must be able to find (stopQuotingRuns) and a worker's reads must be able to reach (absorb)
 
   // ---- managed-credit admission (config-gated; INERT unless STARNET_CREDITS_URL is set) ----
   // A metered run (BYOK-shaped, real $ cost) reserves its per-run cap against the managed account BEFORE the
@@ -25322,7 +26261,13 @@ async function runOnceCore(o) {
   // The per-run cap the loop enforces (billing-class.js runBillingFor): the caller's o.maxCostUsd (a delegated worker's
   // perWorker), else PER RUN for a dollar payer (0/∞ => ungoverned); a plan or local run is not capped at an imaginary
   // figure (2026-07-23, Andrew-approved); a line hop's o.ceilingUsd only ever LOWERS a dollar payer's cap (QA 2026-10-02).
-  const runBilling = billing.runBillingFor({ providerId, callerCapUsd: o.maxCostUsd, ceilingUsd: o.ceilingUsd, perRunUsd: effectiveCaps.perRun });
+  /* PHONE PORT — PER-ROUTINE SPEND CEILING: a scheduled fire / Run Now hands its routine's maxCostUsd as o.routineCapUsd. It is
+     folded into the SAME lower-only ceiling a line hop's o.ceilingUsd uses (never raises the station's PER RUN), and so bounds
+     the lead plus every worker in its spend pool. A separate option, not ceilingUsd: that one marks a line hop (line-runner.js). */
+  const routineCapUsd = (Number(o.routineCapUsd) > 0 && isFinite(Number(o.routineCapUsd))) ? Number(o.routineCapUsd) : null;
+  const lineCeiling = (Number(o.ceilingUsd) > 0 && isFinite(Number(o.ceilingUsd))) ? Number(o.ceilingUsd) : null;
+  const runCeilingUsd = (routineCapUsd != null && lineCeiling != null) ? Math.min(routineCapUsd, lineCeiling) : (routineCapUsd != null ? routineCapUsd : o.ceilingUsd);
+  const runBilling = billing.runBillingFor({ providerId, callerCapUsd: o.maxCostUsd, ceilingUsd: runCeilingUsd, perRunUsd: effectiveCaps.perRun });
   const runRoutes = [runBilling.classify];   // every route this run ran on (the finalizer's row class); onFallback adds a provider fallback's
   let runCapUsd = runBilling.runCapUsd;
   let runCapIsBalance = false;   // managed admission: the ceiling IS the reported StarNet balance (set below)
@@ -25467,6 +26412,7 @@ async function runOnceCore(o) {
   // desktop; an ordinary autonomous caller remains restricted to explicitly unattended-approved keys.
   makeWebTools({
     openrouter: webRung, keyGone: toolKeyGone(webRung, 'web_search'),
+    hostQuota: hostQuota,   // PHONE PORT: web_request to *.apify.com draws on the same daily + per-run counter
     surface: accessSurface,
     redact: redact,
     // the station READER: automatic real-Chrome rung for bot-walled fetches + throttled search
@@ -25740,6 +26686,42 @@ async function runOnceCore(o) {
   // STUDIO (media skills): image_generate / image_analyze use an OpenRouter key when one is available.
   // Gated by a 'studio' object (in the default office below) exactly like web/files; outputs save to the workspace.
   imageTools.register(registry);
+  /* ---- PHONE PORT: THE PRINT AND STUDIO TOOLS (Etsy pipeline) ----
+     The local print tools need no key and no network (@napi-rs/canvas; sharp's wasm build for print-prep):
+       image_print_prep (genuine 300-PPI print files), mockup_compose (listing photos from a finished print),
+       image_quality_check (independent dimension/DPI/integrity check, read-only), vector_export (SVG -> 300-PPI PNG + PDF).
+     image_stock_fetch pulls CC0/public-domain sources with a licence record beside each file.
+     The two PAID generators keep their phone routes and keys (OPENAI_API_KEY via providerRuntimeKey; HF_CREDENTIALS),
+     ADAPTED: each now passes the SAME pre-spend check image_generate uses (mediaSpend: run cap, the lead+workers pool,
+     the unknown-cost image limit) before anything is sent, and openai_image_generate books its cost via onUsage. On the
+     phone they had no pre-check. */
+  {
+    const paidMediaGate = (label) => ({ register: (def) => registry.register(Object.assign({}, def, {
+      run: async (args, ctx) => {
+        const stop = await mediaSpend({ signal: ctx && ctx.signal, holdTimeout: ctx && ctx.holdTimeout });
+        if (stop) {
+          const why = typeof stop === 'string' ? stop : stop.why;
+          const todo = typeof stop === 'string' ? 'The Commander can change the limit in SETTINGS › SPENDING LIMITS.' : stop.todo;
+          throw new Error(label + ' did not start: ' + why + '. No image was generated and nothing was charged.' + (todo ? ' ' + todo : ''));
+        }
+        return def.run(args, ctx);
+      }
+    })) });
+    OutboxTools.makeOutboxTools({ manifest: deliverableManifest }).register(registry);   // the CONSUMER door (PUBLISHER / QC read DESIGNER's work)
+    VideoProbeTools.makeVideoProbeTools({ manifest: deliverableManifest, videoVerify: videoVerify }).register(registry);
+    makePrintPrepTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+    makeMockupComposeTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+    makeImageQcTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+    makeStockImageTools({ fsp, pathMod: path, root: WORKSPACES, now: () => Date.now() }).register(registry);
+    makeVectorExportTools({ fsp, pathMod: path, root: WORKSPACES }).register(registry);
+    makeHiggsfieldTools({ fsp, pathMod: path, root: WORKSPACES }).register(paidMediaGate('higgsfield.generate'));
+    makeOpenAIImageTools({
+      openaiApiKey: providerRuntimeKey('openai', ''),
+      openaiBaseUrl: providerRuntimeBaseUrl('openai', ''),
+      imageModel: String(ENV('OPENAI_IMAGE_MODEL') || '').trim() || undefined,
+      fsp, pathMod: path, root: WORKSPACES, signal, onUsage: recordMediaUsage
+    }).register(paidMediaGate('openai_image_generate'));
+  }
   // STUDIO, third skill: voice_generate — the agent MAKES a clip (voiceover, narration, audio message) into its
   // workspace. It runs the ONE speech ladder (sidecar/speech-ladder.js) as the 'agent' surface: the station's voice on
   // the keyed chain, then the free keyless Edge floor, the same leg order, retry and continuity as /api/tts and the
@@ -25845,6 +26827,7 @@ async function runOnceCore(o) {
     // prompt states what will actually happen. A thunk read off the live roster: computed at dispatch time, and
     // deliberately NOT reusing `agentFullAccess` (declared further down) so this stays order-independent.
     approvalPosture: () => (!hostPowerWithheldFor(o) && (FULL_ACCESS || ((agentRoster.get(agentId) || {}).approvalMode === 'full'))) ? 'full' : 'ask',
+    recordHandoff: (h) => handoffStore.record(h),   // PHONE PORT: the host files every lead→worker handoff in the lead's outbox
     perWorker: ORCH_PER_WORKER, workerMaxIters: ORCH_WORKER_MAX_ITERS, newId: () => crypto.randomUUID(),
     dispatchTimeoutMs: ORCH_DISPATCH_TIMEOUT_MS,   // minutes, not the 30s fast-tool cap (see constant)
     // Saved session metadata is available headlessly; visual delivery still uses
@@ -25852,6 +26835,7 @@ async function runOnceCore(o) {
     station: require('./overseer.js').isCoordinatorRun({ ...o, agentId, surface })
       ? overseerStation(o.streamId, runId) : stationBridge,
     now: () => Date.now(),   // the dispatch wall clock divides this budget across sequential workers (injected: lint-determinism)
+    approvalHoldMaxMs: ORCH_APPROVAL_HOLD_MS,   // PHONE PORT: the hold the dispatch budget subtracts (dispatch-budget.js)
     // team.subagents wait:true stops early when a note is waiting for THIS run (a Commander steer, a background exit
     // notice), so the loop folds it next instead of after the wait (cost plan W1.11). A worker's own steer is not this buffer.
     steerPending: () => (typeof o.steer === 'function' ? 0 : steerBufs.pending(runId)),
@@ -26187,7 +27171,8 @@ async function runOnceCore(o) {
   } : {};
   const projectionAgent = { id: agentId };
   const projectionOrigin = { surface, floorless: !!o.floorless, ownerTrusted, trigger, cronJobId: o.cronJobId, isTask, station: o.station,
-    extraObjects: o.extraObjects, unattendedGrants, enabledToolsets: o.enabledToolsets, groupTools: Array.isArray(o.groupTools) ? o.groupTools : undefined };
+    extraObjects: o.extraObjects, unattendedGrants, enabledToolsets: o.enabledToolsets, groupTools: Array.isArray(o.groupTools) ? o.groupTools : undefined,
+    parentRunId: o.parentRunId || '' };   // PHONE PORT: the delegation depth fence (project-tools.js orchestrator grant)
   const projectionRole = { lead: !!o.lead, delegatedBy: o.delegatedBy || '' };
   const projectionFacts = {
     registry, authority: userControlAuthority, connectorIds: connectors.ids(), disabledCaps: disabledCapsSet(), unrestrictedHost: unrestrictedHostNow(), fullPower: fullPowerNow() && !remoteMachineNow(),
@@ -26332,6 +27317,10 @@ async function runOnceCore(o) {
     // UNATTENDED CONNECTOR GRANT: same host-side source as the authority gate, so an offered MCP tool can
     // never be refused by consent (the incoherent state the terminal lane hit before this was wired).
     connectorGrant: (call, tool) => !execution.taintedBy() && unattendedGrants.indexOf('connectors') >= 0,
+    // PHONE PORT: UNATTENDED DELEGATION GRANT — this routine's recorded "may delegate" approval, read off the SAME host-side
+    // value the object half uses (project-tools.js), so the offered team.dispatch and the consent answer cannot disagree.
+    // Never for a delegated worker; never on a tainted run (same rule as its siblings).
+    dispatchGrant: (call, tool) => !execution.taintedBy() && !o.parentRunId && unattendedGrants.indexOf('orchestrator') >= 0,
     /* UNATTENDED IMAGES GRANT (2026-10-18): this routine's recorded "may make images" approval, off the same durable
        job record as the two above, lifted by taint like them. It covers the routine's OWN agent only: a worker it
        delegates to asks through this broker inside askedBy (attributeAsks) and gets nothing from it, and a line hop
@@ -28891,6 +29880,26 @@ async function runOnceCore(o) {
       try { if (o.streamId && kinds.directiveKind !== 'station') { const files = TurnDelivery.fileRows(transcriptStore, { streamId: o.streamId, agentId, runId, turnId: runStartExtra.turnId, root: o.projectRoot || '', artifacts: execution.artifactList(), note: deliverableNotes.get(runId), quotes: execution.quotes(), taint: execution.rowTaint() || (typeof o.connectorAuthority?.taintedBy === 'function' ? o.connectorAuthority.taintedBy() : null) }); if (files.skipped.length) failNote('turn.files.skipped', new Error(files.skipped.length + ' artifact(s) not published as file rows: ' + files.skipped.map(s => s.why).join(','))); } } catch (e) { failNote('turn.files', e); }   // the run's files, as rows of their own (turn identity commit 10): get, never take, and a failure here skips nothing below (runStore.record, the final drain)
       const runEndedAt = entryEndedAt === null ? Date.now() : entryEndedAt;
       runStore.record({ runId, parentRunId: o.parentRunId || '', delegatedBy: o.delegatedBy || '', agentId, provider: activeProviderId, wireSource: runWire.source, reason: ((result && result.reason) || 'error'), clarifying: taskQuestionAsked, turns: finalTurns, tokens: finalTokens, cachedTokens: finalCachedTokens, nudges: (result && result.nudges) || null, usd: finalUsd, title: title, streamId: o.streamId || '', sessionTitle: o.sessionTitle || '', deliveryPrompt: o.syntheticTrigger ? '' : (o.sessionPrompt || ''), deliveryText, dispatchDelivery: o.dispatchDelivery, recipeId: o.recipeId || '', projectRoot: o.projectRoot || '', deliverable: deliverableNotes.take(runId), model: finalModel, reasoningEffort: effortRan(), unmetered: mediaFlags.unmetered, unpriced: mediaFlags.unpriced, usageMissing, spendUnknown: cutSpendUnknown, effortRule: (crew && crew.record) || undefined, artifacts: execution.artifactList(), toolsOk: execution.toolsOk(), toolTrace: execution.toolTraceList(), failureStage: execution.failureStage(), failureCode: execution.failureCode(), uncertainMutations: execution.uncertainMutations(), cancelledWhile: (result && result.cancelledWhile) || null, completionEvidence: finalCompletionEvidence, recoveryAttempts: execution.recoveryAttempts(), startedAt: runStartedAt, endedAt: runEndedAt, durationMs: runEndedAt - runStartedAt, identityFallback, internal, surface, ownerDirective, recoveryOf: o.recovery ? String(o.recovery.sourceRunId || '') : '', handoffEdited: o.handoffEdited === true, stepTest: o.stepTest === true, lineId: o.lineId || '', dockId: o.dockId || '', cronJobId: isRoutineTrigger(trigger) ? String(o.cronJobId || '') : '', pageClosed: pageClosedRuns.get(runId) || null, steerNotes: steerBufs.ledgerOf(runId), wordless: TurnDirective.labelOnly(directive), taintedBy: execution.taintedBy() || '', rowTaintedBy: execution.rowTaint() || '' });   // wordless: the directive was only the label of its files. taintedBy stays the FIRST source (the relay, the refusal wording); rowTaintedBy is the stamp that durable rows written after the run carry (dispatch-delivery). Execution terminal stays separate from the neutral Task Brief outcome used by progression; recoveryOf links a continuation to the interrupted run it resumed
+
+      /* CENTRAL OUTBOX REGISTRATION (PHONE PORT). The run just proved what it actually wrote — the SAME artifact ledger
+         runStore.record() files above — so the deliverables are indexed here, by the HOST, with the host's own agentId/runId.
+         Asserts ONLY existence+readability: verification, qc and approval all start unset. Fail-open: a manifest hiccup
+         never breaks a run that already succeeded. */
+      try {
+        const artFiles = (execution.artifactList() || []).map(a => (a && a.path) || '').filter(Boolean);
+        if (artFiles.length) {
+          const reg = deliverableManifest.register({
+            ownerAgentId: agentId, runId: runId,
+            projectId: outboxProjectIdFor(artFiles) || 'general',
+            shareWith: outboxShareFor(agentId),
+            files: artFiles
+          });
+          if (reg && reg.ok && reg.entries.length) {
+            emit('deliverable', { id: 'artifact:' + reg.entries[0].id, agentId, kind: 'file',
+              title: reg.entries.map(e => e.filename).join(', '), room: 'office' });
+          }
+        }
+      } catch (e) { failNote('outbox.register', e); }
 
       // P0.1/H1.1: persist the full DIALOGUE (not just the outcome) — a durable server-side transcript for EVERY
       // run, incl. headless ones (cron/Telegram/delegated). Append the triggering user directive, then EVERY new

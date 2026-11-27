@@ -811,6 +811,9 @@
           // routine, read straight off the durable job record. Empty on every routine that was not granted, so an
           // ungranted fire is byte-identical to the pre-grant behavior. Never sourced from the prompt.
           unattendedGrants: Array.isArray(job.unattendedGrants) ? job.unattendedGrants.slice() : [],
+          /* PHONE PORT — PER-ROUTINE SPEND CEILING: the routine's own maxCostUsd rides as routineCapUsd, which runOnceCore folds into the run's LOWER-ONLY ceiling
+             LOWER-ONLY (never raises the station's PER RUN) and which bounds the lead plus every worker it starts. */
+          ...((Number(job.maxCostUsd) > 0 && isFinite(Number(job.maxCostUsd))) ? { routineCapUsd: Number(job.maxCostUsd) } : {}),
           preloadSkills: Array.isArray(job.skills) ? job.skills.slice() : [],
           requiredPreloads: true,
           cronScript: job.script || null,

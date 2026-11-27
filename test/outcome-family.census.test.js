@@ -428,6 +428,16 @@ const ALLOWED = {
    all read RunOutcome now (FOLDS below). */
 const NR = what => "not a run's end reason (" + what + ')';
 const REPORTED = {
+  // PHONE PORT — studio pipeline: these name why a VIDEO/AUDIO check rejected a file or a provider gave up, not how a run ended
+  'sidecar/video-providers.js': [["error: 'output rejected by video-verify: ' + verify.reason", NR('video-verify\'s verdict on a downloaded clip')],
+    ["error: p.name + ' produced an unusable video: ' + verify.reason", NR('video-verify\'s verdict on a downloaded clip')]],
+  'sidecar/audio-finish.js': [["report.layers.push('L2 skipped — ' + fal.reason);", NR('why the paid sound-effects layer was skipped')],
+    ["report.layers.push('L3 skipped — ' + nar.reason);", NR('why the narration layer was skipped')]],
+  'sidecar/cron-orchestrator.js': [["workflow.failureReason = 'producer produced no usable video: ' + (result.reason || 'unknown');", NR('the video provider chain\'s failure reason')],
+    ["reason: result.reason,", NR('the video provider chain\'s result')],
+    ["status: last.status, reason: last.reason || last.error,", NR('a pipeline pass record: status is the stage verdict, reason the stage error text')]],
+  // PHONE PORT: image_stock_fetch lists why a candidate image was rejected — its LICENCE verdict, not a run's ending
+  'sidecar/tools/builtin/stock-image.js': [["': ' + r.verdict.reason);", NR("a stock image's licence verdict")]],
   'sidecar/acp/serve.js': [["(rt.readiness && rt.readiness.reason ?", NR("provider readiness, not a completed run")]],
   'sidecar/provider-readiness.js': [["reason: input.reason ||", NR("credential verification/readiness evidence")]],
   'frontend/app/keycta.js': [
@@ -468,6 +478,9 @@ const REPORTED = {
     ["reason: 'link_check_failed', detail:", NR("a rewind refused because the destination could not be scanned for links; a restore result")]
   ],
   'sidecar/index.js': [
+    // PHONE PORT — studio -> Outbox bridge: video-verify's verdict on the studio render, not how a run ended
+    ["('Video rejected: ' + verdict.reason + ' — ' + blueprint.userPrompt.slice(0, 180))", NR('video-verify\'s verdict on the studio render')],
+    ["('video-verify: ' + verdict.reason + ' (' + verdict.bytes + ' bytes)')", NR('video-verify\'s verdict on the studio render')],
     ["if (!r.ok) return respondFail(res, r.reason === 'gone' ? 404 : 409", NR("a desk confirmation refused (deskproof.js approve: gone / words-differ / forbidden), not a run's end (GHSA-2hpj #1)")],
     ["out.reason === 'link_in_path'", NR("a rewind refused for a link on its destination: the restore endpoint's answer")],
     ["out.reason === 'uncaptured_in_path'", NR("a rewind refused for a file no restore point holds: the restore endpoint's answer")],
@@ -655,6 +668,8 @@ const REPORTED = {
    no run's ending (a script, a frame, a send, a probe) are listed as such; a run counter is listed only when its predicate is stop-aware. */
 const NOT_RUN = what => 'no run\'s ending (' + what + ')';
 const AGGREGATED = {
+  // PHONE PORT (production gate): a fire the gate DECLINED leaves the failure streak exactly as it was — a decline is neither a failure nor a stop
+  'sidecar/cron-store.js': [["next.consecutiveFailures = Number(job.consecutiveFailures) || 0;   // untouched: this is not a failure", NOT_RUN('a fire the production gate declined before it started: the streak is carried unchanged')]],
   'frontend/app/bootguard.js': [["state.scriptFailures++;", NOT_RUN('a page script that failed to load')]],
   'frontend/app/build.js': [["frameFailures++;", NOT_RUN('a render frame that threw')]],
   'frontend/app/goalloop.js': [["if (j.parseFailed) s.parseFails += 1; else s.parseFails = 0;", NOT_RUN("the session-goal judge's unparseable verdicts")]],
@@ -2096,8 +2111,11 @@ const RAISED = { agentId: 'agent', runId: 'r-raised', reason: 'done', outcome: '
       const routineWireRow = j => ({ provider: 'openrouter', model: 'm-' + j.id, source: 'routine' });
       let snap = null;
       try {
-        snap = new Function('cronHealth', 'cronArmed', 'cronTimer', 'CRON_TICK_MS', 'cronJobs', 'cronDriver', 'cronHalted', 'cronArmSet', 'cronDegraded', 'CRON_MAX_CONSECUTIVE_FAILURES', 'cronStore', 'routineWireRow', 'SchedulerState', 'cronScriptStale',
-          src + '\nreturn cronStateSnapshot(1000);')({ lastTickAt: 0, lastSuccessAt: 0, lastTickError: null }, true, 1, 60000, [{ id: 'jrun' }, { id: 'jsettling' }, { id: 'jidle' }], { leases }, false, true, null, 5, { MAX_PENDING_DELIVERIES: 9 }, routineWireRow, require('../sidecar/scheduler-state.js'), () => false);
+        snap = new Function('cronHealth', 'cronArmed', 'cronTimer', 'CRON_TICK_MS', 'cronJobs', 'cronDriver', 'cronHalted', 'cronArmSet', 'cronDegraded', 'CRON_MAX_CONSECUTIVE_FAILURES', 'cronStore', 'routineWireRow', 'SchedulerState', 'cronScriptStale', 'productionArmState', 'productionGate', 'billing', 'normalizeProvider', 'cronProviderFor', 'failNote',
+          src + '\nreturn cronStateSnapshot(1000);')({ lastTickAt: 0, lastSuccessAt: 0, lastTickError: null }, true, 1, 60000, [{ id: 'jrun' }, { id: 'jsettling' }, { id: 'jidle' }], { leases }, false, true, null, 5, { MAX_PENDING_DELIVERIES: 9 }, routineWireRow, require('../sidecar/scheduler-state.js'), () => false,
+          // PORT (production gate): the routines snapshot now asks the gate whether each next fire would run — stubbed ARMED here
+          () => ({ armed: true, source: 'persisted', note: 'armed', by: '', at: '' }), require('../sidecar/production-gate.js'),
+          { policyOf: () => ({ ledgerMetered: true }) }, x => String(x || ''), () => 'openrouter', () => {});
       } catch (e) { snap = { error: String((e && e.message) || e) }; }
       const one = id => ((snap && snap.jobs) || []).find(x => x && x.id === id) || {};
       A.ok(!!src && one('jrun').inFlight === true && one('jrun').inFlightRunId === 'fx' && one('jsettling').inFlight !== true && one('jsettling').inFlightRunId === 'fy' && !one('jidle').inFlight && !one('jidle').inFlightRunId

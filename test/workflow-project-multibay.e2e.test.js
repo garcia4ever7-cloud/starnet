@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/workflow-project-multibay.e2e.test.js — #25 trusted workflow projects × multi-bay agents.
    One agent ("writer") staffs a bay on TWO lines, each line's INBOX carrying its own trusted project. A routine
    that fires at writer's bay on line B must run BOTH of line B's stages in project B. The first cut of #25

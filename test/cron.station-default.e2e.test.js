@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* A routine assigned to a "Follow station default" (unpinned) agent runs on the STATION DEFAULT — the Overseer's
    model, provider and credential — exactly as a channel hop does (channelRunConfigFor). v0.12.5 refused it on both
    paths: the scheduled fire recorded blocked_config "no model is configured" and Run Now answered "choose a model

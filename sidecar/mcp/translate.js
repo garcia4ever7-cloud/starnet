@@ -200,6 +200,13 @@
       network: true,                                     // every remote MCP call is an outward network effect
       timeoutMs: o.timeoutMs || 0,                       // 0 -> inherit the host's per-tool timeout (CAPS.toolTimeoutMs)
       run: async function (args, ctx) {
+        /* PHONE PORT (hostquota.js + 8557798db): a connector tool that STARTS a billable Apify actor run is counted
+           BEFORE the call leaves and never refunded (a failure costs one too). Read-only tools match no rule and stay
+           free. ctx.runId is host-minted, never model-supplied: it keys the PER-RUN cap. Fails closed. */
+        if (o.quota && typeof o.quota.consumeTool === 'function') {
+          const q = o.quota.consumeTool(connectorId, mcpTool.name, ctx && ctx.runId);
+          if (q && q.ok === false) throw new Error(q.error || ('cap reached for ' + q.host));
+        }
         const res = await call(mcpTool.name, args || {}, ctx);   // ctx (runId/emit) lets the manager emit connector_required
         // Clamp BEFORE the error branch too: a failing server is just as able to hand back a
         // megabyte of stack trace as a succeeding one.

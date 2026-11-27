@@ -64,7 +64,9 @@ const ACTIONS = Object.freeze(['bypass-on', 'consent-always', 'consent-full', 'g
   // the route census's spend routes: a raised or removed spending limit, a RESUME past a stop, a settlement that reopens spending
   'budget-raise', 'budget-resume', 'budget-settle',
   // the route census's toolsets row: switching a toolset that is OFF back on gives every agent its tools again
-  'toolset-on']);
+  'toolset-on',
+  // PHONE PORT: arming paid production (production-gate.js) — unattended runs may then spend; disarming never asks
+  'production-arm']);
 const CODE_RE = /^\d{6}$/;
 const MAX_WRONG_CODES = 5;              // five tries (one in 200,000), then a lockout
 const LOCK_MS = 15 * 60 * 1000;         // the first lockout; each further one doubles it...

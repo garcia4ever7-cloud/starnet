@@ -13,6 +13,9 @@
         document and then calls web_request -> refused with the own-read wording (the wording follows the real cause).
    NOT in test:fast (child-process boot); listed in test/http.list. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const { SidecarFixture } = require('./helpers/sidecar-fixture.js');

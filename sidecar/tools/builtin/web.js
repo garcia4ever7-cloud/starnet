@@ -1184,6 +1184,12 @@
         // the caller's own URL: validated, its DNS asked once (that answer is what the first hop dials)
         const dest = await resolveHop(rawUrl);
         const u = dest.url;   // a copy: an auth.in:"query" key is added here, never to the validated Destination
+        /* PHONE PORT (hostquota.js + 8557798db): the HTTP door to Apify shares the connector's daily + per-run counter.
+           Counted here, before the request leaves, never decremented. A host with no limit is a no-op. Fails closed. */
+        if (deps.hostQuota && typeof deps.hostQuota.consume === 'function') {
+          const q = deps.hostQuota.consume(u.hostname, ctx && ctx.runId);
+          if (q && q.ok === false) throw new Error(q.error || ('request cap reached for ' + q.host));
+        }
 
         const used = [];
         /* WHICH HEADER SLOTS ACTUALLY CARRY A SECRET. The redirect guard below used to decide this by NAME

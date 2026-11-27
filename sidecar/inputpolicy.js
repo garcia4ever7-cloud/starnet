@@ -37,7 +37,7 @@ const IMPACT_SET = new Set(Object.keys(IMPACTS).map(k => IMPACTS[k]));
 // it cannot even call what it finds, it only makes it advertisable. Same live-caught failure as 'taskbrief'
 // above: without an entry here it fell through to EXTERNAL_UNKNOWN and the authority layer refused it, so
 // every DEFERRED tool became permanently unreachable while looking, from the outside, merely "not found".
-const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo']);
+const SAFE_BUILTIN_CAPS = new Set(['compute', 'cabinet', 'memory', 'quest', 'studio', 'orchestrator', 'taskbrief', 'toolsearch', 'code', 'stationinfo']);   // PORT: unchanged — the ported outbox tools declare impact 'none' themselves; a bare re-registration stays fail-closed
 
 function impactOfTool(tool) {
   tool = tool || {};
@@ -68,7 +68,10 @@ function impactOfTool(tool) {
 // offers it; the grant only answers the consent broker's "silence is not consent" for that one capability
 // (permissions.js studioAutonomy). It opens no host process and no outside account, and the image's spend still
 // books against the run's caps like any media call.
-const GRANTABLE_UNATTENDED = new Set(['workbench', 'connectors', 'studio']);
+// PHONE PORT: 'orchestrator' = unattended DELEGATION. The object half is in index.js (a routine carrying it resolves the
+// orchestrator object for its LEAD run only — never a delegated worker, so depth stays 1); the consent half is
+// permissions.js dispatchAutonomy, narrowed by exact tool name.
+const GRANTABLE_UNATTENDED = new Set(['workbench', 'connectors', 'studio', 'orchestrator']);
 
 // A tool projected from a configured MCP connector. sidecar/mcp/translate.js stamps every such def with
 // capability 'mcp:<sanitized connectorId>'; nothing else in the registry uses that prefix.
@@ -290,7 +293,9 @@ function enforceSyntheticOnly(resolved, remoteDesktopAuthorized) {
    manual.read) its prompt tells it to call. Named, never derived ("every family without a row"): that would fail
    OPEN for 'code' (execute + consent, the SECURITY STOPGAP in tools/builtin/code.js) and 'apps' (deferred write
    tools), which a restricted routine deliberately does NOT keep — and for any family added later. */
-const TOOLSET_FREEBIES = new Set(['quest', 'toolsearch', 'taskplan', 'deliverable', 'stationinfo', 'routinescratch']);
+// PHONE PORT: 'outbox' (outbox_list / outbox_read — read-only, id-addressed, writes nothing) is a freebie too: on the 0.12.5
+// station the consumer door was always on the computer, so a restricted routine (PUBLISHER, QC) must not lose it.
+const TOOLSET_FREEBIES = new Set(['quest', 'toolsearch', 'taskplan', 'deliverable', 'stationinfo', 'routinescratch', 'outbox']);
 
 /* Per-run toolsets are attenuation only: null preserves the station grant, while an explicit array
    intersects it. Compute and the TOOLSET_FREEBIES above are not toggleable tool families. */

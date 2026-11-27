@@ -10,6 +10,9 @@
    Also: a routine sealed before this change (the first form of the seal record) keeps its grants, and that older form cannot be
    replayed once the station has resealed. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const fs = require('fs'), os = require('os'), path = require('path'), crypto = require('crypto');
 const { station, model, findFile, cleanup, sleep, KEYHEX } = require('./helpers/desk-station.js');

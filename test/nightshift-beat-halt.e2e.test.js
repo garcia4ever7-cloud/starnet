@@ -13,6 +13,9 @@
      · the agent mutex is FREED: a follow-up beat is ACCEPTED (its model run is not refused with
        "already running"), which is exactly concurrencyGate.inFlight(agentId) === 0 observed over HTTP. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const http = require('http');

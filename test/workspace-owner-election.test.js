@@ -13,9 +13,14 @@ const fs=require('node:fs'),path=require('node:path');
 const {makeWorkspaceOwner}=require(process.argv[1]);
 const root=process.argv[2],stage=process.argv[3];
 const proxy=Object.create(fs);
-if(stage==='ticket')proxy.linkSync=(...a)=>{fs.linkSync(...a);process.exit(91)};
+// TERMUX FIX (a0da5104c): where hard links are refused the lock publishes by persist's exclusive copy (open 'wx', write,
+// close), so the crash is also injected right after that copy's close — the moment its name holds complete bytes, the
+// same boundary link() marks.
+const fdPath=new Map();proxy.openSync=(f,...a)=>{const fd=fs.openSync(f,...a);fdPath.set(fd,String(f));return fd};
+const crashAfterClose=(test)=>{proxy.closeSync=(fd)=>{const f=fdPath.get(fd)||'';fs.closeSync(fd);if(test(f))process.exit(91)}};
+if(stage==='ticket'){proxy.linkSync=(...a)=>{fs.linkSync(...a);process.exit(91)};crashAfterClose(f=>/[\\/]\\d+\\.json$/.test(f))}
 if(stage==='pending')proxy.writeSync=(...a)=>{fs.writeSync(...a);process.exit(91)};
-if(stage==='primary')proxy.linkSync=(f,to)=>{fs.linkSync(f,to);if(to.endsWith('.starnet-workspace-owner.json'))process.exit(91)};
+if(stage==='primary'){proxy.linkSync=(f,to)=>{fs.linkSync(f,to);if(to.endsWith('.starnet-workspace-owner.json'))process.exit(91)};crashAfterClose(f=>f.endsWith('.starnet-workspace-owner.json'))}
 if(stage==='readback')proxy.readFileSync=(f,...a)=>{const v=fs.readFileSync(f,...a);if(f.endsWith('.starnet-workspace-owner.json'))process.exit(91);return v};
 const owner=makeWorkspaceOwner({fs:proxy,path,now:Date.now});
 const go=()=>{const r=owner.acquire(root);process.stdout.write(JSON.stringify({ok:r.ok,code:r.code,pid:process.pid})+'\\n');if(r.ok){if(stage==='held')process.exit(91);setInterval(()=>{},1000)}};

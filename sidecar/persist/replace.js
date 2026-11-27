@@ -33,7 +33,11 @@ const { preserve } = require('./quarantine.js');
 const { note: failNote } = require('../failopen.js');
 
 // a link refusal that only means "no hard links here" (FAT/exFAT, a facade, a cross-device path): copy, quietly
-const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EINVAL', 'EISDIR']);
+// TERMUX FIX (fourth phone fix): Android (SELinux) refuses every link() in app storage with EACCES. That also only
+// means "no hard links here": the durable copy below already makes the .bak, so it must not be noted as a failure
+// on every save (persist.bak.link EACCES). Android only, so a real EACCES elsewhere is still noted.
+const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EINVAL', 'EISDIR']
+  .concat(process.platform === 'android' ? ['EACCES'] : []));
 
 function refusal(code, message, cause, file) {
   const error = new Error(message + ' (' + file + ')');

@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* routing.line-jobs.e2e — WORKFLOWS on a real sidecar (2026-09-30, "the easiest conveyor system … clear as day"). A job sent down a line
    (POST /api/routing/sample with its line) is kept as ONE record from the moment it goes out: GET /api/line-jobs lists it newest
    first, GET /api/line-jobs/<id> holds the whole thing (what was asked, the route's own verdict, each step's run at its bay, what came

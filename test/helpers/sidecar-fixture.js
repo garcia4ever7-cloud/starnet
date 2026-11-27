@@ -45,6 +45,7 @@ async function terminate(child, timeoutMs, signal) {
 class SidecarFixture {
   constructor(options) {
     const opts = options || {};
+    this.options = opts;   // PHONE PORT (bd14f909c): { armed: true } arms THIS sandbox's production gate
     this.workspace = fs.mkdtempSync(path.join(os.tmpdir(), opts.prefix || 'starnet-sidecar-'));
     // HERMETIC PROFILE: the sidecar's boot-time station auto-recovery scans the REAL per-user
     // app-data roots (%APPDATA%/%LOCALAPPDATA%/XDG/~) for a lost station, and a fresh temp
@@ -117,6 +118,9 @@ class SidecarFixture {
       STARNET_WORKSPACES: this.workspace
     });
     if (!env.STARNET_DESK_CODE_TO_LOG && !env.SKYNET_DESK_CODE_TO_LOG) env.STARNET_DESK_CODE_TO_LOG = '1';
+    // PHONE PORT (bd14f909c, adapted): { armed: true } arms THIS sandbox through the env default — arming over the route now asks
+    // for the desk proof (route-authority law), and a fresh workspace has no arm file, so STARNET_PRODUCTION_ARMED decides.
+    if (this.options && this.options.armed) env.STARNET_PRODUCTION_ARMED = '1';
     this._childEnv = env;
     const child = spawn(process.execPath, [this.entry].concat(this.args), {
       env,
@@ -133,6 +137,9 @@ class SidecarFixture {
         this.token = await bootToken(this.baseUrl, this.baseUrl);
         if (!this.token) throw new Error('sidecar became healthy but did not serve a boot token');
       }
+
+      // PHONE PORT (bd14f909c): a fresh workspace is production DISARMED and the mock providers are metered, so a test that
+      // drives an UNATTENDED mock run must arm its OWN sandbox. Never change the gate default.
       return this;
     } catch (error) {
       const output = this._output;

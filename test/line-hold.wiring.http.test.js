@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/line-hold.wiring.http.test.js — THE HOLD ON A REAL STATION, ON EVERY ESCALATION WIRING AND REPLY FORM (line-hold lane, S1;
    invariants gh122-matrix-holds-durably, no-verdict-holds-with-zero-spend, held-job-never-spends, restart-keeps-the-hold,
    approve-resumes-from-the-cursor-and-delivers-the-draft).

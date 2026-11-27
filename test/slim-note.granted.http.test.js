@@ -16,6 +16,9 @@
         how-to and the runtime instruction, and its system prompt gains exactly those paragraphs.
    No network, no real model. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const fs = require('fs'), os = require('os'), path = require('path');
 const { station, model, cleanup, sleep } = require('./helpers/desk-station.js');

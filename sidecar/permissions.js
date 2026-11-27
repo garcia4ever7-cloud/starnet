@@ -158,12 +158,20 @@
     // 'toString' would read as granted. No such capability exists today — this is the allowlist being an
     // allowlist rather than a near-miss, matching the same repair in channels/store.js and shared/schema.js.
     const jailWritableCap = (cap) => Object.prototype.hasOwnProperty.call(JAIL_WRITE_CAPS, cap) && !!JAIL_WRITE_CAPS[cap];
+    /* PHONE PORT (2026-10-22): a narrower TOOL-NAME allowlist beside the capability one. The owner asked for unattended
+       image_generate (plus image_print_prep and mockup_compose: local, no network) for a workshop-granted agent — NOT
+       every 'studio' write tool (vector_export, image_stock_fetch reach a third-party source the owner never opened
+       unattended). A capability-level grant cannot say that, so this is keyed by exact name. Same own-key lookup, same
+       autonomous-only / write-only constraints. Overridable via opts.workshopTools for tests. */
+    const JAIL_WRITE_TOOLS = (opts.workshopTools && typeof opts.workshopTools === 'object')
+      ? opts.workshopTools : { image_generate: true, image_print_prep: true, mockup_compose: true };
+    const jailWritableTool = (name) => Object.prototype.hasOwnProperty.call(JAIL_WRITE_TOOLS, name) && !!JAIL_WRITE_TOOLS[name];
     function workshopWritable(call, tool) {
       if (!workshop) return false;
       if (surface !== 'autonomous') return false;               // interactive already asks a live human
       if (scopeOf(tool) !== 'write') return false;              // ONLY write; read auto-allows, execute stays locked
       const cap = tool && tool.capability;
-      if (!jailWritableCap(cap)) return false;                  // must be a jail-scoped capability (files/memory)
+      if (!jailWritableCap(cap) && !jailWritableTool(tool && tool.name)) return false;   // a jail-scoped capability OR an explicitly named tool (PHONE PORT)
       try { return workshop(call, tool) === true; } catch (_) { return false; }
     }
 
@@ -224,6 +232,25 @@
            studio tool were declared execute
          • the injected predicate must confirm THIS RUN carries the recorded per-routine grant
        Spend is not decided here: the image's cost books against the run's caps like any media call. */
+    /* UNATTENDED DELEGATION GRANT (PHONE PORT, 2026-10-27) — lets a SCHEDULED lead hand subtasks to its crew with nobody
+       watching. team.dispatch is scope 'execute', so without this it dies at the exec lockout ("silence is not consent")
+       and the Etsy pipeline can only run while a browser tab is open. Narrowed like terminal/connector autonomy, plus:
+         • the capability must be exactly 'orchestrator' and the TOOL NAME must be on the delegate-and-watch list —
+           routine.create / routine.manage / loop.* / team.configure / team.summon / team.spawn stay human-gated
+         • the injected predicate must confirm THIS RUN carries the recorded per-routine grant (host-sourced) */
+    const dispatchGrant = typeof opts.dispatchGrant === 'function' ? opts.dispatchGrant : null;
+    const ORCH_CAP = opts.orchestratorCap || 'orchestrator';
+    const ORCH_UNATTENDED_TOOLS = (opts.dispatchTools && typeof opts.dispatchTools === 'object')
+      ? opts.dispatchTools
+      : { 'team.dispatch': true, 'team.subagents': true, 'team.steer': true, 'team.interrupt': true, 'team.resume': true };
+    const dispatchableTool = (name) => Object.prototype.hasOwnProperty.call(ORCH_UNATTENDED_TOOLS, name) && !!ORCH_UNATTENDED_TOOLS[name];
+    function dispatchAutonomy(call, tool) {
+      if (!dispatchGrant) return false;
+      if (surface !== 'autonomous') return false;
+      if (!tool || tool.capability !== ORCH_CAP) return false;
+      if (!dispatchableTool(tool.name)) return false;
+      try { return dispatchGrant(call, tool) === true; } catch (_) { return false; }
+    }
     function studioAutonomy(call, tool) {
       if (!studioGrant) return false;
       if (surface !== 'autonomous') return false;
@@ -267,6 +294,8 @@
       // dead code. Still below the hardline floor (tier 1), so protected paths remain unwritable.
       if (terminalAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended terminal grant' };
       if (connectorAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended connector grant' };
+      // 2.45 UNATTENDED DELEGATION GRANT (PHONE PORT) — same load-bearing ordering: team.dispatch is 'execute'.
+      if (dispatchAutonomy(call, tool)) return { allow: true, scope: scope, reason: 'per-routine unattended delegation grant' };
       // 2.5 EXEC LOCKOUT — an UNATTENDED run may NEVER execute a command off a cached/pre-blessed grant: only a
       // live human (interactive surface), or the explicit per-routine grant in tier 2.4, can approve shell. This
       // keeps "no autonomous shell" un-pre-blessable — a permanent `always` grant a human gave once does NOT

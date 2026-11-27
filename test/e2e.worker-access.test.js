@@ -10,6 +10,9 @@
    XDG profile) and additionally points USERPROFILE/HOME at that scratch profile, so no profile root the sidecar
    reads can resolve to real user data. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const path = require('path');

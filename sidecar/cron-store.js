@@ -29,7 +29,7 @@
    A CronJob (see cron.js for schedule shapes):
      { id, name, prompt, schedule, scheduleDisplay, agentId, model, provider, deliver, enabled,
        state:'scheduled'|'paused'|'completed'|'error'|'stopped' (a one-shot someone stopped), repeat:{times,completed},
-       createdAt, nextRunAt, lastRunAt, lastRunId, lastStatus ('ok'|'error'|'stopped'), lastError, lastReason, retryCount,
+       createdAt, nextRunAt, lastRunAt, lastRunId, lastStatus ('ok'|'error'|'stopped'|'declined'), lastError, lastReason, retryCount,
        lastOutcome, lastFailureCode,                                  // TYPED OUTCOMES: the last run's outcome code (markRun)
        lastFire,                                                      // the last FIRE's receipt { runId, outcome, failureCode, reason } (lastFireOf)
        fireReceipts,                                                  // the receipts of recent fires that did not succeed, newest last (firesOf / fireOf)
@@ -103,7 +103,22 @@
   }
 
   // fields a user may edit via updateJob. `id`, timestamps, run-state and counters are NOT editable here.
-  const EDITABLE = ['name', 'prompt', 'agentId', 'model', 'provider', 'deliver', 'skills', 'script', 'scriptTimeoutMs', 'workdir', 'contextFrom', 'monitorMode', 'misfire', 'unattendedGrants', 'noAgent', 'enabledToolsets', 'attachToSession', 'origin', 'runsLine', 'dockId'];
+  const EDITABLE = ['name', 'prompt', 'agentId', 'model', 'provider', 'deliver', 'skills', 'script', 'scriptTimeoutMs', 'workdir', 'contextFrom', 'monitorMode', 'misfire', 'unattendedGrants', 'noAgent', 'enabledToolsets', 'attachToSession', 'origin', 'runsLine', 'dockId', 'maxCostUsd'];
+
+  /* PER-ROUTINE SPEND CEILING (PHONE PORT of ac6382d1a, 2026-11-26). v0.15.4 had no such field: a routine's stored
+     maxCostUsd was carried in cron.jobs.json but read by nothing, so with the station PER RUN at 0 (ungoverned) a scheduled
+     fire had no per-run cap at all — only the soft day rail. Semantics as on the phone and budgetcaps.js:
+       absent/null -> no per-routine ceiling (the station default applies);  0 -> an explicit "no cap";  > 0 -> USD ceiling.
+     STORAGE, not authority: the driver forwards it as the run's ceilingUsd, which billing-class.js applies LOWER-ONLY, so a
+     hand-edited 999 buys nothing past the station's own limit. On v0.15.4 the ceiling covers the lead AND every worker it
+     dispatches (run-spend-pool.js). */
+  const COST_CAP_MAX = 1000;        // a fat-finger guard, far above any legitimate single-run cost here
+  function normCostCap(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    if (!isFinite(n) || n < 0) return null;                       // junk can never grant headroom
+    return Math.min(COST_CAP_MAX, n);
+  }
   const SCRIPT_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
   // what drove the routine when the desk said yes to its grants (index.js routineDriveFor, final review #2): the model and
   // provider it resolves to, and the endpoint ('-' when it was not known then); since GHSA-2hpj NEW-1 also the agent's own
@@ -121,7 +136,10 @@
      (GRANTABLE_UNATTENDED) and re-filters it at the gate on every run, so a hand-edited or migrated
      cron.jobs.json can never widen a run past what the host models — the two filters are deliberately
      independent (defense in depth), which is also why this module needs no cross-require of the policy. */
-  const GRANTABLE = ['workbench', 'connectors', 'studio'];
+  /* PHONE PORT: 'orchestrator' = this routine's agent may DELEGATE unattended (team.dispatch and the read/steer verbs).
+     Storage, not authority, like the rest: inputpolicy.js re-filters the name and permissions.js narrows it again by exact
+     tool, so routine.create / loop.* / team.summon stay human-gated. The live Etsy chain (ebc4f07d) carries it. */
+  const GRANTABLE = ['workbench', 'connectors', 'studio', 'orchestrator'];
   function normGrants(v) {
     if (!Array.isArray(v)) return [];
     const out = [];
@@ -235,6 +253,7 @@
       // ---- record-the-field, defer-the-consumer (no v1 runtime consumer; stored so a later commit wires it) ----
       // UNATTENDED CAPABILITY GRANT (see normGrants): [] on every existing job, so this is purely additive.
       unattendedGrants: normGrants(spec.unattendedGrants),
+      maxCostUsd: normCostCap(spec.maxCostUsd),   // PHONE PORT: per-routine spend ceiling (null on every routine that sets none)
       skills: normList(spec.skills, 8, /^[A-Za-z0-9_. -]{1,120}$/),
       script: spec.script != null ? String(spec.script) : null,
       // the bytes of the script the desk's yes for its grants was given to (review2 #3). Set by the station only: not in
@@ -326,6 +345,7 @@
       // re-normalize through the whitelist: the EDITABLE loop above copies the RAW patch value, so without this
       // a patch could persist an ungrantable capability name (same trap misfire guards against).
       if (Object.prototype.hasOwnProperty.call(patch, 'unattendedGrants')) next.unattendedGrants = normGrants(patch.unattendedGrants);
+      if (Object.prototype.hasOwnProperty.call(patch, 'maxCostUsd')) next.maxCostUsd = normCostCap(patch.maxCostUsd);   // PHONE PORT: re-normalized on every edit
       if (Object.prototype.hasOwnProperty.call(patch, 'origin')) next.origin = normOrigin(patch.origin);
       if (Object.prototype.hasOwnProperty.call(patch, 'noAgent')) next.noAgent = patch.noAgent === true;
       // re-normalize through the same === true rule as creation: a patch may never persist a truthy-ish value
@@ -839,6 +859,13 @@
          asked for by hand: the pause still stands (no re-arm, no relabel), but its result is not held for the resume — its receipt says
          pausedAtStart and deliveriesHeld lets it go. Only a fire the routine was paused WHILE it ran waits. */
       const askedWhilePaused = pausedByYou && result.pausedAtStart === true;
+      /* DECLINED BY THE PRODUCTION GATE (PHONE PORT of ac6382d1a). runOnceCore refuses an unattended PAID run while
+         production is disarmed, before any provider call (failureCode 'production_disarmed'). That is the control working,
+         not a broken routine: settled as a failure it would retry (transient) or count toward the consecutive-failure
+         auto-pause, and a safety refusal must never switch the owner's schedule off. So the occurrence is SKIPPED: streak
+         untouched, no retry, no delivery, the routine stays scheduled on its next occurrence. Visible as lastStatus
+         'declined' with the gate's reason in lastError. */
+      const declined = !ok && !stopped && String(result.failureCode || '') === 'production_disarmed';
       const isOnce = !!(job.schedule && job.schedule.kind === 'once');
       const next = Object.assign({}, job);
       delete next.lastHold;   // a real fire ends the hold receipt (markHeld); deleted, not nulled, so a record that never held is unchanged
@@ -867,6 +894,24 @@
       // NS-0: clear the liveness heartbeat on the SAME settlement — the run is no longer in flight, so a
       // stale heartbeat must never suppress a legitimately-re-arming (transient-backoff) one-shot.
       next.heartbeatAt = null;
+
+      if (declined) {
+        next.lastStatus = 'declined';
+        next.consecutiveFailures = Number(job.consecutiveFailures) || 0;   // untouched: this is not a failure
+        next.retryCount = 0;
+        next.retryAnchorAt = null;
+        next.occurrenceScope = null;
+        next.lastUsd = 0;
+        next.lastRunAt = iso(now);
+        if (pausedByYou) return next;   // the Commander's pause stands
+        if (isOnce) { next.enabled = false; next.nextRunAt = null; next.state = 'stopped'; return next; }   // like a stopped one-shot: RESCHEDULE re-arms it
+        // planTick normally advanced it already; a nextRunAt that is not in the future is re-armed, so a decline can never
+        // turn into a fire-and-refuse loop on every tick
+        const ahead = job.nextRunAt && Date.parse(job.nextRunAt) > now;
+        next.nextRunAt = ahead ? job.nextRunAt : (armAt(job.schedule, next.lastRunAt, now, ctx && ctx.defaultTz) || job.nextRunAt || null);
+        next.state = 'scheduled';
+        return next;
+      }
 
       // transient failure with retries left: back off, stay eligible, do NOT finalize the occurrence (a stop is no failure to retry). A RUN NOW
       // pressed on the paused routine has no retry to wait for (a paused routine never fires one): its failure settles now and is delivered.

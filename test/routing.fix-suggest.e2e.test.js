@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* routing.fix-suggest.e2e — NOT RIGHT? on a real sidecar (2026-09-30, ease of use). A job ridden through a line names the BAY each
    stage ran at (so the panel can show each step's own reply), and POST /api/routing/fix-suggest turns the Commander's "what's wrong"
    into checked changes to the line's step instructions: ONE call on the station default (the Overseer's roster model and

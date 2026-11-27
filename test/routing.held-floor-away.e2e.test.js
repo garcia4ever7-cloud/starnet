@@ -21,6 +21,9 @@
         resume and no re-queue.
    In test/http.list (a child-process boot test does not gate test:fast). The loop phase waits on the loop driver's own 5 s tick (its floor): 17-21 s standalone. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const fs = require('node:fs');

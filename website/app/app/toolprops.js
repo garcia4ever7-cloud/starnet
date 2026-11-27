@@ -35,6 +35,13 @@ const ToolProps = (() => {
     'connectors.list': 'dish',
     'keys.save': 'dish',   // storing a pasted API key for web_request rides web_request's dish grant
     voice_generate: 'studio',   // the studio makes audio as well as images — same prop, same pulse
+    // PHONE PORT: the Etsy pipeline's studio tools with no image_/resolve_ prefix need exact rows, or the floor stays dark
+    // while the agent is visibly producing deliverables (image_print_prep / image_quality_check / image_stock_fetch ride image_)
+    'higgsfield.generate': 'studio',
+    openai_image_generate: 'studio',
+    vector_export: 'studio',
+    mockup_compose: 'studio',
+    'video.inspect': 'studio',
     recall_conversation: 'notebook',
     'widget.get': 'notebook',
     'widget.set': 'notebook'   // Widget definitions/readings share the notebook-object (memory) grant.

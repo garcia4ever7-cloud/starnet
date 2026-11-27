@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* I1: one real sidecar, real filesystem tools and event bus; only the custom model transport is scripted.
    Every entry (channel, schedule, Run Now, webhook, sample, step test, SEND TO) runs clean, host-note/file,
    step-limit-with-partial-text, no-OUTBOX and terse-review-approval jobs. Assert the durable record, typed

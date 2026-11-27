@@ -8,6 +8,9 @@
    This is what made the bug invisible: before the streamId fix, the transcript persisted under the
    'global' catch-all stream (no per-run identity), so no UI could ever find a routine's output. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const http = require('http');

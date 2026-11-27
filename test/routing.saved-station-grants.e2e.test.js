@@ -18,6 +18,9 @@
    fs_write comes only from a cabinet, web_search only from a dish and notebook.* only from a notebook
    (capability/registry.js), so each one is a clean reading of which room the run was handed. In test/http.list (a child-process boot test does not gate test:fast). */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const fs = require('fs');

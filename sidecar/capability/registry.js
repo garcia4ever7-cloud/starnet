@@ -40,6 +40,11 @@
       // nagged). It can NEVER assert status, crew or byte counts: the tool takes a four-key allowlist and drops
       // everything else, because those facts are the harness's to derive. (see tools/builtin/deliverable.js)
       { capId: 'deliverable', tool: 'deliverable_note', scope: 'write', requiresConsent: false, network: false },
+      /* PHONE PORT — CENTRAL OUTBOX (2026-11-02). Reads deliverables ANOTHER agent published to this one. Rides `computer`
+         beside deliverable_note so a consumer is never stranded without the door. capId 'outbox', not 'compute'. Safe by
+         shape: scope read, no consent, no network, takes a manifest ID (never a path). (tools/builtin/outbox.js) */
+      { capId: 'outbox', tool: 'outbox_list', scope: 'read', requiresConsent: false, network: false },
+      { capId: 'outbox', tool: 'outbox_read', scope: 'read', requiresConsent: false, network: false },
       // TOOL SEARCH: how the agent reaches a DEFERRED tool. Rides `computer` for the same reason quest.update
       // does — it is the ONE object in both the compute-only interactive office and fullOffice, so a deferred
       // tool is never stranded on a surface that cannot look it up. capId is 'toolsearch', NOT 'compute'
@@ -354,6 +359,15 @@
     studio: [
       { capId: 'studio', tool: 'image_generate', scope: 'write', requiresConsent: true, network: true },
       { capId: 'studio', tool: 'image_analyze', scope: 'read', requiresConsent: false, network: true },
+      // PHONE PORT — the print and studio tools the Etsy pipeline calls (grants exactly as on the 0.12.5 station):
+      { capId: 'studio', tool: 'higgsfield.generate', scope: 'write', requiresConsent: true, network: true },      // Higgsfield REST, keyed
+      { capId: 'studio', tool: 'openai_image_generate', scope: 'write', requiresConsent: true, network: true },    // OpenAI Images, dedicated route
+      { capId: 'studio', tool: 'image_print_prep', scope: 'write', requiresConsent: true, network: false },       // local 300-PPI print files
+      { capId: 'studio', tool: 'image_quality_check', scope: 'read', requiresConsent: false, network: false },    // local, read-only, unattended-safe
+      { capId: 'studio', tool: 'image_stock_fetch', scope: 'write', requiresConsent: true, network: true },       // CC0/public-domain + licence record
+      { capId: 'studio', tool: 'vector_export', scope: 'write', requiresConsent: true, network: false },          // SVG -> 300-PPI PNG + PDF, local
+      { capId: 'studio', tool: 'mockup_compose', scope: 'write', requiresConsent: true, network: false },         // listing photos from a finished print
+      { capId: 'studio', tool: 'video.inspect', scope: 'read', requiresConsent: false, network: false },          // ffprobe facts, by manifest id
       // voice_generate SPEAKS to a file — the studio's third skill. Consent-gated for the same reason
       // image_generate is: it writes into the workspace. It rides the station's existing TTS ladder (the keyed
       // neural chain, then the free keyless Edge floor), so it needs no studio-specific credential — but it

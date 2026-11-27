@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/run-cap-bounds-spawn.e2e.test.js — bug d3a76db3: the PER RUN dollar cap does not bound team.spawn workers.
 
    SETTINGS › SPENDING LIMITS says PER RUN is a "Hard ceiling for a single agent run". With PER RUN at $0.05, one

@@ -1,3 +1,6 @@
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/attachment-taint-decay.http.test.js — attachment-rows-and-taint, step S2: TAINT FOLLOWS THE BYTES.
 
    THE DONE-MEANS, on the real sidecar with a scripted provider (no key, no network, no real profile): turn 1 attaches a text

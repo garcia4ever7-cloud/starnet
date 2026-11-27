@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/run-wire.parity.e2e.test.js — ONE {provider, model} pair per agent, proven at the provider (run-wire-resolver lane).
 
    One real sidecar, a RECORDING fake upstream that answers two providers on two paths (/custom/... = the station's custom

@@ -52,7 +52,8 @@ A.ok(/^\.thumb-down \.thumb-px \{ transform: rotate\(180deg\); \}/m.test(appCss)
   const ctx = { open: {}, minimized: {}, store: {}, opened: [], familyOf: () => null };
   ctx.openFamilyTab = (f, t) => ctx.opened.push(f + ':' + t.id);
   vm.createContext(ctx); vm.runInContext(fam + '\n' + tf + '\nthis.FAMILIES = FAMILIES; this.toggleFamily = toggleFamily;', ctx);
-  A.eq(ctx.FAMILIES.mywork.tabs.map(t => t.id).join(','), 'tasks,deliverables,recipes', 'the MY WORK tab order is unchanged');
+  // PORT (phone pipeline): CENTRAL OUTBOX (the cross-agent artifact manifest) joins MY WORK right after DELIVERABLES — a deliberate addition
+  A.eq(ctx.FAMILIES.mywork.tabs.map(t => t.id).join(','), 'tasks,deliverables,centraloutbox,recipes', 'the MY WORK tab order is unchanged apart from the ported CENTRAL OUTBOX tab');
   ctx.toggleFamily('mywork');
   A.eq(ctx.opened.pop(), 'mywork:deliverables', 'a first MY WORK open (no saved tab) lands on DELIVERABLES');
   ctx.store.famLast = { mywork: 'tasks' };

@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const assert=require('node:assert/strict'), http=require('node:http');
 const {SidecarFixture}=require('./helpers/sidecar-fixture');
 // the caller's own words: on this non-Claude wire the run-context note leads the newest user message

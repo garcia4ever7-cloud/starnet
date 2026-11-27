@@ -43,6 +43,16 @@ function defaultNonce() {
   catch (_) { try { return require('crypto').randomBytes(16).toString('hex'); } catch (__) { return 'unavailable'; } }
 }
 
+/* TERMUX FIX (a0da5104c, routed through sidecar/persist): Android refuses hard links (EACCES). Fall back to persist's
+   exclusive copy (open 'wx', flushed, its directory synced, a partial copy removed): still an atomic create-or-fail, so
+   a ticket or lockfile that already exists throws EEXIST exactly as link() did. Any other link error is rethrown. */
+function exclusiveCopyOrThrow(fs, from, to, linkError) {
+  if (!linkError || !['EACCES', 'EPERM', 'ENOTSUP', 'EXDEV'].includes(linkError.code)) throw linkError;
+  const r = require('./persist/quarantine.js').copyExclusive(fs, from, to);
+  if (r === true) return;
+  if (r === 'taken') throw Object.assign(new Error('EEXIST: file already exists, copy -> ' + to), { code: 'EEXIST' });
+  throw (r && r.error) || linkError;
+}
 function defaultPidAlive(pid) {
   const n = Number(pid);
   if (!Number.isInteger(n) || n <= 0) return true; // malformed/unprovable is busy, never reclaimable
@@ -50,9 +60,17 @@ function defaultPidAlive(pid) {
   if (n === process.pid) return true;
   try { process.kill(n, 0); return true; }
   catch (e) {
-    // Only ESRCH proves absence. Permission, resource and unsupported-probe errors
-    // leave ownership unknown and must never authorize another writer.
-    return !(e && e.code === 'ESRCH');
+    // ESRCH proves absence outright.
+    if (e && e.code === 'ESRCH') return false;
+    // TERMUX FIX (ported from phone commit ad1c83fea): on Android kill(pid,0) can answer EPERM/EACCES, which is
+    // a permission answer, not a liveness one. The kernel removes a dead process's /proc/<pid>, so ENOENT from
+    // access(F_OK) proves death (stat() itself is blocked by SELinux). Anything else stays busy (fail closed).
+    if (e && (e.code === 'EPERM' || e.code === 'EACCES')) {
+      try { require('node:fs').accessSync('/proc/' + n, require('node:fs').constants.F_OK); return true; }
+      catch (se) { return !(se && (se.code === 'ENOENT' || se.code === 'ENOTDIR')); }
+    }
+    // Any other error leaves ownership unknown and must never authorize another writer.
+    return true;
   }
 }
 
@@ -168,7 +186,9 @@ function makeWorkspaceOwner(deps) {
       if (typeof fs.fsyncSync === 'function') fs.fsyncSync(fd);
       fs.closeSync(fd); fd = null;
       // link never replaces an existing ticket, unlike rename on both platforms.
-      fs.linkSync(temporary, ticket);
+      // TERMUX FIX (ported from phone commit a0da5104c): Android refuses hard links (EACCES); fall back to an
+      // exclusive copy, still an atomic create-or-fail.
+      try { fs.linkSync(temporary, ticket); } catch (le) { exclusiveCopyOrThrow(fs, temporary, ticket, le); }
       election = ticket;
       return true;
     } catch (error) {
@@ -228,7 +248,8 @@ function makeWorkspaceOwner(deps) {
       if (typeof fs.fsyncSync === 'function') fs.fsyncSync(fd);
       fs.closeSync(fd); fd = null;
       // Publishing complete bytes avoids a same-boot torn primary after a kill.
-      fs.linkSync(temporary, lockfile);
+      // TERMUX FIX (a0da5104c): same hard-link fallback for the primary lockfile.
+      try { fs.linkSync(temporary, lockfile); } catch (le) { exclusiveCopyOrThrow(fs, temporary, lockfile, le); }
     } catch (e) {
       let cleanupError = null;
       if (fd != null) {

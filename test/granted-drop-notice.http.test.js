@@ -13,6 +13,9 @@
      2. the client key rewrites the agent's instructions: the next run's start, in both readers, says the grants were dropped,
         why, and where to grant them again; the grant is not used. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const fs = require('fs'), os = require('os'), path = require('path');
 const { station, model, findFile, cleanup, sleep } = require('./helpers/desk-station.js');

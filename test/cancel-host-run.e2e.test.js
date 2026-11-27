@@ -1,3 +1,6 @@
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/cancel-host-run.e2e.test.js — STOP and STEER reach every run, not only desk runs (QA 2026-10-02).
 
    A routine's line hop is driven by runOnce with its own run id and AbortController — it never sits in `runs`.

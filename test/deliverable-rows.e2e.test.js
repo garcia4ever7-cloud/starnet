@@ -1,4 +1,7 @@
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 /* node test/deliverable-rows.e2e.test.js — the files a run wrote are rows of the station's own transcript, exact and openable
    from the station alone (turn identity, commit 10; design A2-SP-C01).
 

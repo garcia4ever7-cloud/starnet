@@ -12,6 +12,9 @@
      · a night-shift work-item crate rides BEFORE the beat finishes (placed while runs are still live).
      · the crate settles: workitem.delivered fires and the queue depth returns to 0 (no leak). */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 
 const A = require('./_assert.js');
 const http = require('http');

@@ -16,6 +16,9 @@
 
    NOT in test:fast (a child-process boot test shouldn't gate other agents' merges); run via `npm run test:http`. */
 'use strict';
+// PHONE PORT (production gate): this test drives UNATTENDED runs on a metered mock provider, so it arms ITS OWN sandbox
+// (a fresh workspace is production DISARMED by design — the same rule as crew-defaults.invariant). The gate default is unchanged.
+process.env.STARNET_PRODUCTION_ARMED = '1';
 const A = require('./_assert.js');
 const http = require('http');
 const fs = require('fs');

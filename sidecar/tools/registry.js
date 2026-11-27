@@ -562,6 +562,24 @@
       return all.filter(t => allow.has(t.name) || (t.capability && allow.has(t.capability)));
     }
 
+    function typeHint(p, depth) {
+      if (!p || typeof p !== 'object') return 'any';
+      if ((depth || 0) > 3) return 'any';
+      if (Array.isArray(p.enum) && p.enum.length) return p.enum.slice(0, 8).map(v => JSON.stringify(v)).join('|');
+      if (Array.isArray(p.anyOf) && p.anyOf.length) return p.anyOf.slice(0, 4).map(b => typeHint(b, (depth || 0) + 1)).join('|');
+      if (p.type === 'array') return 'array<' + typeHint(p.items, (depth || 0) + 1) + '>';
+      return typeof p.type === 'string' ? p.type : 'any';
+    }
+    function describeSchemaHint(s) {
+      if (!s || typeof s !== 'object' || !s.properties || typeof s.properties !== 'object') return '';
+      const req = new Set(Array.isArray(s.required) ? s.required : []);
+      const keys = Object.keys(s.properties);
+      if (!keys.length) return '';
+      let out = keys.slice(0, 20).map(k => k + ': ' + typeHint(s.properties[k], 0) + (req.has(k) ? ' (required)' : '')).join(', ');
+      if (out.length > 420) out = out.slice(0, 419) + '…';
+      return out;
+    }
+
     function wireFormat(toolList) {
       const src = toolList || list();
       return src.map(t => {
@@ -609,7 +627,12 @@
       let v;
       try { v = schema.validate(tool.schema || {}, call.args); }
       catch (e) { v = { ok: false, errors: ['schema error: ' + ((e && e.message) || e)] }; }
-      if (!v.ok) return errResult('invalid arguments for ' + call.name + ': ' + v.errors.join('; '));
+      if (!v.ok) {
+        // PHONE PORT (b0dcc0b2c): say what WOULD have been accepted, so the next attempt is not another guess. Bounded, and
+        // it rides on the error result, never on the advertised catalogue (the tools-on-the-wire budget is unchanged).
+        const want = describeSchemaHint(tool.schema);
+        return errResult('invalid arguments for ' + call.name + ': ' + v.errors.join('; ') + (want ? '. This tool accepts — ' + want : ''));
+      }
 
       // consent gate (M1.4): a denied/cancelled prompt performs NO action
       // external-unknown authority is itself an exact, non-cacheable one-call prompt.

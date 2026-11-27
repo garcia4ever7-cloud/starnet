@@ -93,7 +93,8 @@ for (const f of FILES) f.text.split('\n').forEach((line, i) => { if (FOLDS_DELTA
 A.eq(folds.filter(s => !LIVE_STREAMS.some(d => d.rel === s.rel && d.at.test(s.line))).map(where), [], 'nothing folds a run\'s deltas by hand');
 
 // LJR retired the three inline host hops and the hub's hop fold: the shared runner consumes accepted output instead.
-const SINKS = { 'sidecar/index.js': 2, 'sidecar/channels/hub.js': 1, 'sidecar/cron-driver.js': 1, 'sidecar/loopjob-driver.js': 1 };
+const SINKS = { 'sidecar/index.js': 2, 'sidecar/channels/hub.js': 1, 'sidecar/cron-driver.js': 1, 'sidecar/cron-orchestrator.js': 1,   // PHONE PORT: the studio pipeline assembles each stage's reply
+  'sidecar/loopjob-driver.js': 1 };
 const users = {};
 for (const f of FILES) {
   if (f.rel === THE_ONE.rel) continue;

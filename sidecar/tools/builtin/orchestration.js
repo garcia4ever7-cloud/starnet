@@ -1183,7 +1183,43 @@
           }
         }
 
-        const runWorker = async (job, o2) => {
+        /* THE HOST'S OWN HANDOFF FILE (PHONE PORT of 2dc5b32e6 / ac6382d1a). Every runWorker outcome — done, timeout,
+           error, refused, invalid-result alike — is written into the LEAD's outbox as a file the owner can read with no
+           browser and the next routine in the chain can parse (the Etsy chain's prompt and NIGHT4CHRIST's dossier name
+           these files). Written by the HOST from the row the dispatch really produced: a handoff an agent is merely asked
+           to save is a claim, not evidence. Fail-open on the WRITE only: the failure rides back on the row as
+           handoffError. `handoffDone` keeps one exchange from being written twice (the refusal retry re-runs a job).
+           Adapted: wraps runWorker once at its definition, so every caller (waves, retries, background) is covered. */
+        const recordHandoff = (typeof deps.recordHandoff === 'function') ? deps.recordHandoff : null;
+        const handoffDone = new Set();
+        let handoffSeq = 0;
+        const persistHandoff = (job, row, idem) => {
+          if (!recordHandoff || !row) return row;
+          const key = String((ctx && ctx.runId) || '') + '|' + String(job.agentId || '')
+            + '|' + String(idem || row.runId || ('nostart:' + (++handoffSeq)));
+          if (handoffDone.has(key)) return row;
+          handoffDone.add(key);
+          try {
+            const h = recordHandoff({
+              leadId: leadId, workerId: job.agentId,
+              prompt: job.prompt || '', context: job.context || '',
+              result: row.result == null ? '' : String(row.result),
+              status: row.status, outcome: row.outcome, reason: row.reason, usd: row.usd,   // PORT: the typed verdict decides 'complete' (handoff-store.js)
+              leadRunId: (ctx && ctx.runId) || '', workerRunId: row.runId || '',
+              cronJobId: (ctx && ctx.cronJobId) || '',
+              artifacts: Array.isArray(row.artifacts) ? row.artifacts.map(a => (a && a.path) || '').filter(Boolean) : []
+            });
+            if (h && h.ok) row.handoffFile = h.relPath;
+            else if (h) row.handoffError = h.error || 'handoff not written';
+          } catch (e) {
+            handoffDone.delete(key);
+            row.handoffError = 'handoff not written: ' + ((e && e.message) || e);
+            failNote('orchestration.handoff', e);
+          }
+          return row;
+        };
+        const runWorker = async (job, o2) => persistHandoff(job, await runWorkerCore(job, o2));
+        const runWorkerCore = async (job, o2) => {
           o2 = o2 || {};
           if (job.error) { const bad = { agentId: job.agentId, reason: 'error', result: job.error, usd: 0 }; stampVerdict(bad, null, null, job.error); return bad; }
           const wire = workerWire(job.ident, job.agentId);   // the worker's OWN provider+model when resolvable (see workerWire)
@@ -1208,6 +1244,10 @@
             if (bound) row.bound = BOUNDED_LABEL;   // every row of a bounded worker says who bounded it
             if (job.onlyHost) row.onlyHost = job.onlyHost;   // ...and of a scoped one, the host its lead confined it to
             handedRoot.set(row, projectOptions(job.sessionContext || ctx).projectRoot || '');   // a later worker reads this one's files from ITS base
+            // EVIDENCE BEFORE DELIVERY (PHONE PORT, live run c1bce71a): file the handoff the moment the row is in hand, BEFORE the
+            // post-worker phase (delivery, session notes) that has no wall clock and can stall until the run is reclaimed —
+            // a completed, paid-for worker must never leave no record. The outer runWorker wrap is the catch-all; same key, no duplicate.
+            persistHandoff(job, row);
             const envelope = await finalizeWorkerDelivery(workerRunId, row);
             // The execution loop ending is not completion: validation and any bounded repair finish first.
             noteSessionActivity('station.dispatch_end', job, workerRunId, envelope);
