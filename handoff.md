@@ -17,6 +17,17 @@ Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that
 | 5 | ONE real-key chain test, capped (owner's yes; spends) | NOT STARTED |
 | 6 | Switch-over (cutover) of the live station | NOT STARTED — needs the owner's yes; steps below |
 
+**Commits (2026-11-26 night, LOCAL ONLY — nothing pushed: repo public).** The repo is public and these notes describe the
+Higgsfield key leak that is live on 0.12.5, so no push until the owner decides (and ideally after the switch-over fixes it):
+- `~/starnet` `feat/harness-backend`: **`0464184f4`** docs (CLAUDE.md, handoff.md, STATION_FIELD_NOTES.md) + the commit that
+  adds these hashes (see `git log -2`). Branch is ahead of `origin/feat/harness-backend-station-20261124`; do NOT push.
+- `~/starnet-next` new local branch **`phone-port-v0.15.4`**: **`3c9c1fac3`** — the whole port (183 files) on top of upstream
+  `124b20a6b`. No upstream set; its `origin` (= `~/starnet`) untouched. Restore anything with `git -C ~/starnet-next show 3c9c1fac3`.
+- Both scanned before committing: gitleaks (no leaks) + `~/starnet-next-work/tests/scan-staged.sh` (keys, tokens, desk codes,
+  account-like digits): every hit reviewed — timestamps, paths, a PNG/MP4 fixture, variable names, test-only tokens.
+- Not committed on purpose: the `*.bak-20261126-port` backups; other sessions' untracked files (e.g. OMNIROUTE-REPAIR-CHECKPOINT.md).
+  `sidecar/cron-orchestrator.js` has no local change (already committed earlier in `b82cc582d`).
+
 **Live station = 0.12.5 on :8787, untouched by all of the above.** Nothing committed, pushed, restarted or spent; no key,
 model, cap or routine changed. All tests ran on the copy `~/starnet-testws/` on port 8788 with a sandbox HOME, every
 non-loopback connection blocked (`offline-guard.cjs`) and an obviously fake Anthropic key.
