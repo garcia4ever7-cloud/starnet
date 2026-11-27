@@ -1843,7 +1843,7 @@ fingerprint prefix (one-way; no value was ever read into output):
 Then a read-only identity probe (`GET api.airtable.com/v0/meta/whoami`, no data read, no write):
 
 ```
-LIVE  pat fp c93abd70: HTTP 200  tokenUserId=usr9mBSnLbfglyL87
+LIVE  pat fp c93abd70: HTTP 200  tokenUserId=usr… (Airtable user id redacted 2026-11-26)
 STALE pat fp e4ec6e67: HTTP 401  error=UNAUTHORIZED
 ```
 

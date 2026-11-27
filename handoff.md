@@ -5,6 +5,103 @@ Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that
 
 # v0.15.4 SWITCH-OVER — read this first
 
+## Owner decisions for the switch-over (DECIDED 2026-11-26 ~22:00 PST, Thursday night, owner)
+1. **Chain budget on v0.15.4: $5.00 per run (`maxCostUsd: 5`), covering the lead AND all workers** (one spend pool on
+   v0.15.4). Only the cap changes; the `orchestrator` delegation grant stays. Checked in the port's code: `maxCostUsd` is not
+   in `cron-store.js` `RUN_FIELDS` (so the edit does not revoke the grant) and `handleCronUpdate` asks for no desk code for a
+   cap edit (only for adding grants). Applied to the 8788 copy in P5 and to live after S8 (on v0.15.4, not on 0.12.5 —
+   on 0.12.5 a $5 cap would mean $5 lead + $2 worker pool). Rollback restores the $2.00 cap with the backup.
+2. **Desk codes:** turn on `STARNET_DESK_CODE_TO_LOG=1` and `STARNET_TRUST_LOCAL_PEERS=1` (S5). Trade-off accepted: anything
+   that reads `sidecar.log` can read a desk code.
+3. **Higgsfield key leak:** no separate 0.12.5 patch — the switch-over fixes it.
+Running order: P5 -> S0..S12, one step at a time with its test; Claude stops for the owner before any spend (P5 / S10), any
+desk code, and any failed test. No push.
+
+## P5 RESULT (2026-11-26 22:15–22:26 PST, owner's yes; real keys on the 8788 copy; $4.71 spent)
+Launcher: `~/starnet-next-work/tests/run-test-station-REALKEYS.sh`; output `~/starnet-next-work/test-output/p5-realkeys/`
+(`runnow.ndjson`, `test-station.log`, `pre-test-snapshot/`). Build `3c9c1fac3` (0.15.4, clean). Copy chain cap set to $5 (grant kept).
+- Lead NIGHT4CHRIST (Fable) `6d1a4ec8`: done/succeeded, 13 turns, **$2.16**. 3 sequential team.dispatch, unattended via the grant.
+- SCOUT `d09041cf` (Opus 5.5) $0.34 succeeded · QC_EDITOR `effc21bc` (Fable) $1.17 succeeded (Psalm 46:1 kit passed) ·
+  **PUBLISHER `d06437de` (Fable) $1.04 out_of_budget** at the $1 per-worker cap, no draft. DESIGNER not dispatched (kit reused).
+- Total **$4.71** (runs.jsonl; ledger rows carry no usd). 0 Apify, 0 image generations. 3 host handoff files, +1 Outbox row.
+- Cause of the PUBLISHER stop [Likely]: the chain prompt names the LIVE path `~/.local/share/StarNet/workspaces`; on the copy the
+  workers' file tools are jailed to the copy, so PUBLISHER could not reach its sources and burned turns. On live the paths match.
+- **Isolation finding:** the copy's agents read the LIVE kit via unjailed `shell.exec` (P0 cd082d49); QC_EDITOR's shell cwd stuck in
+  the live kit folder and it created `qc-psalm-46-1/` (preview JPGs) inside LIVE `webdesigner/outbox/psalm-46-1-kit/download/`
+  06:22:11Z, moved it to live `qceditor/` 06:22:28Z, then to the copy 06:22:47Z. Live contents are back as before (kit files'
+  mtimes 11-26 03:0x unchanged); everything else it did on live was reads. Same behaviour exists on 0.12.5.
+- Money note: a Monday run where DESIGNER builds a new kit will likely exceed $5 (this run had no DESIGNER stage).
+- Owner (22:3x): go on to S0–S12; KEEP the $5 pool and the $1 per-worker cap.
+
+## SWITCH-OVER PROGRESS (TS=20261126-2236, also in `~/starnet-next-work/SWITCHOVER_TS`)
+- S0 all 7 true (outbox 137, rev 5603). S1 tabs closed (owner). S2 0.12.5 stopped clean 22:36 (receipts 0 before/after).
+- S3 backups: `workspaces.bak-20261126-2236-pre0154` (diff -rq: identical, 8,324 entries), `env.bak-…`, `start-starnet.sh.bak-…`,
+  `~/.termux/start-starnet.bak-…`; S4 `cron.jobs.json.bak-…`. S5 env +2 lines (mode 600). S6 launcher line 14 -> `$HOME/starnet-next`.
+- S7 v0.15.4 UP 22:38: launcher 9843, sidecar **9868**, build 3c9c1fac3 clean, environ clean, ARMED persisted, chain enabled +
+  grant + $2 + gateBlocked false, outbox 137, 3 grant fingerprints recorded, no errors. **Differs from the plan:** the boot is
+  KEYED, not "unkeyed" — `STARNET_CONNECTOR_ENCRYPTION_KEY` (in the env) keys the authority seal, so `agent.roster.json` was sealed
+  once (`authority-seal.json`). Approval modes/models unchanged (8 full, 2 ask), integrity CONSISTENT, nothing dropped.
+  CONSEQUENCE: a hand edit of agent.roster.json outside StarNet is no longer obeyed (read as its safe default) — change agents
+  only through StarNet's own routes/page from now on; keep STARNET_CONNECTOR_ENCRYPTION_KEY in the env.
+- S8 DONE 22:43 (owner opened the page): save v7; `agent.save.pre-history-ref.json` = the exact v6 save (rev 5603, content-identical
+  to the backup); integrity CONSISTENT; 10 models unchanged; routing no longer held (`/api/routing/lines/stats`). Also at
+  22:43:13/27/41 three boot-offer RESTOREs of preserved `agent.save-conflict-*` copies ran (backups
+  `agent.save-before-restore-*.json`): ADDITIVE ONLY — 17 conversations came back (old routine sessions + "(restored copy)"
+  duplicates incl. 2× General); nothing removed (all 79 v6 conversations present). Owner to confirm they pressed RESTORE.
+- Chain cap set to **$5** on live 22:5x (`cron.jobs.json.bak-20261126-2236-pre-cap5`); grant kept (grantsDropped []); other routines
+  unchanged (every routine also gained a host-written `intakeBinding` observation — not editable, not used to dispatch).
+- **Grant check for Monday [Certain]:** NIGHT4CHRIST's roster `system` changed 12,265 -> 10,900 chars (the accepted v7 dossier
+  refresh) but `GrantedContext.instructionsOf()` is byte-identical (7,899 chars) and its digest `cb99ede2…` equals the chain's
+  stored `grantDrive` — Monday's fire keeps `orchestrator`.
+- **"failover (auth) … claude-fable-5-2 → anthropic/claude-haiku-5.5" (22:44, owner saw it) — ROOT CAUSE [Certain]:** the
+  BROWSER's saved Anthropic key (localStorage, fp 833e21f4) is an old key: free `GET /v1/models` -> **401 invalid x-api-key**;
+  the env key (fp b952d106) -> 200. On v0.15.4 a page run sends the browser's key with every run (per-run key wins), so three
+  page-started NIGHT4CHRIST runs (goal decomposition etc., `27de5e86` `26090e78` `157c2210`) failed auth and fell over to
+  OpenRouter Haiku ($0.007). The page also handed both its keys to the station at 22:42:58 (`.secrets/provider-keys.json`; its
+  Gemini key is the OLD 3ee737a7, env has 77849313). Unattended runs are NOT affected: credential-store order is keychain
+  (desktop only) > environment > page copy, and a cron run passes no per-run key -> env key (P5 proved it with Fable).
+  FIX = owner, in the StarNet page: clear (or replace) the saved ANTHROPIC and GEMINI keys; a run with no page key uses the
+  station's env key. Claude must not type keys.
+
+## 2026-11-26 ~23:00–23:45 PST — owner's 7-step list (stay on v0.15.4; no new keys, no paid runs, no Apify)
+1. **Station page copies REMOVED** (owner's yes): `POST /api/providers/engine-key` empty body for anthropic + gemini -> tombstones,
+   `keySource: environment`, `unattendedReady: true` (backup `.secrets/provider-keys.json.bak-20261126-pre-remove`, mode 600 — it
+   still holds the two OLD keys; delete it once the owner is satisfied). Free check: env Anthropic key `GET /v1/models` 200 (Fable 5.2
+   + Opus 5.5 listed), env Gemini 200. **Owner still to clear the browser's own copy:** SETTINGS ▸ PROVIDERS -> ANTHROPIC key row ->
+   ✕ REMOVE -> ✕ CONFIRM (within 5 s); same on GEMINI. Until then, runs the PAGE starts still fail over to Haiku.
+2. **S9 (read-only):** chain ON, `0 3 * * 1` America/Los_Angeles, next Mon 11/30 03:00 PT, `$5`, grant `orchestrator`, fingerprint
+   unchanged, not gate-blocked; `/api/outbox` 137 rows; page ships CENTRAL OUTBOX (`outbox.js` 200). The window opening on screen is
+   the owner's tap to check. Restored copies left alone (owner did not press RESTORE).
+3. **QC accepts JPEG** — `~/starnet-next/sidecar/tools/builtin/image-qc.js` (backup `.bak-20261126-jpeg-qc`): `parseJpeg`/`parseImage`
+   (SOI, segment lengths, SOFn dimensions, SOS, EOI; DPI from JFIF unit 1/2). Kits NOT regenerated. Test `test/image-qc-jpeg.test.js`
+   (21 OK; fails on the old module) in `test/fast.list`; record `qa/bugs/1b5addcc` (register OK, 463). Siblings green:
+   studio-qc-integration 59, print-prep 46, studio-orchestration 11, qa-bugs-register, source-text-integrity, persist.lint.
+4. **Opus 5.5 price correct** ($4/$20, cache read 0.05x = $0.20) vs platform.claude.com pricing — no change. **Fable 5.2 wrong in
+   v0.15.4** (no row -> Fable 5 $10/$50, read 0.1x; published $8/$40, read $0.20) — **FIXED (owner's yes, 23:5x):** own rows for Fable 5.2 + Mythos 5.2 at
+   $8/$40, cacheRead 0.025 (backup `prices.js.bak-20261126-fable52`); test `test/prices.fable52.port.test.js` (11 OK; 6 fail on the old
+   table) in fast.list; price/budget/cap suites green (provider.prices 27, prices.all-providers 140, context.price-tier-window 92,
+   claude-cli-effort 222, thinking-binding 120, native-defer 180, unpriced-ceiling 52, routine-cost-cap.port 13, budget-caps 77).
+   Billing still books cache reads at the family 0.1x by design (safe direction); `cacheRatesOf` reads 0.025.
+5. **Secret sweep — CLEAN** (both repos, every tracked file + full history of all refs: `~/starnet` 18,298 commits, `~/starnet-next`
+   18,175). (a) The 15 REAL secret values (every env key/token, the 2 old browser keys, the GitHub credential, OmniRoute client key,
+   the Kling key in the settings backup, the test token) searched verbatim: **0 hits anywhere**. (b) Strict real-format keys
+   (`sk-ant-api…`, `sk-or-v1-…`, `sk-proj-…`) outside test/: 0 in the tree; 7 history commits, all synthetic and saying so
+   (`abcdef…abcdef`, "native proof not real key", "live fake", "recipe lanes mock", "tasks regression dummy"; 22–41 chars vs 73 for
+   a real OpenRouter key). (c) gitleaks: history 121 / tree 39 (`~/starnet`), 4 / 127 (`~/starnet-next`) — every one a test fixture,
+   placeholder (`YOUR_TOKEN`, `<workspace-lineage-http-token-32bytes>`), SHA-256, asset/budget key name, the literal
+   `BEGIN RSA PRIVATE KEY` in a redaction list, or Edge-TTS's public client constant (`sidecar/edgetts.js`). Nothing moved to env.
+   One account identifier (an Airtable user id, not a credential) redacted from tracked `docs/CLAUDE_ARCHIVE_20261120.md`
+   (backup `.bak-20261126-redact`); it stays in public history — no rewrite (owner's call). Reports (redacted, no values):
+   session scratchpad `secret-scan/`.
+6. **Committed + pushed** (owner's yes, sweep clean): `~/starnet-next` `phone-port-v0.15.4` = `3c9c1fac3` (the port) + `0c10e9dd6`
+   (QC JPEG + Fable 5.2 price), pushed to GitHub as branch `phone-port-v0.15.4`; `~/starnet` `feat/harness-backend` (docs: 0464184f4,
+   8f5f9c3d4 and the commit carrying this line) pushed to `feat/harness-backend-station-20261124`. Left out on purpose: every `.bak*`,
+   `OMNIROUTE-REPAIR-CHECKPOINT.md`, untracked notes/scratch (`chat`, `detox-run*`, `.ob.json`, …). Not done: the authority-census
+   matrix re-capture (it pins to a commit; owner decision, see PHONE_PORT_NOTES 3g).
+7. **Restart 23:3x** for the QC fix (receipts 0, nothing in flight; ~51 h before Mon 03:00): launcher **8612**, sidecar **8637**, clean
+   environ, ARMED, chain $5 + grant, outbox 137, routing not held, integrity CONSISTENT, 0 error lines.
+   **Second restart 23:5x** for the price fix (same checks, all held): launcher **15531**, sidecar **15547**.
+
 ## Where the upgrade stands (plan steps 0-6)
 | Step | What | State |
 |---|---|---|

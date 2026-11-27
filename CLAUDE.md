@@ -2,7 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Where we left off — 2026-11-26 evening (v0.15.4 port READY in the sandbox; switch-over NOT done)
+## Where we left off — 2026-11-26 ~23:45 PST: LIVE STATION IS NOW v0.15.4 (switch-over done, owner's yes)
+
+**The live station runs `~/starnet-next` (branch `phone-port-v0.15.4`), not `~/starnet`.** `~/start-starnet.sh` line 14 points
+`STARNET_DIR` at `$HOME/starnet-next`, so manual starts, `starnet-up.sh` and Termux:Boot all start v0.15.4. Sidecar **15547**
+(launcher 15531) since the 23:5x restart for the Fable 5.2 price fix (before: 8637 for the QC fix). Read `handoff.md` "SWITCH-OVER PROGRESS" first.
+- **Rollback to 0.12.5:** full backup `~/.local/share/StarNet/workspaces.bak-20261126-2236-pre0154` (identical copy) + env /
+  launcher / boot-script `.bak-20261126-2236-pre0154` files — recipe "FULL ROLLBACK" in handoff.md. Keep them ≥ 7 days.
+- **Code changes now go in `~/starnet-next`** (and its tests: `node test/<x>.test.js` there). `~/starnet` (0.12.5) is the old tree.
+- **Keys:** the station uses the ENV keys (`~/.config/starnet/env`). A browser-saved key overrides them for runs the PAGE starts
+  (per-run key wins), so a stale browser key = "failover (auth)". The station's page copies of Anthropic/Gemini were REMOVED
+  2026-11-26 (tombstones). Never paste keys into the page on the owner's behalf.
+- **Hand edits of `agent.roster.json` are no longer obeyed** (the authority seal is keyed by `STARNET_CONNECTOR_ENCRYPTION_KEY`):
+  change agents through StarNet's routes/page only. Keep that env var.
+- **Desk codes** print in `~/.local/state/starnet/sidecar.log` (`STARNET_DESK_CODE_TO_LOG=1`); the owner types them.
+- **Chain `ebc4f07d`:** cap **$5** (lead + ALL workers, one pool on v0.15.4), `$1` per worker (env), grant `orchestrator` with
+  fingerprint `…cb99ede2` (still valid after the v7 move — checked). Editing the chain's prompt/model/skills or NIGHT4CHRIST's
+  instructions/skills/model revokes the grant: re-grant in SCHEDULES (desk code).
+- **Fixed tonight:** `image_quality_check` accepts JPEG print files (qa/bugs/1b5addcc). Fable 5.2 / Mythos 5.2 now priced at the
+  published $8/$40 (cache read 0.025x) in `sidecar/providers/prices.js` (owner's yes; test `prices.fable52.port`); Opus 5.5 $4/$20 was already correct.
+
+## Where we left off — 2026-11-26 evening (v0.15.4 port READY in the sandbox; switch-over NOT done) [HISTORICAL — superseded above]
 
 **Start at `handoff.md` ("v0.15.4 SWITCH-OVER — read this first").** The live station is still **0.12.5** on :8787 (sidecar
 12486, launcher 12468, untouched by the port). The upgrade to upstream **v0.15.4** is fully ported and tested in

@@ -2682,3 +2682,30 @@ What v0.15.4 does differently on THIS station (each checked in code or on 8788):
   response `status_url` send the Higgsfield key headers to another host. Fixed in the port only; live is NOT fixed.
 - **Phone bug found:** `image_print_prep` ships JPEG since 10-22 but `image_quality_check` accepts PNG only (QC of print files
   fails "not a PNG"). Ported as-is; owner decision.
+
+## 2026-11-26 ~22:00–23:45 PST — switch-over to v0.15.4 DONE (owner's yes); P5 real-key test; four fixes/findings
+
+The live station now runs `~/starnet-next` (v0.15.4 + phone port). Plan, every test and the rollback: `handoff.md`.
+- **P5 (8788 copy, real keys, $4.71):** headless delegation via the `orchestrator` grant works on v0.15.4 (3 dispatches, host
+  handoff files, typed worker outcomes, no false "failed"). PUBLISHER stopped on the $1 per-worker cap — the chain prompt names the
+  LIVE workspace path, which the copy's jailed file tools cannot reach. **A copy station is not isolated from live:** `shell.exec`
+  is unjailed (P0 cd082d49), so the copy's agents read the live kit and QC_EDITOR briefly wrote a preview folder into it (moved
+  out 36 s later). Treat any real-key test on a copy as able to touch live files.
+- **Keyed authority seal:** with `STARNET_CONNECTOR_ENCRYPTION_KEY` in the env, v0.15.4 seals `agent.roster.json` (and the other
+  permission files) on first boot; a hand edit afterwards is NOT obeyed. The keyless 8788 tests had shown "unkeyed" — misleading.
+- **v7 move:** the page did it at 22:43; `agent.save.pre-history-ref.json` = the exact v6 save. The boot offer also ran three
+  additive RESTOREs of old `agent.save-conflict-*` copies (17 conversations back, nothing lost) — the owner did not press RESTORE
+  on purpose; the restored copies are kept as they are.
+- **"failover (auth) claude-fable-5-2 -> haiku-5.5" in the page:** the browser's localStorage held an OLD Anthropic key (free
+  `GET /v1/models` -> 401 "invalid x-api-key"; env key -> 200). On v0.15.4 a page run sends the browser key with every run and that
+  wins; unattended runs use keychain > ENV > page copy, so cron is unaffected. The station's page copies (Anthropic + old Gemini)
+  were removed via `POST /api/providers/engine-key` with an empty body (tombstone). The owner clears the browser's own copy:
+  SETTINGS ▸ PROVIDERS, key row ✕ REMOVE then ✕ CONFIRM.
+- **Grant fingerprint survives the v7 dossier refresh:** NIGHT4CHRIST's roster `system` changed (12,265 -> 10,900 chars) but
+  `GrantedContext.instructionsOf()` is byte-identical, digest `cb99ede2…` = the chain's `grantDrive`.
+- **image_quality_check accepts JPEG** (qa/bugs/1b5addcc, `test/image-qc-jpeg.test.js`): replay on the live 4x5 print file —
+  before "FAIL — not a PNG (bad signature)", after PASS 4800x6000 @ 300 DPI from JFIF. Live after the 23:3x restart (sidecar 8637).
+- **Prices (checked against platform.claude.com pricing 2026-11-26):** Opus 5.5 $4/$20 (cache read $0.20) — v0.15.4 correct, the
+  phone's $5/$25 was stale. **Fable 5.2 $8/$40, cache read $0.20 — v0.15.4 has no row and bills it as Fable 5 ($10/$50, read
+  $1.00):** spend over-booked ~25%, so caps stopped Fable early. FIXED 23:5x with the owner's yes (own rows, $8/$40, 0.025x reads);
+  live from sidecar 15547.
