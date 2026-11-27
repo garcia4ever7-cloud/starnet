@@ -68,6 +68,12 @@
     // re-checked 2026-10-08 against the claude-api skill "Current Models" table (cached 2026-10-06). Cache reads re-checked
     // 2026-11-09 (shared/prompt-caching.md:144, shared/model-migration.md:1695 and :2040): $0.25/MTok on Fable 5.1 and
     // Mythos 5.1 (0.025x), $0.20/MTok on Opus 5.5 (0.05x), 0.1x on every other model; Fable 5 / Mythos 5 read at $1/MTok.
+    // PHONE PORT 2026-11-26 (owner's yes): Fable 5.2 / Mythos 5.2 had no row and fell into the Fable 5 row ($10/$50, 0.1x reads),
+    // over-booking spend ~25% so routine caps stopped Fable runs early. Published rates (platform.claude.com/docs/en/about-claude/
+    // pricing, read 2026-11-26): $8 in / $40 out per MTok, cache writes $10 (5m) / $16 (1h) = the family 1.25x / 2x, cache hits
+    // $0.20 = 0.025x. Must stay ABOVE the Fable 5 / Mythos 5 family rows (first match wins).
+    [/^claude-fable-5[-.]2/i,        { in: 8.00, out: 40.00, cacheRead: 0.025 }],   // fable 5.2
+    [/^claude-mythos-5[-.]2/i,       { in: 8.00, out: 40.00, cacheRead: 0.025 }],   // mythos 5.2 — Fable 5.2's rates (published)
     [/^claude-fable-5[-.]1/i,        { in: 10.00, out: 50.00, cacheRead: 0.025 }],  // fable 5.1
     [/^claude-fable-5/i,             { in: 10.00, out: 50.00 }],  // fable 5
     [/^claude-mythos-5[-.]1/i,       { in: 10.00, out: 50.00, cacheRead: 0.025 }],  // Project Glasswing — Fable 5.1's rates (skill ref)

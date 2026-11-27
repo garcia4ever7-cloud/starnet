@@ -270,3 +270,10 @@ skills in `skills.jsonl`, which carries over with the workspace.
   HTTP list 401 (first time swept): 310 pass after arming 68 test sandboxes (gate vs metered mocks); 91 pre-existing; 0 regressions.
   Final 8788 smoke: version 0.15.4, armed carried over, chain cap/grant kept, Outbox 137 rows, desk-confirmed arming works
   (with STARNET_DESK_CODE_TO_LOG=1), $0.
+
+## 5. After the switch-over (2026-11-26 night, LIVE on this tree)
+- **`image_quality_check` accepts JPEG** (qa/bugs/1b5addcc): print-prep ships JPEG since 10-22; QC was PNG-only. New `parseJpeg`
+  (SOI, segment lengths, SOFn, SOS, EOI; DPI from JFIF) beside `parsePng`; the bytes pick the parser. `test/image-qc-jpeg.test.js`.
+  Replay on the live 4x5 print file: before FAIL "not a PNG (bad signature)", after PASS 4800x6000 @ 300 DPI.
+- **Fable 5.2 / Mythos 5.2 priced at the published $8/$40** (cache hits 0.025x) in `sidecar/providers/prices.js` — they fell into the
+  Fable 5 row ($10/$50). Opus 5.5 $4/$20 was already right. `test/prices.fable52.port.test.js`.

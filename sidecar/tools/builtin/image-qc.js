@@ -69,6 +69,66 @@
     return out;
   }
 
+  /* JPEG (qa/bugs/1b5addcc, 2026-11-26): image_print_prep ships its print files as JPEG since 2026-10-22 (Etsy's 20 MB cap),
+     so a PNG-only check failed every real print file "not a PNG (bad signature)". Same contract as parsePng: walk the
+     container once from the bytes on disk, never trust a filename. SOI first; every marker segment's declared length must
+     fit inside the file; a SOFn frame header gives the real dimensions; the entropy-coded scan after SOS is skipped to the
+     EOI marker, which must be present (a file cut off mid-write has none). DPI comes from the JFIF APP0 density fields —
+     the exact fields print-prep's injectJfifDpi writes (unit 1 = dots per inch, unit 2 = dots per cm, converted);
+     units 0 (aspect ratio only) or no JFIF segment = no DPI metadata, reported as such, never guessed. */
+  const JPEG_SOI = Buffer.from([0xff, 0xd8]);
+  function isJpeg(buf) { return !!buf && buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff; }
+  function isSofMarker(m) { return m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc; }
+  function parseJpeg(buf) {
+    const out = { ok: false, format: 'jpeg', width: null, height: null, ppiX: null, ppiY: null, bytes: buf ? buf.length : 0, hasEoi: false, error: '' };
+    if (!buf || buf.length < 4) { out.error = 'file is empty or too small to be a JPEG'; return out; }
+    if (!buf.slice(0, 2).equals(JPEG_SOI)) { out.error = 'not a JPEG (no SOI marker)'; return out; }
+    let offset = 2, sawSof = false, sawSos = false;
+    while (offset < buf.length) {
+      if (buf[offset] !== 0xff) { out.error = 'corrupt JPEG: expected a marker at byte ' + offset; return out; }
+      while (offset < buf.length && buf[offset] === 0xff) offset++;   // fill bytes before a marker are legal
+      if (offset >= buf.length) { out.error = 'truncated JPEG: file ends inside a marker'; return out; }
+      const marker = buf[offset++];
+      if (marker === 0xd9) { out.hasEoi = true; break; }
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;   // TEM / RSTn carry no length
+      if (offset + 2 > buf.length) { out.error = 'truncated JPEG: segment length past end of file'; return out; }
+      const len = buf.readUInt16BE(offset);
+      if (len < 2 || offset + len > buf.length) { out.error = 'truncated/corrupt JPEG: segment 0xFF' + marker.toString(16).toUpperCase() + ' declares ' + len + ' bytes past end of file'; return out; }
+      const seg = offset + 2;
+      if (marker === 0xe0 && len >= 16 && buf.toString('ascii', seg, seg + 4) === 'JFIF' && buf[seg + 4] === 0) {
+        const unit = buf[seg + 7], x = buf.readUInt16BE(seg + 8), y = buf.readUInt16BE(seg + 10);
+        if (unit === 1) { out.ppiX = x; out.ppiY = y; }
+        else if (unit === 2) { out.ppiX = Math.round(x * 2.54); out.ppiY = Math.round(y * 2.54); }
+      } else if (isSofMarker(marker)) {
+        if (len < 8) { out.error = 'corrupt JPEG: frame header too short'; return out; }
+        out.height = buf.readUInt16BE(seg + 1); out.width = buf.readUInt16BE(seg + 3);
+        if (!(out.width > 0) || !(out.height > 0)) { out.error = 'invalid JPEG frame header: non-positive dimensions'; return out; }
+        sawSof = true;
+      }
+      offset += len;
+      if (marker === 0xda) {   // SOS: entropy-coded data follows until the next non-RST, non-stuffed marker
+        sawSos = true;
+        let i = offset;
+        while (i + 1 < buf.length && !(buf[i] === 0xff && buf[i + 1] !== 0x00 && !(buf[i + 1] >= 0xd0 && buf[i + 1] <= 0xd7))) i++;
+        if (i + 1 >= buf.length) { out.error = 'no EOI marker found — file is truncated or was never finished writing'; return out; }
+        offset = i;
+      }
+    }
+    if (!sawSof) { out.error = 'no JPEG frame header (SOFn) found'; return out; }
+    if (!sawSos) { out.error = 'no JPEG scan (SOS) found — no image data'; return out; }
+    if (!out.hasEoi) { out.error = 'no EOI marker found — file is truncated or was never finished writing'; return out; }
+    out.ok = true;
+    return out;
+  }
+  // one door for both formats: the bytes decide (a .png name holding JPEG bytes is checked as JPEG, and says so)
+  function parseImage(buf) {
+    if (isJpeg(buf)) return parseJpeg(buf);
+    const png = parsePng(buf);
+    png.format = 'png';
+    if (!png.ok && png.error === 'not a PNG (bad signature)') png.error = 'neither a PNG nor a JPEG (unrecognized signature)';
+    return png;
+  }
+
   // Print-size suitability: at the PNG's own pHYs DPI if present, else the industry-standard
   // "effective DPI" from pixels/inches if the caller states a target size — never invents a DPI
   // the file doesn't actually declare or imply. 300 is the conventional print-shop floor; below
@@ -168,9 +228,14 @@
       try { buf = await fsp.readFile(abs); }
       catch (e) { result.error = e && e.code === 'ENOENT' ? 'no such file in workspace: ' + relPath : ('could not read file: ' + ((e && e.message) || e)); return result; }
 
-      const png = parsePng(buf);
+      const png = parseImage(buf);   // PNG or JPEG, by the bytes (qa/bugs/1b5addcc); `png` kept as the name below
       result.bytes = png.bytes;
-      result.integrity = png.ok ? 'PASS — well-formed PNG container (signature, IHDR, chunk chain, IEND all present)' : ('FAIL — ' + png.error);
+      result.format = png.format;
+      result.integrity = png.ok
+        ? (png.format === 'jpeg'
+          ? 'PASS — well-formed JPEG (SOI, segment chain, frame header, scan data, EOI all present)'
+          : 'PASS — well-formed PNG container (signature, IHDR, chunk chain, IEND all present)')
+        : ('FAIL — ' + png.error);
       if (!png.ok) return result;
 
       result.width = png.width;
@@ -199,9 +264,9 @@
 
     const qcTool = {
       name: 'image_quality_check', capability: 'studio', impact: 'none' /* PORT: v0.15.4 requires a declared impact; the studio family is 'none' like image_generate */, scope: 'read', requiresConsent: false, network: false, timeoutMs: 30000,
-      description: 'Independently verify one or more PNG files already in the workspace: file integrity (valid ' +
-        'PNG container, not truncated/corrupt), real pixel dimensions, real DPI from the file\'s own pHYs ' +
-        'metadata (never from a filename), an optional claimed-vs-actual dimension check (catches a mislabeled ' +
+      description: 'Independently verify one or more PNG or JPEG files already in the workspace (image_print_prep ' +
+        'print files are JPEG): file integrity (valid PNG/JPEG container, not truncated/corrupt), real pixel ' +
+        'dimensions, real DPI from the file\'s own metadata (PNG pHYs / JPEG JFIF density; never from a filename), an optional claimed-vs-actual dimension check (catches a mislabeled ' +
         'file — e.g. a filename promising 4800x6000 that is actually a small screen render), and print-size ' +
         'suitability at an optional target inches. This re-reads the actual bytes on disk — it does not trust ' +
         'what image_generate or image_print_prep reported about their own output. Use this for the independent ' +
@@ -292,7 +357,7 @@
     return {
       qcTool,
       register(reg) { reg.register(qcTool); return reg; },
-      _internals: { parsePng, suitability, pixelsPerMeterToPpi, PNG_SIGNATURE, coerceImages, coerceEntry }
+      _internals: { parsePng, parseJpeg, parseImage, isJpeg, suitability, pixelsPerMeterToPpi, PNG_SIGNATURE, coerceImages, coerceEntry }
     };
   }
 

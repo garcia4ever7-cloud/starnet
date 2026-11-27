@@ -203,6 +203,7 @@ test/prices.live.test.js
 test/provider.gemini.test.js
 test/provider.toolschema.test.js
 test/provider.prices.test.js
+test/prices.fable52.port.test.js
 test/prices.all-providers.test.js
 test/provider.timeouts.test.js
 test/provider.registry.test.js
@@ -1904,6 +1905,7 @@ test/headless-dispatch.test.js
 test/dispatch-handoff-race.test.js
 test/dispatch-lease-invariant.test.js
 test/print-prep.test.js
+test/image-qc-jpeg.test.js
 test/vector-export.test.js
 test/stock-image.test.js
 test/mockup-compose.test.js
