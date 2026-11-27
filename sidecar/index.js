@@ -18658,6 +18658,17 @@ async function handleEngineKeySet(req, res) {
   return json(200, Object.assign({ ok: true, provider: id, applied: true, persisted: true, changed: !!r.changed, rev: engineKeys.revOf(id) }, engineKeyPresence(id)));
 }
 function providerLabelOf(id) { const p = getProviderProfile(id); return (p && p.label) || id; }
+/* PHONE PORT 2026-11-27 (handleRun): the Commander removed this provider's page key at the station (a REMOVE tombstone: a revision
+   with no record) AND the station's own key for it is the operator's environment key. Presence only — reads no key. */
+const retiredPageKeySaid = new Set();
+function retiredPageKey(id) {
+  try {
+    const p = String(id || '');
+    if (!p || !engineKeys.revOf(p) || engineKeys.get(p)) return false;
+    const pres = credStore.presence(p);
+    return !!pres && pres.credentialSource === 'environment' && pres.unattendedReady === true;
+  } catch (e) { failNote('credentials.retired-page-key', e); return false; }
+}
 
 /* POST /api/providers/connect { provider, key?, baseUrl? } — the terminal's /connect: a provider key typed in `starnet`
    saved where the APP keeps it, through the app's own ＋ ADD KEY path. The page owns provider keys (the desktop window
@@ -24987,6 +24998,17 @@ async function handleRun(req, res) {
   // the body's key, endpoint and key pool belong to the provider it NAMED. A body that names none meant OpenRouter (what a
   // provider-less body always ran on), so they serve this run only when it runs there — never a provider it borrowed.
   const bodyCredential = !!provider || runProvider === normalizeProvider('');
+  /* PHONE PORT 2026-11-27 — A PAGE KEY THE COMMANDER REMOVED DOES NOT RIDE A RUN. A browser page keeps its own copy of a
+     provider key in localStorage and sends it with every interactive run, and that per-run key wins (credential-store.js).
+     When the Commander REMOVED that provider's page key at the station (the engine-key REMOVE tombstone) and the station's
+     own choice for the provider is an operator ENV key, a page still sending a key is a stale page: its key, spare keys and
+     endpoint are dropped and the run uses the station's env key. Live case: an old Anthropic key in the page (401) sent every
+     page chat over to the fallback chain. Saving a new key in any page replaces the tombstone (explicit save, last-write-wins),
+     which ends this at once; nothing is added, changed or deleted, and no key is logged. */
+  if (bodyCredential && body && typeof body === 'object' && String(body.key || '').trim() && retiredPageKey(runProvider)) {
+    body = Object.assign({}, body, { key: '', keyPool: [], baseUrl: '', base_url: '' });
+    if (!retiredPageKeySaid.has(runProvider)) { retiredPageKeySaid.add(runProvider); console.warn('[credentials] a page sent a saved ' + runProvider + ' key the Commander removed at the station; runs use the station\'s environment key instead (said once per provider per boot)'); }
+  }
   // only the body's OWN effort pick rides to runOnce: runOnceCore resolves the rest WITH the pair the run really uses (the
   // ONE effort rule, run-wire.js) — resolving it here against a provider default would shadow the agent's own effort
   const reasoningEffort = String((body && (body.reasoningEffort || body.reasoning_effort || (body.reasoning && body.reasoning.effort))) || '').trim() || undefined;

@@ -115,6 +115,7 @@ test/cron.run-now.e2e.test.js
 test/desktop-endpoint-handover.e2e.test.js
 test/routine-keys.e2e.test.js
 test/credential-store.remove-rotate.e2e.test.js
+test/retired-page-key.e2e.test.js
 test/credential-store.pool-binding.e2e.test.js
 test/credential-store.redaction.e2e.test.js
 test/credential-store.openrouter-consumers.e2e.test.js

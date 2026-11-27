@@ -277,3 +277,9 @@ skills in `skills.jsonl`, which carries over with the workspace.
   Replay on the live 4x5 print file: before FAIL "not a PNG (bad signature)", after PASS 4800x6000 @ 300 DPI.
 - **Fable 5.2 / Mythos 5.2 priced at the published $8/$40** (cache hits 0.025x) in `sidecar/providers/prices.js` — they fell into the
   Fable 5 row ($10/$50). Opus 5.5 $4/$20 was already right. `test/prices.fable52.port.test.js`.
+- **A page key the Commander removed does not ride a run** (2026-11-27): a browser page keeps its localStorage key and sends it with
+  every `/api/run`, and a per-run key wins — so after the station's page copy was REMOVED (tombstone) an old, revoked key kept
+  failing page chats over to the fallback chain. `handleRun` now drops the body's key / spare keys / endpoint when the provider's
+  page copy is a REMOVE tombstone AND the station's key for it is an env key (`retiredPageKey`); a key saved deliberately in a page
+  replaces the tombstone and is honoured. `test/retired-page-key.e2e.test.js` (http.list): 21 OK on this tree; on pristine v0.15.4
+  row 2 fails (the removed key went upstream).
