@@ -98,6 +98,29 @@ Launcher: `~/starnet-next-work/tests/run-test-station-REALKEYS.sh`; output `~/st
    8f5f9c3d4 and the commit carrying this line) pushed to `feat/harness-backend-station-20261124`. Left out on purpose: every `.bak*`,
    `OMNIROUTE-REPAIR-CHECKPOINT.md`, untracked notes/scratch (`chat`, `detox-run*`, `.ob.json`, …). Not done: the authority-census
    matrix re-capture (it pins to a commit; owner decision, see PHONE_PORT_NOTES 3g).
+
+## 2026-11-27 ~00:10–00:30 PST — browser's old keys stop riding page runs (owner asked; no tap needed)
+- The page does NOT forget its own key when the station holds a REMOVE tombstone (harness.js boot hand-over only keeps its rev),
+  so every page chat kept sending the OLD Anthropic key. **Station-side rule added** (`~/starnet-next/sidecar/index.js`, backup
+  `.bak-20261127-retired-page-key`): in `handleRun`, when the page sends a key for provider X AND X's station page copy is a REMOVE
+  tombstone AND the station's own key for X comes from the environment, the body's key / spare keys / endpoint are dropped and the
+  run uses the env key. A key saved deliberately in any page replaces the tombstone and is honoured again. No key added, changed,
+  deleted or logged; the browser's localStorage still holds the old keys (harmless now).
+- **Proof, free + offline** (8788 copy, sandbox HOME, offline guard, fake keys, Anthropic -> local mock recording only key
+  fingerprints): pristine v0.15.4 sent the removed OLD key (`c767487f`) = the live bug; the fix sent the ENV key (`c784a2db`) on
+  `claude-fable-5-2`, run done/succeeded, 0 fallbacks; a NEW key saved afterwards (`00f7c54e`) was used. Scripts + logs: session
+  scratchpad `pagekey/`. Copy's key file restored. Regression suites green: credential-store.no-crossing 145, engine-credential 169,
+  engine-key-sync 49, route-authority census, persist.lint 102, source-text-integrity, failopen-ratchet 151.
+  `credential-store.endpoint-pair.e2e` fails identically on the pristine baseline (Android boot-token fixture) — pre-existing.
+  Covered since 2026-11-27 by `test/retired-page-key.e2e.test.js` (http.list; 21 OK; on pristine v0.15.4 row 2 fails).
+  `credential-store.remove-rotate.e2e` 117/117 on both trees (run via `run-test-clean.sh`).
+- **Live** after a clean restart 00:2x (receipts 0, nothing in flight, ~50 h before Mon 03:00): launcher **8798**, sidecar **8820**;
+  chain $5 + grant, ARMED, outbox 137, integrity CONSISTENT. Live preconditions hold (both tombstones, env keys); env key
+  `GET /v1/models/claude-fable-5-2` -> 200. No page run has happened since the restart, so a live page-run row is still to be seen:
+  the next page chat should log `[credentials] a page sent a saved anthropic key …` once and record `anthropic/claude-fable-5-2`
+  with no fallback in runs.jsonl.
+- **Committed + pushed** (owner's yes; staged diff scanned: scan-staged hits = the test's 4 fake keys only, gitleaks clean, 0 of 13
+  real secret values): `phone-port-v0.15.4` = **`93abce2bd`** on GitHub (verified by ls-remote). This handoff edit is local only.
 7. **Restart 23:3x** for the QC fix (receipts 0, nothing in flight; ~51 h before Mon 03:00): launcher **8612**, sidecar **8637**, clean
    environ, ARMED, chain $5 + grant, outbox 137, routing not held, integrity CONSISTENT, 0 error lines.
    **Second restart 23:5x** for the price fix (same checks, all held): launcher **15531**, sidecar **15547**.
@@ -597,3 +620,22 @@ live, a worker error on Monday re-fires the chain up to 3× (≤ ~$4 each, ≤ ~
    scheduled run is the chain, Mon 11-30 03:00 PST — read it after 03:30.
    [SCOUT's 11-26 09:00 run (step 2) happened before the pause: Opus 5.5, `budget` stop at $0.685 of the $1.00 cap, 6 turns.]
 5. Work the owner decisions above only with a yes.
+
+## 2026-11-27 ~01:00 PST — dossier audit vs the Nov 26 plan (read-only; NO edits needed)
+Plan = the owner's bundle (`~/.local/share/StarNet/dossier-install-20261126/agent-dossiers-bundle-20261126.txt`, parsed exactly as
+its `plan.js`) + `fixes.js` (04:46: QC_EDITOR Etsy-rules block, DESIGNER step-2 in-art exception) + HARVEST's approved 09:30
+"routine paused" lines. Compared field by field (identity, purpose, context, manual, skills) in three snapshots: the save after the
+09:30 edit (`agent.save.json.bak-20261126-dossierfix`, rev 5584), pre-switch (rev 5603) and LIVE v7 (rev 5641).
+- **All 10 match the plan** in all three: 9 byte-equal to bundle+fixes; HARVEST = bundle + the approved 09:30 lines (unchanged since).
+  Skills identical in all three. Every live roster prompt starts with the planned identity and carries the planned
+  purpose/context/manual block exactly once. Commander's `doc.agent.docs` == NIGHT4CHRIST's.
+- **Changed by the switch-over, outside the dossier fields** (v0.15.4's own prompt framing; not reverted): the 8 Full-Access agents'
+  authority text now says "inside your project folders" (v0.15.3 reach rule, TRUSTED PROJECT; approvalMode still full); the Studio four
+  also get the "What you know about your Commander" block; NIGHT4CHRIST's prompt carries the 2 refreshed Commander-dossier lines
+  cd_1/cd_10 (owner accepted 11-26). The 09:40 Commander-dossier fixes (cd_4, cd_14, cd_15, cd_20, cd_21, cd_28) are intact.
+  New since the switch: Commander-dossier item **cd_32** ("validates tool availability and research readiness before operation"),
+  learned by v0.15.4's background study pass at 22:52 from an old Nov 2 SCOUT test run — not in the plan; left for the owner.
+- **Skills withheld (same on 0.12.5 — `REVIEW_ACTORS` rule):** NIGHT4CHRIST `handle-model-provider-failures-gracefully` and SCOUT
+  `research-etsy-competitor-pricing-for-digital-products` were written by background-review, so they wait for the Commander's
+  approval in ABILITIES ▸ SKILLS. Not changed.
+- No file edited, no restart, NIGHT4CHRIST untouched: chain grant fingerprint `…cb99ede2` still matches.
