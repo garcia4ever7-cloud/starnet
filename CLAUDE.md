@@ -2,10 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Where we left off — 2026-11-26 evening (v0.15.4 port READY in the sandbox; switch-over NOT done)
+
+**Start at `handoff.md` ("v0.15.4 SWITCH-OVER — read this first").** The live station is still **0.12.5** on :8787 (sidecar
+12486, launcher 12468, untouched by the port). The upgrade to upstream **v0.15.4** is fully ported and tested in
+`~/starnet-next` (uncommitted, detached at `124b20a6b`), with every work file in `~/starnet-next-work/` and the full write-up
+in `~/starnet-next/PHONE_PORT_NOTES.md`. Nothing was committed, pushed, restarted or spent ($0 — all tests ran on the 8788
+copy `~/starnet-testws/` with network blocked and a fake key).
+- **Live facts (read 2026-11-26 ~19:30 PST):** save `_saveRevision` **5603**, integrity CONSISTENT; models **Fable 5.2 on 4**
+  (NIGHT4CHRIST, DESIGNER, PUBLISHER, QC_EDITOR), **Opus 5.5 on 6**; production ARMED (2026-11-21, unattributed); 0 receipts;
+  only routine ON = chain `ebc4f07d` (Mon 03:00 LA, Fable, cap $2.00, grant `orchestrator`, next 11-30 03:00 PST).
+- **The chain-retry fix is now COMMITTED and pushed** (`006c1646e`, 11-26 12:41; branch 0/0 with origin). `sidecar/cron-driver.js.orig`
+  is the stray pre-fix copy. v0.15.4 does not need this fix (its driver already settles on the lead's runId).
+- **Facts that change on v0.15.4 (detail in handoff.md):** the launcher's `STARNET_DIR` picks the tree; the env needs
+  `STARNET_TRUST_LOCAL_PEERS=1` AND `STARNET_DESK_CODE_TO_LOG=1` (else desk codes are never printed — the console is a kept log); open the StarNet page once after the switch (v6 -> v7 save move — until then routines refuse);
+  the chain's $2 cap covers lead AND workers (BUDGET_WORKER_POOL is ignored; upstream read no per-routine cap at all — the
+  port restores it); raises (arming production, Full Access, routine
+  grants, spending raises) ask for a 6-digit desk code that the sidecar prints in `~/.local/state/starnet/sidecar.log`;
+  a granted routine loses its grant if its agent's instructions, skills or model change (re-grant in SCHEDULES, desk code).
+
 ## Where we left off — 2026-11-26, 12:12 PST (chain-retry fix is LIVE)
 
 **Chain-retry fix applied and live (owner's yes):** `sidecar/cron-driver.js` patched with
-`~/.local/share/StarNet/chainfix-20261126/cron-driver.patch` (backup `sidecar/cron-driver.js.orig`; uncommitted).
+`~/.local/share/StarNet/chainfix-20261126/cron-driver.patch` (backup `sidecar/cron-driver.js.orig`; ~~uncommitted~~ committed + pushed as `006c1646e`, 11-26 12:41).
 `node --check` OK; replay of the real 11-26 events: old code `failed`, patched `ok`. Restarted 12:12 PST with the
 clean-env recipe below (`.spend-pending/` 0 before and after): launcher 12468, **sidecar 12486**, health ok, `/api/version`
 buildSha `b82cc582d` (dirty), no `LD_PRELOAD`/`CLAUDE*` in its environ, no new log errors. All 11 routines byte-identical

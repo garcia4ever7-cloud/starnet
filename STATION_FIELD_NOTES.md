@@ -2649,3 +2649,36 @@ transient provider/network streaming failure, not configuration.
   byte); it lives only in NIGHT4CHRIST's `doc.agent.systemPrompt` + roster `agent.system` and in `_commander.dossier.json`
   (server copy for cron personas, set via `POST /api/dossier {block}` → `{"ok":true,"chars":1427}`). Each dim line is
   trimmed to a fair share (1,600-char cap), so most changed words never reach the prompt. Backups `*.bak-20261126-dossierfix`.
+
+## 2026-11-26 evening PST — v0.15.4 port ready in a sandbox (facts for the switch-over; nothing live changed)
+
+Live stays 0.12.5 on :8787. The port is `~/starnet-next` (upstream v0.15.4 `124b20a6b` + phone fixes, uncommitted); work files
+`~/starnet-next-work/`; write-up `~/starnet-next/PHONE_PORT_NOTES.md`; plan + risks in `handoff.md`. All tests ran on the 8788
+copy (`~/starnet-testws/`) with the network blocked and a fake key: $0.
+
+What v0.15.4 does differently on THIS station (each checked in code or on 8788):
+- **Install:** `npm ci --force --ignore-scripts` (onnxruntime-node lists no android); node-pty built from source; sharp's wasm build.
+- **Termux fixes needed (4):** workspace-owner lock copy fallback (now via persist `copyExclusive`), EPERM `/proc` check,
+  android treated as linux in process-identity, `.bak` EACCES treated as "no hard links" (was log noise, not data loss).
+- **Page token on Android needs `STARNET_TRUST_LOCAL_PEERS=1`** in the env (`/proc/net/tcp` is denied, so the peer check fails).
+- **Open the page once after switching:** it moves the save v6 -> v7 (one-way; `agent.save.pre-history-ref.json` kept). Until it
+  has, routines/channels refuse ("saved floor waiting for a migration").
+- **Desk codes:** every authority raise (arming production — new, see port notes — Full Access, routine grants, spending
+  raises, toolsets) asks for a 6-digit code. Under the launcher the console is a kept log, and v0.15.4 writes NO code there
+  unless `STARNET_DESK_CODE_TO_LOG=1` is set (verified on 8788). With it, the code is in `~/.local/state/starnet/sidecar.log`.
+- **Routine grants are fingerprinted** on first boot (`grantDrive`: model/provider + agent instructions + skills). A later
+  change of any of them runs the routine WITHOUT its grants (log: "runs without its unattended grants") until re-granted.
+- **A granted run's system prompt** is the agent's own desk-bound instructions + routine note — no Commander dossier,
+  memory, standing brief or crew names.
+- **Spend:** upstream v0.15.4 READ NO per-routine cap at all (`maxCostUsd` was stored but ignored; with station PER RUN 0
+  that meant no per-run cap). The port restores it (`routineCapUsd`, lower-only), and on v0.15.4 it covers the lead AND its
+  workers (run-spend-pool.js); `STARNET_BUDGET_WORKER_POOL` is ignored;
+  `STARNET_BUDGET_PER_WORKER` still applies. Opus 5.5 is priced $4/$20 in v0.15.4's table (the phone says $5/$25) — check.
+- **Dispatch window** is derived: with live `STARNET_CRON_MAX_RUN_MS=1200000` it is 2,580 s per team.dispatch (phone 1,080 s);
+  routine hard wall `CRON_MAX_WALL_MS` 90 min.
+- **Not read by v0.15.4:** `OMNIROUTE_API_KEY` (no omniroute provider — nothing live uses it), `BUDGET_WORKER_POOL`.
+- **Studio:** live env runs studio stages on `openai/gpt-6-luna` (STUDIO_PROVIDER/STUDIO_MODEL).
+- **Security bug found in 0.12.5 (live):** `higgsfield.generate` let a model-supplied `endpoint` (e.g. `@evil.example/x`) or a
+  response `status_url` send the Higgsfield key headers to another host. Fixed in the port only; live is NOT fixed.
+- **Phone bug found:** `image_print_prep` ships JPEG since 10-22 but `image_quality_check` accepts PNG only (QC of print files
+  fails "not a PNG"). Ported as-is; owner decision.

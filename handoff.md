@@ -1,8 +1,360 @@
-# StarNet handoff — read this first (updated 2026-11-26 08:40 PST)
+# StarNet handoff — read this first (updated 2026-11-26 ~22:00 PST, after the v0.15.4 pipeline port)
+
+Phone station (Galaxy Z Fold 8, Termux, F-Droid build). Live data: `~/.local/share/StarNet/workspaces/` (12 GB).
+Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that push. Never print keys or tokens.
+
+# v0.15.4 SWITCH-OVER — read this first
+
+## Where the upgrade stands (plan steps 0-6)
+| Step | What | State |
+|---|---|---|
+| 0 | Plan the 0.12.5 -> v0.15.4 upgrade | DONE |
+| 1 | Install v0.15.4 in a sandbox (`~/starnet-next`) | DONE |
+| 2 | Termux fixes (4) | DONE |
+| 3 | v7 data move tested on a copy (8788) | DONE ($0) |
+| 4 | Shop-safety port (production gate, Apify cap, schema guard, Etsy lifecycle) | DONE ($0) |
+| 4b | Pipeline port (orchestrator grant, handoff files, studio tools, Central Outbox + approval commits, studio video pipeline, integrity script, skill) + full regression sweep + per-routine spend cap | DONE ($0) — this session |
+| 5 | ONE real-key chain test, capped (owner's yes; spends) | NOT STARTED |
+| 6 | Switch-over (cutover) of the live station | NOT STARTED — needs the owner's yes; steps below |
+
+**Live station = 0.12.5 on :8787, untouched by all of the above.** Nothing committed, pushed, restarted or spent; no key,
+model, cap or routine changed. All tests ran on the copy `~/starnet-testws/` on port 8788 with a sandbox HOME, every
+non-loopback connection blocked (`offline-guard.cjs`) and an obviously fake Anthropic key.
+
+## Live state (read-only, 2026-11-26 ~19:30 PST — re-check before acting, it drifts)
+- Sidecar **12486**, launcher **12468**, health ok, OmniRoute up. `.spend-pending/` empty.
+- `agent.save.json` `_saveRevision` **5603**; integrity CONSISTENT (`node scripts/agent-config-integrity.mjs`).
+- Models: **Fable 5.2** (`anthropic/claude-fable-5-2`) on NIGHT4CHRIST (`agent`), DESIGNER (`webdesigner`), PUBLISHER, QC_EDITOR
+  (`qceditor`); **Opus 5.5** (`anthropic/claude-opus-5-5`) on SCOUT, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER.
+  Fallback chain (OpenRouter): claude-haiku-5.5 » gemini-3-flash-preview » gpt-5-mini.
+- Production **ARMED** (`.production-arm.json`: `{"armed":true,"at":"2026-11-21T08:32:28.502Z","by":"unattributed"}`).
+- Routines: only the chain **`ebc4f07d` is ON** — `0 3 * * 1` America/Los_Angeles (next **Mon 11-30 03:00 PST**), lead
+  `anthropic/claude-fable-5-2`, `maxCostUsd` $2.00, `unattendedGrants: ['orchestrator']`. Five others paused (09:30 decision).
+- Live env (names; values read only for non-secrets): `STARNET_CRON_MAX_RUN_MS=1200000`, `STARNET_BUDGET_PER_WORKER=1.00`,
+  `STARNET_BUDGET_WORKER_POOL=2.00`, `STUDIO_PROVIDER=openai`, `STUDIO_MODEL=gpt-6-luna`, `ANTHROPIC_BASE_URL` = api.anthropic.com,
+  keys for Anthropic/OpenRouter/OpenAI/Gemini/HF/Kling/OmniRoute. **No `STARNET_TRUST_LOCAL_PEERS`** (v0.15.4 needs it — step S5).
+- Git `~/starnet`: branch `feat/harness-backend`, tip `006c1646e` (the chain-retry fix, committed + pushed 11-26 12:41; 0/0 with
+  `origin/feat/harness-backend-station-20261124`). Modified: this file, CLAUDE.md, STATION_FIELD_NOTES.md (docs, this session).
+
+## Where everything is
+- **`~/starnet-next`** — upstream v0.15.4 (`124b20a6b`, detached HEAD; a local clone whose `origin` is `~/starnet`), with the
+  whole port applied, UNCOMMITTED. Own `node_modules` (`npm ci --force --ignore-scripts`; node-pty built from source; sharp wasm).
+  Write-up: `~/starnet-next/PHONE_PORT_NOTES.md` (sections 1 Termux, 2 shop safety, 3 pipeline incl. 3g sweep fixes, 4 tests).
+  **183 changed/new files** (`~/starnet-next-work/changed-files.final.txt`): the 115 by category below, plus **68 HTTP-list tests**
+  that now arm their own sandbox (one line each; list in `test-output/sweep2/http-gate-list.txt`):
+- **Termux fixes** (4): `sidecar/persist/replace.js`, `sidecar/process-identity.js`, `sidecar/workspace-owner.js`, `test/workspace-owner-election.test.js`
+- **Production gate + routine caps** (5): `sidecar/cron-driver.js`, `sidecar/cron-store.js`, `sidecar/deskproof.js`, `sidecar/index.js`, `sidecar/production-gate.js` (new)
+- **Apify cap** (4): `sidecar/hostquota.js` (new), `sidecar/mcp/manager.js`, `sidecar/mcp/translate.js`, `sidecar/tools/builtin/web.js`
+- **Routine permission + delegation** (6): `sidecar/capability/project-tools.js`, `sidecar/dispatch-budget.js` (new), `sidecar/handoff-store.js` (new), `sidecar/inputpolicy.js`, `sidecar/permissions.js`, `sidecar/tools/builtin/orchestration.js`
+- **Print & studio tools** (8): `sidecar/tools/builtin/higgsfield.js` (new), `sidecar/tools/builtin/image-qc.js` (new), `sidecar/tools/builtin/mockup-compose.js` (new), `sidecar/tools/builtin/openai-image.js` (new), `sidecar/tools/builtin/print-prep.js` (new), `sidecar/tools/builtin/stock-image.js` (new), `sidecar/tools/builtin/vector-export.js` (new), `sidecar/tools/builtin/video-probe.js` (new)
+- **Deliverables register + Outbox (server)** (6): `sidecar/apitickets.js`, `sidecar/capability/registry.js`, `sidecar/deliverable-files.js` (new), `sidecar/deliverable-manifest.js` (new), `sidecar/tools/builtin/outbox.js` (new), `sidecar/video-verify.js` (new)
+- **Outbox UI (frontend + website mirror)** (12): `frontend/app/apiticket.js`, `frontend/app/outbox.js` (new), `frontend/app/stationui.js`, `frontend/app/toolprops.js`, `frontend/css/app.css`, `frontend/index.html`, `website/app/app/apiticket.js`, `website/app/app/outbox.js` (new), `website/app/app/stationui.js`, `website/app/app/toolprops.js`, `website/app/css/app.css`, `website/app/index.html`
+- **Studio video pipeline** (5): `sidecar/audio-finish.js` (new), `sidecar/cron-orchestrator.js` (new), `sidecar/higgsfield-video.js` (new), `sidecar/project-orchestration.js` (new), `sidecar/video-providers.js` (new)
+- **Integrity script + skill** (3): `scripts/agent-config-integrity.mjs` (new), `sidecar/skills/library/judgment-rubrics.md` (new), `test/agent-config-integrity.test.js` (new)
+- **Tool guards / catalog / persist** (4): `sidecar/etsy-workflow.js` (new), `sidecar/tools/catalog.js`, `sidecar/tools/registry.js`, `sidecar/tools/tool.js`
+- **Tests: ported phone tests** (27): `test/deliverable-files.test.js` (new), `test/deliverable-manifest.test.js` (new), `test/dispatch-handoff-race.test.js` (new), `test/dispatch-lease-invariant.test.js` (new), `test/etsy-workflow.test.js` (new), `test/headless-dispatch.test.js` (new), `test/higgsfield-registry.test.js` (new), `test/higgsfield.test.js` (new), `test/hostquota-run-cap.test.js` (new), `test/mockup-compose.test.js` (new), `test/openai-image.test.js` (new), `test/orchestration-deliverables.test.js` (new), `test/outbox-approval-route.test.js` (new), `test/outbox-large-artifact.test.js` (new), `test/outbox-nine-agents.test.js` (new), `test/outbox-route.test.js` (new), `test/outbox-studio-bridge.test.js` (new), `test/outbox-tools.test.js` (new), `test/outbox-ui.test.js` (new), `test/outbox-unverified-approval.test.js` (new), `test/print-prep.test.js` (new), `test/stock-image.test.js` (new), `test/studio-capture.test.js` (new), `test/studio-orchestration.test.js` (new), `test/studio-pipeline-advance.test.js` (new), `test/studio-qc-integration.test.js` (new), `test/vector-export.test.js` (new)
+- **Tests: new port tests** (6): `test/higgsfield.port-security.test.js` (new), `test/hostquota.port-wiring.test.js` (new), `test/production-gate.port.test.js` (new), `test/production-gate.test.js` (new), `test/routine-cost-cap.port.test.js` (new), `test/tool-schema.port.test.js` (new)
+- **Tests: upstream tests adapted** (24): `test/capgate.test.js`, `test/claude-cli-compact-tools.test.js`, `test/credential-store.no-crossing.test.js`, `test/crew-defaults.invariant.test.js`, `test/cron.images-grant.e2e.test.js`, `test/cron.run-now.e2e.test.js`, `test/cron.session-transcript.e2e.test.js`, `test/cron.station-default.e2e.test.js`, `test/cron.upgrade-backlog.e2e.test.js`, `test/fast.list`, `test/front-doors-tabs.test.js`, `test/harness.integration.test.js`, `test/helpers/sidecar-fixture.js`, `test/inputpolicy.test.js`, `test/outcome-family.census.test.js`, `test/reply-assembler.census.test.js`, `test/route-authority.census.test.js`, `test/routine-delivery.parts.e2e.test.js`, `test/routine-delivery.session-return.e2e.test.js`, `test/routine-drive.http.test.js`, `test/routine-history.publication.http.test.js`, `test/routine-keys.e2e.test.js`, `test/routing.b5.test.js`, `test/tool-withheld-message.test.js`
+- **Docs** (1): `PHONE_PORT_NOTES.md` (new)
+
+- **`~/starnet-next-work`** — everything that is not source (README.md inside):
+  `1-termux-fixes/` (patches + `.bak` test) · `2-shop-safety/` (patches, the 10 phone commits in `orig/`, phone tests, edit
+  scripts) · `3-pipeline/` (`patches/pipeline-port.patch`, `orig/phone-index-blocks/` = phone handler blocks lifted verbatim,
+  `orig/phone-css/`, `phone-tests/`, `scripts/`, `authority-matrix.diff.txt`) · `all-changes-vs-v0.15.4.{tracked,new-files}.patch`
+  (the whole port) · `changed-files.*` · `env/test.env` (8788 settings, NO provider keys) + `env/live-env-NAMES-only.txt` ·
+  `tests/` (`run-test-station.sh`, `run-test-station-step4.sh` = fake key, `run-test-clean.sh` / `run-test-clean-ARMED.sh`
+  (`PORT_ROOT=` picks the tree), `sweep.sh`, `offline-guard.cjs`, `cdp-eval.mjs`, `probes/`) · `test-output/` (station logs,
+  API answers per step, `step4/`, `step5-pipeline/`, `sweep/`, `sweep2/` = FINAL sweeps, `reruns/`, `cron-suites/`,
+  blocked-network logs) · `baseline-v0154-termux/` (pristine v0.15.4 + Termux fixes, for "is this failure pre-existing?") ·
+  `tree-after-step4/` · `home/` (sandbox HOME; deletable). The two trees are 3.5 GB each.
+- **`~/starnet-testws/`** — the 12 GB test copy of the live workspace (already migrated to v7 by step 3). Restored to its
+  pre-test bytes after every test (snapshots in `test-output/*/pre-test-snapshot/`).
+
+## What the port changes (summary — detail in PHONE_PORT_NOTES.md)
+- **Termux (4):** workspace lock copy fallback (persist `copyExclusive`), EPERM `/proc` liveness, android treated as linux in
+  process-identity, `.bak` EACCES = "no hard links" (was log noise; backups were never lost).
+- **Shop safety:** production gate (state file, routes, run-start refusal, cron "declined" outcome, routine snapshot,
+  workshop buttons; **arming now asks for the desk code**, disarming never does), Apify cap 8/day + 3/run at both doors,
+  tool schema/name guards, Etsy lifecycle module (not wired, as on the phone).
+- **Pipeline:** `orchestrator` routine grant (object + consent + depth fence), host handoff files in the lead's outbox, the
+  lease-outlives-dispatch invariant, 8 print/studio tools, Central Outbox (manifest at `workspaces/.deliverables`, run-end
+  registration, outbox tools, `/api/outbox`, `/api/artifact`, approval + QC writers, `/api/deliverables/register`, UI window
+  CENTRAL OUTBOX under MY WORK, tickets), the studio video pipeline (`/api/studio/*`), integrity script, `judgment-rubrics`.
+- **Per-routine spend cap (found + ported tonight):** v0.15.4 carried the field but read it nowhere — with station PER RUN = 0
+  every routine would have had NO per-run cap. Ported as `routineCapUsd`, lower-only; **on v0.15.4 the chain's $2.00 cap
+  covers the lead AND all its workers** (run-spend-pool.js); `STARNET_BUDGET_WORKER_POOL` is ignored; per-worker $1.00 still applies.
+- **Security fix (live bug!):** Higgsfield key headers could be steered to another host by a model-supplied endpoint or a
+  response status URL. Fixed in the port only.
+- **Superseded / not ported on purpose:** pooled worker budget (upstream's spend pool is stricter), the 0.12.5 chain-retry
+  patch (upstream's driver already ignores worker runIds), video.kling / image_upscale_kling (never callable), phone
+  `image.js` routing (v0.15.4 keeps its own image router), `cron-orchestration-tasks.js` (dead), slow-phase diagnostic log.
+
+## Test results (final tree)
+- **Fast list (`test/fast.list`, 1,904 tests), full sweep on the frozen tree + re-run of every failure:** 1,875 pass.
+  29 fail: **28 fail identically on pristine v0.15.4 + the Termux fixes** (pre-existing on this phone — browser/WebGL/scene
+  bakes need a display, real-socket/SNI tests vs the offline guard, release-train/updater (desktop), workshop e2e and
+  boot-security (403 token on Android), durable-store-faults (expects a hard link), prompt-scrub P2 hash (clock/locale),
+  voice, channels.store-cache, notebook-peer-reads, save-persist-cost, session-reliability, prop-recovery, workspace-probe,
+  skills.package-hardening (EACCES link)); **1 is the port's: `authority-census`** — the captured authority matrix differs in
+  734 cells, ALL about the 10 ported tools (`~/starnet-next-work/3-pipeline/authority-matrix.diff.txt`); a re-capture is pinned
+  to a commit hash, so it waits for a commit (owner decision). Lists: `test-output/sweep2/final/fast-classification.tsv`.
+- **HTTP list (`test/http.list`, 401 tests — never swept before; the fast sweep does not cover it):** first pass 242 pass,
+  159 fail. Classified (`tests/classify.sh`: port -> port with sandbox armed -> baseline): **0 port regressions.**
+  **68 were the production gate** refusing unattended metered MOCK runs on a fresh, disarmed test sandbox (upstream tests
+  written before a gate existed; includes workers dispatched by an interactive lead, which the gate judges as unattended,
+  as on 0.12.5). Each now arms its own sandbox (`process.env.STARNET_PRODUCTION_ARMED = '1'`, like the phone's bd14f909c); all
+  68 re-run green on the plain runner. **91 fail identically on the baseline** (pre-existing on this phone): 35 boot token
+  withheld by the Android peer check in the fixture, 17 other 403s (token/desk on Android), 12 timeouts, 27 other env.
+  Final: **310 pass, 91 pre-existing.** Lists: `test-output/sweep2/http-classification.all.tsv`, `http-armed-verify/`.
+- **Live-shape runs on 8788** ($0 each): boot clean; ARMED carried over; disarmed Run Now refused + recorded "declined";
+  armed Run Now passed the gate; Outbox reads the copied live manifest as **137 rows** (identical to the phone module:
+  PUBLISHER 55, QC_EDITOR 57, DESIGNER 49); artifact fetch byte-exact; approval/QC/path gates refuse; ticketed fetch works and
+  cannot be replayed as another agent; studio pipeline starts/stops; `/api/run` NDJSON contract (runId + typed outcome)
+  confirmed; integrity CONSISTENT; copy restored byte for byte.
+- **Final smoke on the finished tree (8788, 2026-11-26 ~20:25 PST):** `/api/version` = `{"app":"0.15.4","buildSha":"124b20a6b…",
+  "buildDirty":true}`; production persisted ARMED; chain keeps `maxCostUsd:2`, grant + fingerprint; Outbox 137 rows. It also
+  caught a real bug: the arming desk action was not on deskproof.js's whitelist (500 "unknown desk action") — fixed and re-run:
+  disarm 200 without asking; arm from disarmed 403 + challenge; code in the log (with `STARNET_DESK_CODE_TO_LOG=1`); confirm 200;
+  ARMED, recorded "final smoke — unverified". Copy restored; integrity CONSISTENT; only boot probes blocked; $0.
+
+## SWITCH-OVER PLAN (each step needs the owner's yes; test + undo per step)
+Do it on a weekday daytime with the owner at the phone, **not** within ~12 h before Monday 03:00 PST, and after the owner has
+decided the chain cap (Recommendation 1). Total time ~45 min (the workspace copy is ~12 GB). Claude may run the commands; the
+owner types any desk code. `TS=$(date +%Y%m%d-%H%M)` once, reuse it.
+
+**P5 — Plan step 5 FIRST, on the 8788 copy (recommended before the switch; owner's yes; spends real money).** Proves the
+whole pipeline on v0.15.4 with real keys while live keeps running 0.12.5. How: copy `tests/run-test-station-step4.sh` to a
+`run-test-station-REALKEYS.sh` that (a) does NOT load `offline-guard.cjs`, (b) instead of the fake key does
+`set -a; . ~/.config/starnet/env; set +a` INSIDE that one process (never print it), (c) keeps port 8788, the sandbox HOME and
+`STARNET_WORKSPACES=~/starnet-testws/workspaces`, and (d) adds `STARNET_HOST_DAILY_LIMITS=apify.com=3` (the copy has its own
+Apify counter, separate from live's 8/day). Snapshot the copy (as in step 5 of the port), boot, set the copy's chain cap to
+the decided value (`POST /api/cron/update {"id":"ebc4f07d-a26e-4e40-ae4f-01f8a56ea909","patch":{"maxCostUsd":<X>}}`), then ONE
+Run Now of the chain (`POST /api/cron/run`, never `curl -m`). The copy has no chat channels configured (checked), so no bot is
+shared with live. Note: with real keys the copy's own background passes (quest refresh on its "caught-up" fast path, reflection after
+runs) can make a few small paid calls, as live does; the Run Now is the main spend. Watch what S10 lists. Afterwards SIGTERM the 8788 sidecar by PID and keep its logs; the copy is a sandbox.
+Undo: none needed (live untouched); the spend is real.
+
+**S0 — Pre-flight (read-only).** `curl -s -m4 http://127.0.0.1:8787/api/health` = ok · `ls ~/.local/share/StarNet/workspaces/.spend-pending/`
+= empty · `GET /api/cron` (header `x-starnet-token`) shows no `inFlight:true` · `node scripts/agent-config-integrity.mjs` = exit 0 ·
+`df -h ~` ≥ 20 GB free · record `GET /api/outbox?agent=agent` `count` (compare in S7) · note launcher/sidecar PIDs (`pgrep -af start-starnet.sh`, `pgrep -af 'node sidecar/index\.js'`).
+Test: all seven true. Undo: none (read-only). **If any fails, stop.**
+
+**S1 — Close every StarNet browser tab** (an old 0.12.5 page would push its roster to the new station). Test: no tab open.
+
+**S2 — Stop 0.12.5 cleanly** (CLAUDE.md recipe): count `.spend-pending` again (must be 0), `kill <launcher PID>`, then
+`kill <sidecar PID>`, wait until `curl …/api/health` fails and `pgrep -af 'node sidecar/index\.js'` is empty (≤ 30 s).
+Test: port 8787 closed, no node sidecar. Undo: start 0.12.5 again with the `env -i` recipe (launcher unchanged at this point).
+
+**S3 — Backups (with the station stopped, so the copy is consistent):**
+`cp -a ~/.local/share/StarNet/workspaces ~/.local/share/StarNet/workspaces.bak-$TS-pre0154` ·
+`cp -p ~/.config/starnet/env ~/.config/starnet/env.bak-$TS-pre0154` · `cp -p ~/start-starnet.sh ~/start-starnet.sh.bak-$TS-pre0154` ·
+`cp -p ~/.termux/boot/start-starnet ~/.termux/start-starnet.bak-$TS-pre0154` (outside boot/ so Termux:Boot does not run it).
+Test: `du -s` of the copy ≈ the original; `cmp` the save, roster, cron.jobs.json, `.production-arm.json`,
+`.deliverables/manifest.jsonl`. Undo: delete the copies (nothing else changed).
+
+**S4 — (optional, recommended) Mark the moment:** `cp -p workspaces/cron.jobs.json workspaces/cron.jobs.json.bak-$TS-pre0154`.
+
+**S5 — Env: add TWO lines** to `~/.config/starnet/env` (append; keep mode 600; never print the file):
+`STARNET_TRUST_LOCAL_PEERS=1` — Android denies `/proc/net/tcp`, so without it v0.15.4 withholds the token from the page and the
+page cannot open (and the page must open once, S8).
+`STARNET_DESK_CODE_TO_LOG=1` — **required on this phone.** The launcher pipes the sidecar's console into `sidecar.log`, and
+v0.15.4 refuses to write desk codes to a kept log unless this is set ("This station's console is kept in a log, so its code is
+not written here … start it with STARNET_DESK_CODE_TO_LOG=1"). Without it NO raise can be confirmed: re-granting the chain,
+arming production, Full Access, spending raises. Trade-off: anything that can read `sidecar.log` (this Termux user, a Claude
+session) can read the code. Verified on 8788 tonight: without it, arming asked and printed no code; with it, the code was in the
+log and the confirm armed the station.
+Test: `grep -cE '^STARNET_(TRUST_LOCAL_PEERS|DESK_CODE_TO_LOG)=1$' ~/.config/starnet/env` = 2; `stat -c %a` = 600.
+Undo: `cp -p env.bak-$TS-pre0154 env`.
+
+**S6 — Launcher points at the new tree:** in `~/start-starnet.sh` change line 14 to
+`STARNET_DIR="${STARNET_DIR:-$HOME/starnet-next}"`. This one line switches manual starts, `starnet-up.sh` and Termux:Boot
+(boot -> starnet-up.sh -> start-starnet.sh). Test: `bash -n ~/start-starnet.sh`; `grep -n STARNET_DIR= ~/start-starnet.sh`.
+Undo: `cp -p ~/start-starnet.sh.bak-$TS-pre0154 ~/start-starnet.sh`.
+
+**S7 — Start v0.15.4** with the clean-env recipe from CLAUDE.md (cheat sheet, "When Claude Code runs a restart"), never from a
+Claude shell directly. Test (all must hold): `/api/health` ok; `GET /api/version` reports 0.15.4; `/proc/<sidecar>/environ` has
+no `LD_PRELOAD` and no `CLAUDE*`; `tail -80 ~/.local/state/starnet/sidecar.log` has no uncaught error and no
+`[dispatch] … does NOT fit` warning; expected lines: `authority-seal unkeyed`, `[cron] recorded the model of 3 routine(s) allowed
+to run unattended` (grant fingerprints, first boot only — the chain, the dispatch smoke test and the Etsy research routine); `GET /api/production/status` = armed/persisted; `GET /api/cron`
+= chain enabled, `unattendedGrants:['orchestrator']`, `maxCostUsd:2`, `gateBlocked:false`; `GET /api/outbox?agent=agent`
+count = the count recorded in S0. Undo: stop it (S2 recipe), restore the launcher (S6 undo), start 0.12.5 — the data is still v6 until S8.
+
+**S8 — Open StarNet once in Chrome** (`http://127.0.0.1:8787`, a fresh tab). The page moves the save v6 -> v7 by itself
+(seconds) and keeps `agent.save.pre-history-ref.json` (the v6 file). **Until this has happened, routines and channels refuse
+to run** (0.15.0 notes). Test: `agent.save.pre-history-ref.json` exists; `node ~/starnet-next/scripts/agent-config-integrity.mjs`
+= CONSISTENT; `node ~/starnet/scripts/station-models.mjs list` shows the same 10 models; sidecar.log has no "waiting for a
+migration"; COMMS shows the chats. Undo after S8 = **full rollback** (below) — v7 is one-way for 0.12.5.
+
+**S9 — Post-switch checks:** CENTRAL OUTBOX tab opens (MY WORK); SCHEDULES shows the chain armed with its next run; the
+grant is intact (no "runs without its unattended grants" in the log after a Run Now). Raises now ask for a 6-digit desk
+code that the sidecar prints in `~/.local/state/starnet/sidecar.log` (`tail` it, type the code in the page).
+
+**S10 — Plan step 5 on the live station (only if P5 was skipped; owner's yes; spends):** one Run Now of the chain on v0.15.4 with its (decided) cap. Watch:
+`runs.jsonl` (lead + worker rows, `usd`, `reason`/`outcome`), handoff files `workspaces/agent/outbox/<ts>-agent-to-*.md`,
+new rows in `/api/outbox`, DESIGNER's `image_generate`/print-prep outputs, SCOUT's Apify calls (≤3), the spend total vs cap.
+Never pass `curl -m` or pipe Run Now to `head` (it aborts the run). This is the proof the pipeline works on v0.15.4.
+
+**S11 — (optional) Termux:Boot test:** reboot the phone; `~/.local/state/starnet/boot.log` must show `UP` and `/api/version`
+0.15.4. Undo: none needed (boot script unchanged).
+
+**S12 — Keep the backups ≥ 7 days** (and `~/starnet` untouched) until v0.15.4 has run Monday's chain cleanly.
+
+**FULL ROLLBACK to 0.12.5** (any time after S7/S8): stop v0.15.4 (S2 recipe) · `mv workspaces workspaces.failed-0154-$TS` ·
+`cp -a workspaces.bak-$TS-pre0154 workspaces` · restore the launcher (S6 undo) · (optional) restore env (S5 undo; the extra
+line is harmless) · start with the clean-env recipe · reload tabs · integrity CONSISTENT. Anything v0.15.4 produced after the
+switch (runs, Outbox rows, handoff files) stays in `workspaces.failed-0154-$TS` — copy files back by hand if needed.
+
+## Recommendations — top risks for unattended runs (Monday 03:00 chain, safety holds, production switch, spend caps)
+1. **Chain budget will likely cut Monday's run short.** [Likely] Past chain fires cost $0.35–$0.99 lead+workers on gemini/gpt-5
+   (11-24..11-26). The chain is now Fable (lead) + Fable/Opus workers (≈5–100× per token; SCOUT alone spent $0.685 this
+   morning). On v0.15.4 one **$2.00 pool covers lead + workers** (0.12.5: $2 lead + $2 worker pool). Do: decide the cap before
+   the switch — e.g. `POST /api/cron/update {"id":"ebc4f07d-…","patch":{"maxCostUsd":5}}` (owner's yes), or keep $2 and accept a
+   partial run (the run stops cleanly on budget). Measure it in P5 first. If the switch is not done before Monday, nothing
+   changes: 0.12.5 runs Monday's chain as today ($2 lead + $2 worker pool).
+2. **v7 move needs the page.** If nobody opens StarNet after S7, every routine refuses (no spend, but no work). Do S8 at once.
+3. **Without `STARNET_TRUST_LOCAL_PEERS=1` the page cannot open on Android** (token withheld) — so S8 fails. S5 first.
+4. **Grant fingerprints.** v0.15.4 stamps the chain's grant with NIGHT4CHRIST's instructions, skills and the routine's model
+   at first boot. Any later dossier/skill/model edit makes the chain run **without** `orchestrator` (no delegation; log
+   "runs without its unattended grants"). Also, **editing the routine's own prompt, model, provider, skills, agent, script or toolsets
+   revokes its grant** (cron-store `RUN_FIELDS`, checked in code); a `maxCostUsd` edit does NOT. Do: after any such edit,
+   re-grant in SCHEDULES (desk code) and check the log before the next fire.
+5. **A granted run's prompt is smaller on v0.15.4** (agent's own instructions + routine note; no Commander dossier, memory,
+   standing brief or crew names). Watch the first chain's quality in S10; the Etsy rules live in the agent docs, so they stay.
+6. **Desk codes need `STARNET_DESK_CODE_TO_LOG=1` (S5) and then live in `sidecar.log`.** Arming production (desk-gated by the
+   port; disarming never asks), Full Access, routine grants, spending raises and toolsets all ask. Flow (verified on 8788):
+   the request answers 403 `desk_confirm_required` with a challenge; the page shows it; the 6-digit code is in
+   `tail ~/.local/state/starnet/sidecar.log` ("Confirm at the desk: …"); type it in the page. From curl:
+   headers `x-starnet-desk-proof: <challenge id>` + `x-starnet-desk-code: <code>`. 5 wrong codes lock raises for a while.
+7. **Live security bug until the switch:** `higgsfield.generate` (0.12.5) can leak the Higgsfield key. The switch fixes it.
+   Until then avoid Higgsfield calls (DESIGNER used it 6 times historically).
+8. **Opus 5.5 price:** v0.15.4's table says $4/$20 per Mtok, 0.12.5 says $5/$25. If v0.15.4 is low, Opus spend books ~20% low
+   and caps stop later than they should. Check Anthropic's price page; fix `sidecar/providers/prices.js` if needed.
+9. **Print files fail QC (phone bug, ported as-is):** print-prep writes JPEG, image_quality_check accepts PNG only. The chain's
+   QC stage will report print files as failed. Decide: teach QC JPEG (print-prep has a JFIF DPI reader) or leave.
+10. **Second dispatch after tainted input is refused** (same on 0.12.5): once a worker's output (e.g. SCOUT's web data)
+    reaches the lead, a NEW `team.dispatch` call is refused unattended. The chain works today because one sequential
+    dispatch covers all stages — keep the chain prompt that way.
+11. **Dispatch window got longer:** with `STARNET_CRON_MAX_RUN_MS=1200000` v0.15.4 derives 2,580 s per dispatch (phone 1,080 s);
+    the 90-min routine wall still bounds the run. Fine, but a stuck worker now burns up to ~43 min before an honest timeout.
+12. **OmniRoute unused by v0.15.4** (no `omniroute` provider; `OMNIROUTE_API_KEY` ignored). Nothing live uses it; the launcher still
+    starts it (RAM only). Leave or remove later.
+13. **Studio pipeline** runs on `openai/gpt-6-luna` (env), priced; its status can stay "running" forever after a submit failure
+    (phone bug, ported as-is).
+14. **Committing the port:** `~/starnet-next` is an uncommitted detached tree whose `origin` is the PUBLIC repo's local clone.
+    Decide branch/commit strategy before pushing anything (45 gitleaks findings are still open); then re-capture the
+    authority matrix (`test/authority-census.test.js`) on that commit.
+15. **Disk:** backups 12 GB + test copy 12 GB + work trees 7 GB. Delete `~/starnet-testws`, `baseline-v0154-termux/`,
+    `tree-after-step4/` and `home/` only after the switch-over is proven (owner's call).
+
+## Open owner decisions (consolidated)
+1. Chain cap on v0.15.4 (Rec. 1). 2. When to do S0–S12 and step 5 (spends). 3. Print-prep JPEG vs QC PNG (Rec. 9).
+4. Opus price (Rec. 8). 5. Commit/branch/push strategy for the port (Rec. 14) + authority-matrix re-capture. 6. Keep arming
+desk-gated (port default) or revert to token-only. 7. Accept `STARNET_DESK_CODE_TO_LOG=1` (S5; codes readable by anything that
+reads sidecar.log) — without it no raise can be confirmed on this phone. 8. Patch the live 0.12.5 Higgsfield key leak now
+(needs a restart) or wait for the switch (Rec. 7). 9. Older decisions below still open: OpenRouter balance ($6.32 of $45),
+Anthropic balance (console), approvalMode `full` on 8 of 10, repo public + gitleaks, Kling key backup file, 137 Outbox items,
+ledger $139.67 vs $60 ceiling, production armed "unattributed".
+
+## How to work on the port (for a fresh session)
+- Tests: `~/starnet-next-work/tests/run-test-clean.sh test/<name>.test.js` (clean env, no keys, offline guard; `PORT_ROOT=` picks
+  the tree; `run-test-clean-ARMED.sh` arms the sandbox). Pre-existing? Run it with
+  `PORT_ROOT=~/starnet-next-work/baseline-v0154-termux`. Whole list: `tests/sweep.sh <outdir> [list]`. Sort failures:
+  `tests/classify.sh <failed-list> <outdir>` (port -> port armed -> baseline; verdicts pass-now / gate-needs-armed-sandbox /
+  pre-existing / PORT-REGRESSION). `run-test-station-DESKLOG.sh` = the 8788 station with desk codes in its log.
+- Live-shape test: snapshot the copy's state files, `tests/run-test-station-step4.sh` (8788, fake key, offline guard), test,
+  SIGTERM it by PID (cwd `~/starnet-next`), restore the snapshot, run the integrity script on `~/starnet-testws/workspaces`.
+- Never touch the live station, `~/.config/starnet/env`, Termux:Boot or `~/starnet` code without the owner's yes.
+
+---
+
+# HISTORICAL — this file as it stood earlier on 2026-11-26 (kept verbatim; superseded where it disagrees with the above)
+
+# StarNet handoff — read this first (updated 2026-11-27, pipeline port)
 
 Phone station (Termux). Repo `~/starnet` is PUBLIC (GitHub confirmed 05:00) — push only with the owner's yes for that push
 (08:40: yes for the three docs commits). Live data: `~/.local/share/StarNet/workspaces/`.
 Then read `CLAUDE.md` "Where we left off" and the newest section of `STATION_FIELD_NOTES.md`.
+
+## v0.15.4 update: plan steps 1–3 DONE in a sandbox (2026-11-26 ~13:15 PST). Live 0.12.5 untouched on 8787.
+- **Where things are:** `~/starnet-next` is upstream v0.15.4 (`124b20a6b`, detached, uncommitted). It has 3 Termux fixes and
+  `PHONE_PORT_NOTES.md`, which lists every change by category. The test leftovers, patch, test env and test scripts
+  are in `~/starnet-next-work/` (see its README). The test workspace copy is `~/starnet-testws/`.
+- **Step 1, install:** `npm ci --force --ignore-scripts` (plain `npm ci` refuses android, because of onnxruntime-node).
+  node-pty is built from source with `--nodedir=$PREFIX`. sharp uses the lockfile's `@img/sharp-wasm32` build
+  (hash-checked). Voice (onnxruntime) is not usable on Android.
+- **Step 2, Termux fixes:** workspace-owner hard-link copy fallback and EPERM `/proc` check, android treated as
+  linux in process-identity, and the matching lock-test fix. All 4 lock and identity tests pass.
+  `STARNET_TRUST_LOCAL_PEERS=1` is only in the test env file.
+- **Step 3, v7 on a copy:** booted on 8788 with a sandbox HOME, all network blocked and a FAKE Anthropic key
+  (now deleted). The page went in by itself. Save v6 to v7, `pre-history-ref` kept, all 71 sessions' chats load
+  exactly as in v6, agents identical, integrity CONSISTENT. $0 spent, and all 7 network attempts were blocked.
+- **Owner decision (DECIDED 2026-11-26, owner): KEEP the 2 refreshed dossier lines.** The 0.15.4 page rewrites 2
+  untouched dossier "seed" lines (identity #1 and standing order #2) to match NIGHT4CHRIST's current docs (upstream
+  `2ef2cb718`, by design). The owner accepts the refreshed text; do NOT clear them on 0.12.5 before cutover.
+  Also, 8 old routine-run sessions leave the session list (0.15.3 rule).
+- **Fourth Termux fix DONE (step 4).** Correction: `.bak` copies were never lost (upstream already copies when
+  `link()` fails). The fix stops the `persist.bak.link EACCES` noise (EACCES counted as no-hard-links, Android only).
+  The step-2 lock fallback was reworked onto persist's `copyExclusive` (upstream `persist.lint` forbids bare writes).
+
+## v0.15.4 update: PIPELINE PORT DONE in the sandbox (2026-11-27). Live 0.12.5 untouched on 8787. Stopped before cutover.
+Full detail: `~/starnet-next/PHONE_PORT_NOTES.md` section 3 (+ 4 for tests). Work files: `~/starnet-next-work/3-pipeline/`.
+- **Ported (all adapted, nothing committed):** the `orchestrator` routine grant (object + consent + depth fence), host
+  handoff files, the lease-outlives-dispatch invariant; the 8 print/studio tools; the Central Outbox (manifest, run-end
+  registration, outbox tools, /api/outbox, /api/artifact, approval + QC writers, /api/deliverables/register, UI window,
+  tickets) including the 4 held-back commits `b0dcc0b2c` (outbox half), `c9b56ca46`, `21e1e7c79`, `6b141f46d`; the studio
+  video pipeline (cron-orchestrator + no-delegate prompt, /api/studio/*); the integrity script; the `judgment-rubrics` skill.
+- **Without the grant port the chain could not delegate on v0.15.4** (upstream drops unknown grant names) — fixed; the
+  chain's `['orchestrator']` survives the load.
+- **8788 test ($0, network blocked, fake key):** clean boot; ARMED carried over; Outbox reads the copied live manifest as
+  137 rows (identical to the phone module); artifact fetch byte-exact; approval/QC/path gates refuse correctly; ticketed
+  retrieval works and cannot be replayed as another agent; studio pipeline starts and stops cleanly (no OpenRouter key in
+  the test env); /api/run's stream contract confirmed. Integrity CONSISTENT; test copy restored byte for byte.
+- **Owner decisions (new):** see "Open owner decisions — pipeline port" below.
+
+## v0.15.4 update: plan step 4 shop-safety DONE in the sandbox (2026-11-26 ~14:45 PST). Live 0.12.5 untouched.
+Full detail: `~/starnet-next/PHONE_PORT_NOTES.md` sections 1, 2 and 4. Patches: `~/starnet-next-work/2-shop-safety/`.
+- **Finding:** all 10 commits fix PHONE-ONLY features (none of them, and none of their bases, are in upstream), so
+  each was adapted, not cherry-picked.
+- **Ported:** the production gate (`2f5f3486c`, `c0a1d0096`, `e5c8da4ab` plus its base); the Apify cap (`8557798db`
+  plus `hostquota.js`, both doors); `b0dcc0b2c` generic half (schema-key guard and argument hint); the Etsy lifecycle
+  (`14160ee7b`, a library nothing imports yet). Same state files as 0.12.5 (`.production-arm.json`,
+  `.host-daily-quota.json`), so the ARMED state and today's Apify count carry over at cutover.
+- **Superseded:** `893070f29`. Upstream's `run-spend-pool.js` makes the lead's cap cover all its workers.
+  **`BUDGET_WORKER_POOL` is ignored on v0.15.4: the chain's $2.00 becomes lead + workers together** (today:
+  $2 + $2). Owner may want to raise the chain cap before cutover.
+- **Blocked until the pipeline port:** `c9b56ca46`, `21e1e7c79`, `6b141f46d` and the outbox half of `b0dcc0b2c`
+  (they need the phone-only `deliverable-manifest.js`, outbox UI, `cron-orchestrator.js` and studio tools).
+- **Not needed after cutover:** the live chain-retry patch. v0.15.4's cron driver already ignores worker runIds.
+- **Adaptations to know about:** the gate refusal is `failureCode 'production_disarmed'` (v0.15.4 uses
+  "refused" for model refusals), and the routine is recorded as `declined` (no retry, no streak, still scheduled).
+  The workshop "Commander pressed it" flag feeds the gate only, not `accessSurface`. The HUD's `cron.result` still
+  says "failed" for a declined fire (wording nit).
+- **8788 test ($0, network blocked, fake key):** status carried over ARMED. Disarm logs the recorded label
+  ("unverified"). Run Now while disarmed was REFUSED before any provider call and recorded as declined. Run Now
+  while armed passed the gate, then was blocked at the network, `usd 0`. All 11 attempts were blocked. Integrity
+  CONSISTENT. The test copy was restored from `test-output/step4/pre-test-snapshot/`. Note: the chain is OFF in the
+  test copy (ON live).
+- **Owner decision (recorded 2026-11-26): keep the 2 refreshed dossier lines** (see above).
+- **Next: plan step 4, part 2, the pipeline commits** (print and studio tools, deliverables register, the
+  cron-orchestrator prompt, the integrity script, the `orchestrator` routine permission). The 4 blocked outbox
+  commits ride with the deliverables register. Then step 5 ($2-capped chain test with real keys, owner's yes),
+  then step 6 (cutover).
+
+## Open owner decisions — pipeline port (2026-11-27)
+1. **Print-prep vs QC (phone bug):** `image_print_prep` ships JPEG (Etsy 20 MB rule) but `image_quality_check` only accepts
+   PNG, so QC of a print-prep file fails today on 0.12.5 too. Teach QC to read JPEG (print-prep already has a JFIF DPI
+   reader it could reuse), or leave it. Ported unchanged.
+2. **`image_generate` routing:** v0.15.4 keeps its own router (default `google/gemini-3.1-flash-image`); the phone's
+   OpenRouter-key fix and native Gemini fallback were not ported (that would change models/keys). Confirm it renders with
+   the real keys in the $2 step-5 test.
+3. **Studio stage model:** the studio pipeline still runs every stage on `anthropic/claude-sonnet-4.5` via OpenRouter
+   unless `STUDIO_MODEL`/`STUDIO_PROVIDER` are set — not the agents' own models. Unchanged on purpose.
+4. **Chain budget (from step 4):** on v0.15.4 the chain's $2.00 cap covers lead + workers together (today $2 + $2 pool).
+5. **Dispatch window:** derived default is 420 s per team.dispatch on v0.15.4 (the phone uses 360 s); an explicit
+   `STARNET_DISPATCH_TIMEOUT_MS` in the env would override it — check the env before cutover (not read here).
+6. **Studio status (phone bug):** a studio project whose stage fails at submit stays "running" forever. Fix or leave.
+7. **New MY WORK tab:** CENTRAL OUTBOX sits after DELIVERABLES (upstream's own OUTBOX alias still opens DELIVERABLES'
+   TO REVIEW section). Keep, rename or move.
 
 ## Current state (checked live 04:29, re-checked 05:00, read-only)
 - [12:12 PST: now sidecar 12486, launcher 12468, after the chain-fix restart] Sidecar 29630 (health ok, app 200), OmniRoute 29422/29443. Started by the Termux:Boot test reboot at 00:33 PST.
