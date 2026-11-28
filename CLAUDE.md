@@ -2,17 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Where we left off — 2026-11-26 ~23:45 PST: LIVE STATION IS NOW v0.15.4 (switch-over done, owner's yes)
+## Where we left off — 2026-11-28 (end of session c2fcd585; owner will /clear) — START AT `handoff.md` "CURRENT STATE"
+
+- **Live:** v0.15.4 from `~/starnet-next` (`phone-port-v0.15.4` @ `93abce2bd`, pushed), sidecar 8820 / launcher 8798, ARMED, save
+  rev **5764**, integrity CONSISTENT, 0 receipts. Models: Fable 5.2 on NIGHT4CHRIST/DESIGNER/PUBLISHER/QC_EDITOR, Opus 5.5 on the other 6.
+  Only routine ON: chain `ebc4f07d` (Mon 03:00 LA, next 11-30, $5 lead+workers, $1/worker, grant `orchestrator` `…cb99ede2` intact).
+- **LiteDesignz "Garden of Memories" is the flagship product line** — record: `docs/LITEDESIGNZ.md` (shop text, banner v5/icon v4, master
+  Higgsfield jobs, the 20 slideshow backgrounds with job IDs, credits, rules); briefs in `docs/litedesignz/`. House style
+  `webdesigner/styles/litedesignz-garden-of-memories.md` (active, MAIN for LiteDesignz; default row in `styles/index.md`). For LiteDesignz:
+  no KJV, verses or watercolor; no text in the art; 4K -> 3840x2160 crops; register every file in CENTRAL OUTBOX **and** DELIVERABLES.
+- **Flagship note** is in DESIGNER/PUBLISHER/SCOUT `context` (2026-11-28, via `POST /api/save` + full-roster `POST /api/roster`).
+  **NIGHT4CHRIST deliberately NOT edited:** its dossier text is inside the chain grant's digest (`GrantedContext.instructionsOf` =
+  identity+purpose+context+manual), so an edit drops `orchestrator` until the owner re-grants. Recipe for v7 dossier edits:
+  `STATION_FIELD_NOTES.md` "v7 dossier edit through StarNet's routes (2026-11-28)".
+- **Owner steps open:** see handoff "OWNER STEPS STILL OPEN" (browser keys, Central Outbox tap, Monday cost vs cap, delete the old key
+  backup, RESTORE question, repo private?, Opus price only matters on rollback).
+- **Starmem is Claude Code's memory, not StarNet's** — StarNet agents never read it. Tell agents things through their dossiers or
+  workspace files (style files, briefs).
+
+## Where we left off — 2026-11-26 ~23:45 PST: LIVE STATION IS NOW v0.15.4 (switch-over done, owner's yes) [partly superseded by 2026-11-28 above]
 
 **The live station runs `~/starnet-next` (branch `phone-port-v0.15.4`), not `~/starnet`.** `~/start-starnet.sh` line 14 points
-`STARNET_DIR` at `$HOME/starnet-next`, so manual starts, `starnet-up.sh` and Termux:Boot all start v0.15.4. Sidecar **15547**
-(launcher 15531) since the 23:5x restart for the Fable 5.2 price fix (before: 8637 for the QC fix). Read `handoff.md` "SWITCH-OVER PROGRESS" first.
+`STARNET_DIR` at `$HOME/starnet-next`, so manual starts, `starnet-up.sh` and Termux:Boot all start v0.15.4. Sidecar **8820**
+(launcher 8798) since the 2026-11-27 ~00:25 restart for the page-key rule (before: 15547 price fix, 8637 QC fix). Read `handoff.md` "SWITCH-OVER PROGRESS" first.
 - **Rollback to 0.12.5:** full backup `~/.local/share/StarNet/workspaces.bak-20261126-2236-pre0154` (identical copy) + env /
   launcher / boot-script `.bak-20261126-2236-pre0154` files — recipe "FULL ROLLBACK" in handoff.md. Keep them ≥ 7 days.
 - **Code changes now go in `~/starnet-next`** (and its tests: `node test/<x>.test.js` there). `~/starnet` (0.12.5) is the old tree.
 - **Keys:** the station uses the ENV keys (`~/.config/starnet/env`). A browser-saved key overrides them for runs the PAGE starts
   (per-run key wins), so a stale browser key = "failover (auth)". The station's page copies of Anthropic/Gemini were REMOVED
-  2026-11-26 (tombstones). Never paste keys into the page on the owner's behalf.
+  2026-11-26 (tombstones), and since 2026-11-27 a page run that still sends a key for a provider whose page copy is a REMOVE
+  tombstone, while the station holds an ENV key for it, runs on the env key (`retiredPageKey` in `sidecar/index.js` handleRun;
+  log `[credentials] a page sent a saved … key`). Saving a new key in a page ends it. Never paste keys into the page.
 - **Hand edits of `agent.roster.json` are no longer obeyed** (the authority seal is keyed by `STARNET_CONNECTOR_ENCRYPTION_KEY`):
   change agents through StarNet's routes/page only. Keep that env var.
 - **Desk codes** print in `~/.local/state/starnet/sidecar.log` (`STARNET_DESK_CODE_TO_LOG=1`); the owner types them.
@@ -291,7 +311,7 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 - **Ten agents exist** (live roster, 2026-11-24): NIGHT4CHRIST (`agent`, Commander), SCOUT (research), DESIGNER (`webdesigner`, product creation), PUBLISHER (listing drafts), HARVEST (zero-cost income-opportunity hunting outside Etsy), and the studio crew STORYWRITER, DIRECTOR, PRODUCER, QC_EDITOR (`qceditor`), COPYWRITER. The GPT-4o Independent Reviewer (`gpt4o_reviewer`) is **designed but not in the roster** — see its section below.
 - **approvalMode — historical snapshot 2026-11-24, not current state** (live source: `agent.roster.json` / `node scripts/agent-config-integrity.mjs`): `full` on 8 — agent, webdesigner, publisher, scout, harvest, storywriter, director, qceditor; `ask` on 2 — producer, copywriter. Only `'full'` and `'ask'` exist; anything else normalizes to `ask`. **An `ask` agent in a cron run never stalls** — an ungranted consent-gated call is denied immediately (`sidecar/permissions.js`, `SILENCE`); unattended capability for `ask` agents comes from routine `unattendedGrants` and the Workshop grant, not from waiting. Full Access allows before even the hardline floor (`permissions.js` `full-power`), and answering "Full access" on any permission card permanently flips that agent to `full` (`persistAgentFullAccess`) — that is how modes drift without a doc trail. Older docs saying SCOUT/DESIGNER/PUBLISHER are `ask` (`STATION_FIELD_NOTES.md` §1, §16 table) are stale.
-- **Agent dossiers (2026-11-26, revision 5575; live revision now 5577 after the 04:42 model move and 04:46 fixes):** every agent's four docs were replaced by the owner's bundle — shared Etsy/Studio rule blocks, KJV only, the creative brief is standing approval, owner-only list, Apify 3 per run / 8 per day. To change them again use the app's dossier editor in ONE tab, or the hand recipe in the newest `STATION_FIELD_NOTES.md` section (both files, revision +1, full-roster POST, then reload tabs).
+- **Agent dossiers (2026-11-26, revision 5575; [2026-11-28: live revision 5764 on v0.15.4's v7 save; flagship note added to DESIGNER/PUBLISHER/SCOUT context])**: every agent's four docs were replaced by the owner's bundle — shared Etsy/Studio rule blocks, KJV only, the creative brief is standing approval, owner-only list, Apify 3 per run / 8 per day. To change them again use the app's dossier editor in ONE tab, or [v0.15.4, 2026-11-28] the route recipe in `STATION_FIELD_NOTES.md` "v7 dossier edit through StarNet's routes" — never hand-write the files (the roster is sealed).
 - **Standing spend policy**: $60 business capital ceiling, separate $40 development allowance, $0 default new spend, max 8 Apify runs/day including failures. No purchases, publishes, credential/budget changes, or destructive git ops without explicit owner approval. The same applies to commits, paid generation (Higgsfield MCP credits are the owner's Plus wallet), and StarNet/OmniRoute restarts: each needs the owner's explicit yes for that action, and one approval does not carry over to the next.
 - **The working tree is intentional; back up before editing.** Before changing an existing file, make a same-directory backup — `cp path/to/file path/to/file.bak` — unless that exact backup already exists; never overwrite a useful one. The stray `.bak` files already in the tree are deliberate, not litter. This station runs on Android/Termux with phone-only workflows and carries intentional platform-specific fixes, so prefer small reversible changes and never run `reset`, `clean`, `checkout`, `stash`, bulk reinstalls, or dependency sweeps. Inspect a file before editing it, leave unrelated working-tree changes exactly as found (never fold them into your own edit), and ask before expanding scope beyond what the owner approved. `CLAUDE_CODE_ETSY_PROJECT.md` (untracked, repo root) holds the full owner brief.
 - **The `skill.view` toolset gap above is fixed** (2026-10-15): a `notebook`-type object (`gigs_servercart`) was placed in SCOUT's resolved capability room. Verified by one real cron run: the `skill.view` error is gone.
@@ -302,7 +322,7 @@ This repo doubles as the live runtime for the owner's actual Etsy business. Know
 
 **NEW — 2026-11-19**: Added `100-repo-evaluation` skill in `.claude/skills/100-repo-evaluation/SKILL.md` (three-phase repository evaluation framework, adapted from Nate Herk's "I Tried 100+ Github Repos for Claude").
 - **Security-review plugin** (`~/.claude/plugins/cache/claude-plugins-official/security-guidance/2.0.20/hooks/llm.py`): reviews commits via LLM. Requires `ANTHROPIC_API_KEY`; model names `anthropic/claude-opus-5-5` (primary) and `anthropic/claude-sonnet-5-5` (fallback) — unprefixed names fail with HTTP 400. OmniRoute (`localhost:20128`) has no anthropic provider connection configured, so reviews go direct to `api.anthropic.com`. The plugin is NOT restarted by `start-starnet.sh`; restart it manually after env changes.
-- **DESIGNER's reusable art-style library** lives in StarNet at `webdesigner/styles/` — see the `etsy-rules` skill's `styles.md`. [2026-11-26: 2 styles — soft-watercolor-sunrise (active, default) and gothic-blackletter-faith (trial); `index.md` now uses the bundle's name/status/look/best-for table and new-style template.]
+- **DESIGNER's reusable art-style library** lives in StarNet at `webdesigner/styles/` — see the `etsy-rules` skill's `styles.md`. [2026-11-28: 3 styles — soft-watercolor-sunrise (active, default for the KJV shop), gothic-blackletter-faith (trial), litedesignz-garden-of-memories (active, MAIN for LiteDesignz).]
 - **Two scoped side missions are written up but deliberately not started**: jailing `shell.exec`'s filesystem access, and locking NIGHT4CHRIST/HARVEST from Full Access to Ask. See `STATION_FIELD_NOTES.md` §9 "Side missions" before picking either up — plan mode first.
 
 ## Hard-won rules (2026-10-26) — read before touching providers, spend, or the live station
@@ -571,7 +591,8 @@ New launches run **2.1.331**, glibc-patched copy at `~/.local/share/claude-termu
 
 | Location | Contains |
 |----------|----------|
-| Code | `~/starnet` |
+| Code (LIVE, v0.15.4) | `~/starnet-next` (branch `phone-port-v0.15.4`) |
+| Old 0.12.5 tree + notes | `~/starnet` |
 | Real data, agents, outbox | `~/.local/share/StarNet/workspaces/` |
 | Provider keys | `~/.config/starnet/env` |
 | Log | `~/.local/state/starnet/sidecar.log` |

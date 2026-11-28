@@ -8,6 +8,9 @@ A map of the ~95 files in `docs/`. They fall into four buckets: **living referen
 > that something "is missing" or "is broken," grep the current code and re-prove it. Treat these
 > as history and intent, not as the current state of the build.
 
+
+> **Station business record (2026-11-28):** `LITEDESIGNZ.md` — the LiteDesignz "Garden of Memories" flagship line (shop text, branding, Higgsfield job IDs, the 20 slideshow backgrounds, house style, rules); briefs in `litedesignz/`. Live station state lives in `../handoff.md`, not here.
+
 ---
 
 ## Living architecture / subsystem reference

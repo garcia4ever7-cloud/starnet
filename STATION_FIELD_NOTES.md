@@ -2709,3 +2709,38 @@ The live station now runs `~/starnet-next` (v0.15.4 + phone port). Plan, every t
   phone's $5/$25 was stale. **Fable 5.2 $8/$40, cache read $0.20 — v0.15.4 has no row and bills it as Fable 5 ($10/$50, read
   $1.00):** spend over-booked ~25%, so caps stopped Fable early. FIXED 23:5x with the owner's yes (own rows, $8/$40, 0.025x reads);
   live from sidecar 15547.
+- **2026-11-27 ~00:25 — page key rule:** a v0.15.4 page never forgets its own localStorage key when the station tombstones it, and
+  a per-run key beats the env key. Station now drops a page's per-run key when that provider's page copy is a REMOVE tombstone and
+  an env key exists (`retiredPageKey`, handleRun). Proven against a local mock (fingerprints only): before = removed key sent,
+  after = env key, Fable, no fallback. To test credential routing for free: point `ANTHROPIC_BASE_URL` at a loopback mock (v0.15.4
+  honours it; the base has no `/v1` — the station calls `/messages` and `/models`).
+
+## v7 dossier edit through StarNet's routes (2026-11-28, v0.15.4 live; used for the LiteDesignz flagship note)
+
+Since the switch the roster file is sealed (`authority-seal.json`), so a hand edit of `agent.roster.json` is not obeyed. This route
+recipe works while the sidecar runs and needs no restart and no desk code (no approval/profile raise):
+1. Gate: `.spend-pending/` empty, no run in flight. Back up `agent.save.json`, `agent.roster.json`, `authority-seal.json`, `cron.jobs.json`.
+2. **Grant check first.** `GrantedContext.instructionsOf(system)` (`sidecar/granted-context.js`) = the roster `system` before the learned
+   tail, minus the YOUR CREW and APPROVAL lines — i.e. identity + purpose + context + manual. A routine's `grantDrive` is
+   `d1:<model>:-:<instructionsDigest>`. So editing ANY doc of an agent whose routine holds a grant drops that grant (the run goes
+   ungranted; re-grant in SCHEDULES with a desk code). On 11-28: chain `ebc4f07d` binds NIGHT4CHRIST (`…cb99ede2`) -> NIGHT4CHRIST was left
+   alone; paused SCOUT routine `3d117f09` binds SCOUT (`…b17af79d…`) -> stale after the SCOUT edit, re-grant if re-enabled.
+3. For each agent: the roster `system` contains `"\n\nABOUT YOUR COMMANDER & THEIR WORLD (context.md):\n" + docs.context +
+   "\n\nSTANDING ORDERS (operating-manual.md)"` exactly once (check the count is 1). Replace that segment with the new context.
+4. `POST /api/save` with the whole `doc` (the body IS the doc, not a wrapper): keep `_saveRevision` = the current revision, set
+   `updatedAt` = now, `_saveClient` = a tag (e.g. `claudecode`). Reply `{ok:true, revision:N+1}`; the server bumps the revision.
+5. `POST /api/roster` `{agents: all 10 rows from agent.roster.json with only system changed, updatedAt: now, saveRevision: N+1}` ->
+   `{ok:true,count:10}`. Rows with an unchanged approvalMode/executionProfile raise nothing.
+6. Verify: `node scripts/agent-config-integrity.mjs` (in `~/starnet-next`) CONSISTENT; both copies carry the text; the untouched agents'
+   rows byte-identical; `GET /api/cron` grants unchanged. An open page tab adopts the newer server revision on its next reconcile.
+Headers: `x-starnet-token`, `Content-Type: application/json`, `Origin: http://127.0.0.1:8787`. Starmem notes do NOT reach StarNet agents.
+
+## Owner-made Higgsfield images into both Outbox views (2026-11-27/28, LiteDesignz; $0 StarNet)
+- Download the CloudFront file (the UUID in `hf_<date>_<time>_<uuid>.png` is the Higgsfield job ID) into a NEW workshop folder, never
+  over an existing file; check size/mode with PIL. Do long downloads in the background (4 × 6–7 MB took > 120 s).
+- Crops: PIL crop + `Image.LANCZOS` resize, `optimize=True`, never overwrite; preview the crop lines on a contact sheet before writing.
+- CENTRAL OUTBOX: `makeDeliverableManifest(...).register({ownerAgentId, runId, projectId, shareWith, files})` (reads the manifest from
+  disk per request; no restart). DELIVERABLES: `POST /api/deliverables/register {id, agentId, runId, path, kind, title, summary}` —
+  the file must sit at `<agent>/workshop/<runId>/<path>` (byte-identical copy). Verify with page-style tickets
+  (`apitickets.js` `mint(token,'artifact'|'file', scope, {now, ttlMs})`, nonce default) and compare bytes.
+- Helpers: `docs/litedesignz/register-set.sh`, `verify-set.mjs`, `crop_set2.py` (copies also in `webdesigner/workshop/hf-litedesignz-seasons/`).

@@ -1,0 +1,6 @@
+FLAGSHIP — LiteDesignz Garden of Memories (owner, 2026-11-28). This is our flagship product line. For any LiteDesignz work, use this style and theme by default unless the owner says otherwise.
+- Style file: webdesigner/styles/litedesignz-garden-of-memories.md (active, main LiteDesignz style). The look: photoreal sunlit cottage garden, a building softly in the background (chapel, cottage, gazebo...), real seasonal flowers in the foreground, a calm open centre for a photo or text, no text or verses in the art, made at 4K and cropped to 3840x2160.
+- Shop: LiteDesignz. Shop text theme: "Garden Floral Digital Keepsakes and Memorial Designs". For LiteDesignz, no KJV, no Bible verses and no watercolor on shop images or in shop text.
+- Proof in DESIGNER's outbox: outbox/litedesignz/seasons/ (20 slideshow backgrounds), banner-3360x840-v5.png and icon-500x500-v4.png in outbox/litedesignz/.
+- Digital downloads come first. Slideshows vs digital downloads is not decided yet; don't plan around either until the owner decides.
+- Everything goes through StarNet and the Outbox. Higgsfield is the tool for upgrading images. Agents never upload to Etsy; the owner uploads by phone.

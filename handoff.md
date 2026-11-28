@@ -1,9 +1,72 @@
-# StarNet handoff — read this first (updated 2026-11-26 ~22:00 PST, after the v0.15.4 pipeline port)
+# StarNet handoff — read this first (updated 2026-11-28, end of session c2fcd585; the owner will /clear)
 
-Phone station (Galaxy Z Fold 8, Termux, F-Droid build). Live data: `~/.local/share/StarNet/workspaces/` (12 GB).
+Phone station (Galaxy Z Fold 8, Termux, F-Droid build). Live data: `~/.local/share/StarNet/workspaces/` (W).
 Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that push. Never print keys or tokens.
 
-# v0.15.4 SWITCH-OVER — read this first
+## CURRENT STATE (2026-11-28 ~08:40 PST — re-check live before acting; read-only checks listed under "Verify")
+- **Station:** v0.15.4 from `~/starnet-next`, branch `phone-port-v0.15.4`, tip `93abce2bd` (= GitHub). Launcher 8798, sidecar
+  **8820** (since 2026-11-27 ~00:25). Production ARMED (persisted, 2026-11-21, unattributed). Save `_saveRevision` **5764**,
+  integrity CONSISTENT. `.spend-pending/` 0. Env has `STARNET_TRUST_LOCAL_PEERS=1`, `STARNET_DESK_CODE_TO_LOG=1`,
+  `STARNET_BUDGET_PER_WORKER=1.00`, `STARNET_BUDGET_WORKER_POOL=2.00` (the pool is ignored on v0.15.4: one cap covers lead + workers).
+- **Models (roster, read 2026-11-28):** Fable 5.2 (`anthropic/claude-fable-5-2`) on NIGHT4CHRIST, DESIGNER, PUBLISHER, QC_EDITOR;
+  Opus 5.5 (`anthropic/claude-opus-5-5`) on SCOUT, HARVEST, STORYWRITER, DIRECTOR, PRODUCER, COPYWRITER. approvalMode full on 8,
+  ask on PRODUCER and COPYWRITER. Prices in `~/starnet-next/sidecar/providers/prices.js`: Fable 5.2 $8/$40 (fixed 11-26), Opus 5.5
+  $4/$20 — both match the published prices. The "Opus price mismatch" is only the OLD 0.12.5 tree's table ($5/$25, Opus 5's price):
+  it matters only after a rollback.
+- **Routines:** only the chain `ebc4f07d` is ON — Mondays 03:00 America/Los_Angeles, next **Mon 11-30 03:00 PST**, lead Fable,
+  cap **$5** for lead + all workers, $1 per worker (env), grant `orchestrator`, fingerprint `…cb99ede2` (still matches: NIGHT4CHRIST
+  was not edited). All 10 other routines paused (`enabled:false`). Editing NIGHT4CHRIST's instructions/skills/model or the chain's
+  prompt/model/skills drops the grant -> re-grant in SCHEDULES (desk code in `~/.local/state/starnet/sidecar.log`).
+- **Commits (all pushed, verified by `git ls-remote`):** `~/starnet-next` `phone-port-v0.15.4`: `3c9c1fac3` (port), `0c10e9dd6` (QC JPEG +
+  Fable 5.2 price), `93abce2bd` (retired page key). `~/starnet` local branch `feat/harness-backend` is pushed to
+  **`origin/feat/harness-backend-station-20261124`** (its upstream setting points at `-20261122`, so `git status` says "ahead" — ignore;
+  push with `git push origin feat/harness-backend:feat/harness-backend-station-20261124`): `0464184f4`, `8f5f9c3d4`, `55117de8f`,
+  `168715ed3`, plus this session's docs commit (see the end of this section).
+- **Backups:** rollback set `W.bak-20261126-2236-pre0154` + env/launcher/boot `.bak-20261126-2236-pre0154` (keep to at least 12-03).
+  Today: `agent.save.json`, `agent.roster.json`, `authority-seal.json`, `cron.jobs.json` `.bak-20261128-flagship`;
+  `.deliverables/manifest.jsonl` + `deliverables.library.jsonl` `.bak-20261128-{redo,v5,text-v2,seasons,set2,set3}`;
+  `webdesigner/styles/index.md.bak-20261128-garden`; notes `*.bak-20261128-handoff-final` (never commit any `.bak*`).
+- **LiteDesignz = flagship line "Garden of Memories"** — everything is in **`docs/LITEDESIGNZ.md`**: shop text v2 (title "Garden Floral Digital
+  Keepsakes and Memorial Designs"; no KJV, verses or watercolor), banner v5 + icon v4, master images (garden `f961bb96` / 4K `98f074fa`;
+  peony "Eternal Love" `ed347807` / 4K `85c562e9`), all 20 slideshow backgrounds with job IDs (set 1 seasons, set 2 owner bouquets,
+  set 3 remembrance flowers), the house style `webdesigner/styles/litedesignz-garden-of-memories.md` (active, main), Higgsfield credits
+  (82 used, 840 left — owner's figures), rules, and the briefs in `docs/litedesignz/`. Etsy upload is blocked by a sign-in error: the
+  owner uploads by phone. Digital downloads first; slideshows vs downloads undecided.
+- **Flagship note in the dossiers (2026-11-28, through StarNet's routes):** DESIGNER, PUBLISHER, SCOUT `context` got the note
+  (`POST /api/save` 5763 -> 5764, then full-roster `POST /api/roster` count 10; integrity CONSISTENT). **NIGHT4CHRIST held back** — any
+  dossier edit changes its grant digest and Monday's chain would lose `orchestrator`; it gets the style default via `styles/index.md`.
+  Side effect: the paused SCOUT routine `3d117f09` (grant `connectors`) was fingerprinted on SCOUT's old text — re-grant it if it is
+  ever turned back on. Recipe: `STATION_FIELD_NOTES.md` "v7 dossier edit through StarNet's routes (2026-11-28)".
+- **Rules (owner):** everything through StarNet and the Outbox (register in BOTH CENTRAL OUTBOX and MY WORK ▸ DELIVERABLES); Higgsfield
+  to upgrade images (show the credit cost first); no Bible verses on LiteDesignz shop images; agents run unattended; nothing published by
+  agents; no new keys/accounts; no model/cap/routine change without the owner's yes; back up before every edit.
+
+## OWNER STEPS STILL OPEN
+1. SETTINGS ▸ PROVIDERS: remove the browser's saved **ANTHROPIC** and **GEMINI** keys (row ✕ REMOVE -> ✕ CONFIRM within 5 s). Harmless
+   since 11-27 (station drops them for page runs), but they are old keys.
+2. Tap **MY WORK ▸ CENTRAL OUTBOX** once (owner's own open step; LiteDesignz rows: filter Project = litedesignz).
+3. After **Mon 11-30 03:00**: check the chain's cost against the $5 cap (`runs.jsonl`, lead `ebc4f07d`). PUBLISHER (Fable) may need more
+   than the $1 per-worker cap — raising `STARNET_BUDGET_PER_WORKER` needs the owner's yes and a restart (receipts 0, not within 12 h of 03:00).
+4. Delete `W/.secrets/provider-keys.json.bak-20261126-pre-remove` (holds the two OLD keys, mode 600) once satisfied.
+5. **RESTORE question:** at 22:43 on 11-26 three boot-offer RESTOREs ran (additive: 17 old conversations came back incl. "(restored copy)"
+   duplicates, 2× General). Did the owner press RESTORE, and keep or delete the duplicates?
+6. **Repo private?** `~/starnet` is public; the notes name the shops, job IDs and station layout (no secrets). Owner's call.
+7. Opus price: no action on live (see Models); only relevant if the station is rolled back to 0.12.5.
+8. Older open items still stand (below): approve/reject Outbox items, "Verses for Hard Days" publish, Commander-dossier cd_32, two
+   withheld skills, `shell.exec` jail, $60 capital ceiling vs ledger.
+
+## NEXT STEPS (for the next session)
+1. Before anything: `/starnet-live-health`; `ls W/.spend-pending`; `node scripts/agent-config-integrity.mjs` (in `~/starnet-next`).
+2. Monday 11-30 after 03:00: read the chain run (cost, workers, outputs). Register its outputs in both Outbox views by hand if the run-end
+   collector missed shell outputs (`docs/LITEDESIGNZ.md`, helpers `register-set.sh` / `verify-set.mjs`).
+3. LiteDesignz products: wait for the owner's choice (slideshows vs downloads); default style = Garden of Memories.
+
+### Verify (read-only, free)
+`curl -s -m4 127.0.0.1:8787/api/health`; `GET /api/production/status`; `GET /api/cron` (chain enabled, grant, cap 5);
+`GET /api/outbox?agent=agent` (191 rows on 11-28); `GET /api/deliverables?agent=agent` (296 total on 11-28); roster models from
+`W/agent.roster.json`. Header `x-starnet-token` from `~/.config/starnet/env`.
+
+# v0.15.4 SWITCH-OVER — DONE 2026-11-26 (record below; superseded where it disagrees with CURRENT STATE above)
 
 ## Owner decisions for the switch-over (DECIDED 2026-11-26 ~22:00 PST, Thursday night, owner)
 1. **Chain budget on v0.15.4: $5.00 per run (`maxCostUsd: 5`), covering the lead AND all workers** (one spend pool on
@@ -639,3 +702,103 @@ its `plan.js`) + `fixes.js` (04:46: QC_EDITOR Etsy-rules block, DESIGNER step-2 
   `research-etsy-competitor-pricing-for-digital-products` were written by background-review, so they wait for the Commander's
   approval in ABILITIES ▸ SKILLS. Not changed.
 - No file edited, no restart, NIGHT4CHRIST untouched: chain grant fingerprint `…cb99ede2` still matches.
+
+## 2026-11-27 ~09:45 PST — LiteDesignz shop branding: STOPPED by the owner at ~$0.95 (budget ~$1)
+- Reuse check: DESIGNER's native-4K master `webdesigner/outbox/quality-test/isaiah-40-31-4k-test.png` (3712x4608, text-free, soft
+  watercolor sunrise, two eagles in the sky) suits the 3360x840 banner (full-width 3712x928 band, downscale; top y≈1335 or 1200).
+  It has no single-peak-with-sun motif, so the icons needed new art. Fonts for lettering: `webdesigner/fonts/CormorantGaramond-
+  {Medium,Italic}.ttf` + `OFL.txt`. KJV text checked in `agent/tools/data/verses_kjv.json` (Isaiah 40:31, Philippians 4:13).
+- Made (DESIGNER run `9e8adf95`, Fable, interactive, cancelled by Claude's spend watchdog at $0.77): `outbox/litedesignz/icon-art-v1.png`
+  and `icon-art-v2.png` (1024x1024, one peak + sun, centred — good) — **in the Outbox** (manifest 232 -> 234). An earlier attempt
+  (`17184e68`, $0.05) ran without tools. Not made: banners, 500x500 icons, QC, fonts/licence record, PUBLISHER's text drafts.
+- **Findings (fix before the next try):**
+  1. `/api/run` attaches tools only with `isTask: true` in the body (the page sends it); without it the agent answers "no tools".
+  2. v0.15.4's shell fence refuses a command containing backslashes as "drive-root paths (\…)" — a Python heredoc with `\n` trips it.
+     Have the agent `fs_write` the script, then `shell_exec` `python3 <file>`.
+  3. **Outbox gap:** v0.15.4's run-end registration (`sidecar/artifacts.js`) records only fs.write/append/edit/patch and image_generate —
+     NOT shell outputs and NOT image_print_prep / mockup_compose / vector_export / openai_image_generate outputs (0.12.5 had the same
+     list; the existing kit rows were back-filled by hand, runId "pre-existing-kit"). Monday's chain outputs made that way won't show in
+     the Outbox on their own.
+  4. image_generate cost is booked `unpriced` (≈$0.067/image on OpenRouter, not in StarNet's books).
+  5. Cost shape: each DESIGNER Fable turn re-reads ~41–46k tokens ($0.44 uncached first turn, ~$0.16–0.18 cached after).
+- Briefs + watchdog runner: session scratchpad `litedesignz/` (brief-designer.md, run-agent.mjs). Nothing published; no model, cap,
+  routine or dossier changed; 0 receipts.
+
+## 2026-11-27 ~10:30 PST — LiteDesignz shop branding DONE (draft; nothing published) — $1.47 of the owner's $2
+- Style per owner: light, NOT watercolor — cream paper, blush rose corners, gold flourish frame, soft cloud wash. Built by DESIGNER
+  (run `6442f7ee`, Fable, task run, $1.40 — stopped by Claude's watchdog after its script ran; first turn $1.11 = 17k output tokens) from
+  the station's own art only: `refs/litedesignz/` (COPIES of agent/outbox title-floral-1080p, cover-art-A/B, faith-journal-cover-twilight)
+  + its own Rooted & Reflecting cover and the Isaiah 40:31 / Philippians 4:13 4x5 prints. No new AI images, no Higgsfield (owner chose
+  to skip: StarNet's higgsfield.generate is text-to-image only and unpriced). Script: `webdesigner/scripts/build_litedesignz.py`.
+- Files (webdesigner/outbox/litedesignz/): banner-3360x840-v1.png (brand), banner-3360x840-v2.png (features Isaiah 40:31, Rooted &
+  Reflecting, Philippians 4:13), icon-500x500-v1.png (rose in gold ring), icon-500x500-v2.png ("LD" monogram + rose sprig).
+  image_quality_check code (run locally by Claude, free): 4/4 PASS. Fonts: Cormorant Garamond Medium/Italic (SIL OFL, webdesigner/fonts).
+  The fonts-and-licences record and the agent-side QC step were not reached (watchdog stop) — facts are here instead.
+- Text: PUBLISHER (run `52d670a3`, Fable, tool-free, $0.07) -> saved VERBATIM by Claude to publisher/outbox/litedesignz/shop-text-drafts.md.
+  Checked by code: title 50 chars; Philippians 4:13 quoted exactly with (KJV); no reviews/sales/"prints only"/non-KJV.
+- Outbox: all 5 registered BY HAND with deliverable-manifest.register() under the producing agent's real runId (owner's instruction;
+  the run-end collector misses shell outputs and a stopped run registers nothing). Manifest 234 -> 239 (backup
+  `.deliverables/manifest.jsonl.bak-20261127-litedesignz`); live /api/outbox lists 7 litedesignz rows (incl. the older icon-art-v1/v2,
+  which the owner said to ignore). All unverified / not_reviewed / pending approval.
+- Cost lesson: a tool-free run for pure writing costs ~$0.07 on Fable; a task run pays ~42k tokens of tool definitions per turn.
+- **Visibility fix (2026-11-27 ~11:00, $0, no agent turns):** the owner's "Outbox" door is MY WORK ▸ DELIVERABLES (the Library,
+  `/api/deliverables`), not CENTRAL OUTBOX (`/api/outbox`). The Library builds cards from each run's own artifact list, so it showed only
+  `build_litedesignz.py` (stopped run) and no images. Fixed with the station's free route `POST /api/deliverables/register`: byte-identical
+  COPIES in `webdesigner/workshop/6442f7ee-…/litedesignz/` (4 PNGs) and `publisher/workshop/52d670a3-…/litedesignz/shop-text-drafts.md`,
+  5 rows `litedesignz-*`, status kept (backups `deliverables.library.jsonl.bak-20261127-litedesignz`, `deliverables.store.bak-…`). Read back:
+  Library rows 1–5 of 250, image previews; `/api/file` with a page-style file ticket (no token header) returns each file byte-identical at
+  full size. CENTRAL OUTBOX already had them (rows 138–144 of 144, oldest-first — filter Project = litedesignz); `/api/artifact` with an
+  artifact ticket returns each byte-identical. Originals in `outbox/litedesignz/` unchanged.
+- **Icon v3 (2026-11-27 ~10:45, owner's request; $0 StarNet, 4 Higgsfield credits from the owner's Plus wallet via the Higgsfield
+  connector in the Claude session):** text-free base = Higgsfield gpt_image_2_6 (2K, high, 2 credits; reference = our cover-art-B, uploaded
+  to Higgsfield) job 33a0bd39; Higgsfield 4K upscale (bytedance, 2 credits) job a05ad363 — slightly smooths paper grain/petal lines,
+  invisible at 500 px; "LD" + gold rule lettered by Claude Code (`webdesigner/workshop/claude-code-litedesignz-icon-v3/letter_icon_v3.py`,
+  Cormorant Garamond Medium, OFL). Output `webdesigner/outbox/litedesignz/icon-500x500-v3.png` (500x500, 407,938 B, QC pass); v2 kept.
+  Registered in CENTRAL OUTBOX (manifest; runId `claude-code-litedesignz-icon-v3` — not an agent run) and DELIVERABLES (card
+  `litedesignz-icon-500x500-v3`, position 1); page-style ticketed fetch returns it byte-identical in both. Sources (2K base, 4K upscale)
+  kept in that workshop folder. Note: the owner named faith-journal-cover-twilight as the look, but its listed features matched cover-art-B
+  (twilight is a dark night sky) — the listed features were followed.
+- **Owner-picked Higgsfield redo (2026-11-28, $0 StarNet; Higgsfield work done by the owner, 8 credits; Claude only downloaded):** sources in
+  `webdesigner/workshop/hf-litedesignz-redo/` (garden original f961bb96 2688x1520; garden widened+4K 98f074fa 5090x2160; peony original
+  ed347807; peony widened+4K 85c562e9 5090x2160) + `crop_redo.py`. New files in `webdesigner/outbox/litedesignz/` (older versions kept):
+  banner-3360x840-v3.png (garden, full-width 4:1 band, bottom-aligned y 888-2160 -> 3360x840), banner-3360x840-v4.png (peony, same band),
+  icon-500x500-v4.png (garden original crop (0,560)-(700,1260): two big pink roses + hydrangeas, circle-safe), icon-500x500-v5.png (peony
+  original crop (0,700)-(820,1520)). No text. All downscales. QC 4/4. Registered in CENTRAL OUTBOX (manifest, runId `hf-litedesignz-redo`) and
+  DELIVERABLES (cards `litedesignz-…-v3/-v4/-v5`, positions 1–4); page-style ticketed fetch byte-identical in both.
+- **Banner v5 (2026-11-28, $0 StarNet, no Higgsfield credits used by Claude):** owner's Higgsfield 21:9 garden image with "LiteDesignz" in gold
+  already lettered by Higgsfield (job 9e9c5ccf) -> original saved as `webdesigner/workshop/hf-litedesignz-redo/garden-21x9-litedesignz.png`
+  (3840x1648). `webdesigner/outbox/litedesignz/banner-3360x840-v5.png` = full-width 4:1 band y 505–1465 -> 3360x840 (downscale x0.875; code in
+  `crop_redo.py`). Checked by eye at 1:1: spelling exactly "LiteDesignz" (capital L and D, one word) plus a gold infinity-knot flourish; nothing
+  clipped; text+flourish box in the final x1369–2494, y101–420 (margins L1369 T101 R866 B420), inside Etsy's middle 60% (672–2688). Flowers kept:
+  cottage + climbing roses + hydrangeas left, hydrangea/rose bush right, delphinium/lavender border; only the bottom 183 px of the source cut.
+  No local text added. QC pass. Registered in CENTRAL OUTBOX (manifest) and DELIVERABLES (card `litedesignz-banner-3360x840-v5`, #1);
+  page-style fetch byte-identical in both. All older files kept (banner v1–v4 incl. peony v4, icons v1–v5).
+- **Shop text v2 (2026-11-28, $0.08 — owner chose PUBLISHER on its own Fable model over a free model):** PUBLISHER run `7e2f6ed2`, tool-free,
+  rewrote the Nov 27 drafts for the garden/keepsake look; saved VERBATIM as `publisher/outbox/litedesignz/shop-text-drafts-v2.md` (1,612 B).
+  Note: the Nov 27 drafts live in publisher/outbox (not webdesigner/outbox) and had no section names — v2 adds 4 suggested sections.
+  Checked by code: title 52/55, About headline 48, sections 14–20/24, no KJV/scripture/verse/watercolor/mountain/journal/slideshow/Christmas/
+  "Garden of Memories"/availability or review claims. Registered in CENTRAL OUTBOX (manifest) and DELIVERABLES (card `litedesignz-shop-text-drafts-v2`, #1);
+  page-style fetch byte-identical. Nov 27 drafts unchanged (sha256 fc3c62ec…). Nothing published.
+- **Seasonal slideshow backgrounds (2026-11-28, $0 StarNet, no Higgsfield credits used by Claude — downloads only):** the owner's Higgsfield jobs
+  spring e3dad384 (white chapel), summer 9b7a4dac (Victorian greenhouse), fall 7fb36942 (stone cottage), winter afc2536c (gazebo with lights),
+  each 4096x2323. Originals in `webdesigner/workshop/hf-litedesignz-seasons/{season}-original.png`; crops in
+  `webdesigner/outbox/litedesignz/seasons/bg-{season}-3840x2160.png` = centred 16:9 crop (0,9)-(4096,2313), Lanczos down to 3840x2160
+  (`crop_seasons.py`). Only 9 px top / 10 px bottom trimmed; no building top or flower cut. QC 4/4. All 8 (4 crops + 4 originals) registered as
+  "LiteDesignz seasonal slideshow backgrounds" in CENTRAL OUTBOX (manifest, project litedesignz, runId `hf-litedesignz-seasons`) and DELIVERABLES
+  (cards `litedesignz-season-*`, positions 1–8; crops via byte-identical copies in the workshop folder); page-style fetch byte-identical in both.
+  Backups `manifest.jsonl.bak-20261128-seasons`, `deliverables.library.jsonl.bak-20261128-seasons`. Nothing published. (The first attempt stopped at
+  the usage limit before saving anything.)
+- **Slideshow backgrounds sets 2 + 3 (2026-11-28, $0 StarNet, downloads only — owner's Higgsfield jobs):** same rule as the seasons set
+  (centred 16:9 crop (0,9)-(4096,2313) of 4096x2323, Lanczos -> 3840x2160; `workshop/hf-litedesignz-seasons/crop_set2.py`).
+  Set 2: pastel-farmhouse, pastel-footbridge, sunflower-barn, sunflower-lighthouse, carnation-church, carnation-windmill, dahlia-thatched-cottage,
+  dahlia-brick-manor. Set 3: spring-tudor-cottage, spring-wisteria-pergola, summer-tuscan-villa, summer-columned-house, fall-log-cabin,
+  fall-water-mill, winter-chalet, winter-red-cottage. Originals `workshop/hf-litedesignz-seasons/<name>-original.png`; crops
+  `outbox/litedesignz/seasons/bg-<name>-3840x2160.png`. No building top or flower cut by the 9/10 px trim (two roofs/pergola already ran off the
+  originals' top). QC 16/16. All 32 files registered as "LiteDesignz seasonal slideshow backgrounds" in CENTRAL OUTBOX (project litedesignz,
+  runId hf-litedesignz-seasons; rows 159 -> 191) and DELIVERABLES (cards litedesignz-season-*; 264 -> 296); every file page-style fetched
+  byte-identical in both. Backups `*.bak-20261128-set2`, `*.bak-20261128-set3`. Nothing published.
+- **New house style (2026-11-28):** `webdesigner/styles/litedesignz-garden-of-memories.md` (active, MAIN for LiteDesignz) + index row and
+  LiteDesignz default line (backup `index.md.bak-20261128-garden`). Style files only; no dossier, model, cap or routine changed (NIGHT4CHRIST
+  untouched, chain grant safe). Register/verify helpers copied to `workshop/hf-litedesignz-seasons/`.
+- ~~OPEN (stopped at usage limit)~~ DONE later on 2026-11-28: notes refreshed, briefs copied to `docs/litedesignz/`, flagship note added
+  (see CURRENT STATE at the top). The whole session scratchpad is archived (NOT in git) at `~/starnet-next-work/scratch-c2fcd585-20261128/`.
