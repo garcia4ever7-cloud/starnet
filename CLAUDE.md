@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Where we left off — 2026-11-28 (end of session c2fcd585; owner will /clear) — START AT `handoff.md` "CURRENT STATE"
 
-- **Live:** v0.15.4 from `~/starnet-next` (`phone-port-v0.15.4` @ `93abce2bd`, pushed), sidecar 8820 / launcher 8798, ARMED, save
+- **Live:** v0.15.4 from `~/starnet-next` (`phone-port-v0.15.4`, code `93abce2bd`, docs tip `ae58a3312`, pushed; `~/starnet` notes `d227b5908`), sidecar 8820 / launcher 8798, ARMED, save
   rev **5764**, integrity CONSISTENT, 0 receipts. Models: Fable 5.2 on NIGHT4CHRIST/DESIGNER/PUBLISHER/QC_EDITOR, Opus 5.5 on the other 6.
   Only routine ON: chain `ebc4f07d` (Mon 03:00 LA, next 11-30, $5 lead+workers, $1/worker, grant `orchestrator` `…cb99ede2` intact).
 - **LiteDesignz "Garden of Memories" is the flagship product line** — record: `docs/LITEDESIGNZ.md` (shop text, banner v5/icon v4, master

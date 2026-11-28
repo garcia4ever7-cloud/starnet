@@ -4,7 +4,7 @@ Phone station (Galaxy Z Fold 8, Termux, F-Droid build). Live data: `~/.local/sha
 Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that push. Never print keys or tokens.
 
 ## CURRENT STATE (2026-11-28 ~08:40 PST — re-check live before acting; read-only checks listed under "Verify")
-- **Station:** v0.15.4 from `~/starnet-next`, branch `phone-port-v0.15.4`, tip `93abce2bd` (= GitHub). Launcher 8798, sidecar
+- **Station:** v0.15.4 from `~/starnet-next`, branch `phone-port-v0.15.4`, code `93abce2bd`, tip `ae58a3312` (docs only; = GitHub). Launcher 8798, sidecar
   **8820** (since 2026-11-27 ~00:25). Production ARMED (persisted, 2026-11-21, unattributed). Save `_saveRevision` **5764**,
   integrity CONSISTENT. `.spend-pending/` 0. Env has `STARNET_TRUST_LOCAL_PEERS=1`, `STARNET_DESK_CODE_TO_LOG=1`,
   `STARNET_BUDGET_PER_WORKER=1.00`, `STARNET_BUDGET_WORKER_POOL=2.00` (the pool is ignored on v0.15.4: one cap covers lead + workers).
@@ -21,7 +21,8 @@ Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that
   Fable 5.2 price), `93abce2bd` (retired page key). `~/starnet` local branch `feat/harness-backend` is pushed to
   **`origin/feat/harness-backend-station-20261124`** (its upstream setting points at `-20261122`, so `git status` says "ahead" — ignore;
   push with `git push origin feat/harness-backend:feat/harness-backend-station-20261124`): `0464184f4`, `8f5f9c3d4`, `55117de8f`,
-  `168715ed3`, plus this session's docs commit (see the end of this section).
+  `168715ed3`, plus **`d227b5908`** (2026-11-28 notes; this hash line was added in the next commit). `~/starnet-next` also has docs-only
+  **`ae58a3312`** (port-notes line) on top of `93abce2bd`, pushed — the running code is still `93abce2bd`.
 - **Backups:** rollback set `W.bak-20261126-2236-pre0154` + env/launcher/boot `.bak-20261126-2236-pre0154` (keep to at least 12-03).
   Today: `agent.save.json`, `agent.roster.json`, `authority-seal.json`, `cron.jobs.json` `.bak-20261128-flagship`;
   `.deliverables/manifest.jsonl` + `deliverables.library.jsonl` `.bak-20261128-{redo,v5,text-v2,seasons,set2,set3}`;
