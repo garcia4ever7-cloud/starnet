@@ -69,6 +69,9 @@ The sources are in `W/webdesigner/workshop/hf-litedesignz-redo/`, along with `cr
 
 **Higgsfield credits (owner's figures, 2026-11-28):** 82 used in total, 840 left.
 
+## Outbox check (2026-11-28)
+**Higgsfield-vs-Outbox check (2026-11-28 ~08:50 PST, $0): 59 LiteDesignz images in BOTH CENTRAL OUTBOX and DELIVERABLES, byte-verified by page-style ticketed fetch, no duplicates.** 8 added: garden master `f961bb96` and its 4K `98f074fa`, peony "Eternal Love" `ed347807` and its 4K `85c562e9`, banner v5 source `9e9c5ccf`, icon v3 base `33a0bd39` and its 4K `a05ad363` (each registered in BOTH views), and icon v3's DELIVERABLES card re-added as `litedesignz-icon-500x500-v3-card2` (the old card was cleared 11-27 10:44 and a cleared ID stays hidden). Left out on purpose: the 25 Higgsfield 2K drafts made before each upscale and the 2 widening (outpaint) steps — the same pictures at lower resolution; the style file is a note, not an image (exists, not registered). Backups `.deliverables/manifest.jsonl`, `deliverables.library.jsonl`, `deliverables.store` `.bak-20261128-hfcheck`. Check script + result: `docs/litedesignz/verify/` (`check-all.mjs`, `final.txt`).
+
 ## Rules for this line
 - Everything goes through StarNet and the Outbox, registered in both CENTRAL OUTBOX and DELIVERABLES.
 - Higgsfield is the tool for upgrading images. Show the credit cost before any Higgsfield job.

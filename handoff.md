@@ -42,6 +42,8 @@ Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that
   to upgrade images (show the credit cost first); no Bible verses on LiteDesignz shop images; agents run unattended; nothing published by
   agents; no new keys/accounts; no model/cap/routine change without the owner's yes; back up before every edit.
 
+- **Higgsfield-vs-Outbox check (2026-11-28 ~08:50 PST, $0): 59 LiteDesignz images in BOTH CENTRAL OUTBOX and DELIVERABLES, byte-verified by page-style ticketed fetch, no duplicates.** 8 added: garden master `f961bb96` and its 4K `98f074fa`, peony "Eternal Love" `ed347807` and its 4K `85c562e9`, banner v5 source `9e9c5ccf`, icon v3 base `33a0bd39` and its 4K `a05ad363` (each registered in BOTH views), and icon v3's DELIVERABLES card re-added as `litedesignz-icon-500x500-v3-card2` (the old card was cleared 11-27 10:44 and a cleared ID stays hidden). Left out on purpose: the 25 Higgsfield 2K drafts made before each upscale and the 2 widening (outpaint) steps — the same pictures at lower resolution; the style file is a note, not an image (exists, not registered). Backups `.deliverables/manifest.jsonl`, `deliverables.library.jsonl`, `deliverables.store` `.bak-20261128-hfcheck`. Check script + result: `docs/litedesignz/verify/` (`check-all.mjs`, `final.txt`).
+
 ## OWNER STEPS STILL OPEN
 1. SETTINGS ▸ PROVIDERS: remove the browser's saved **ANTHROPIC** and **GEMINI** keys (row ✕ REMOVE -> ✕ CONFIRM within 5 s). Harmless
    since 11-27 (station drops them for page runs), but they are old keys.
@@ -64,7 +66,7 @@ Repo `~/starnet` is PUBLIC on GitHub — push only with the owner's yes for that
 
 ### Verify (read-only, free)
 `curl -s -m4 127.0.0.1:8787/api/health`; `GET /api/production/status`; `GET /api/cron` (chain enabled, grant, cap 5);
-`GET /api/outbox?agent=agent` (191 rows on 11-28); `GET /api/deliverables?agent=agent` (296 total on 11-28); roster models from
+`GET /api/outbox?agent=agent` (198 rows on 11-28; 59 LiteDesignz images); `GET /api/deliverables?agent=agent` (304 total on 11-28; 59 LiteDesignz images); roster models from
 `W/agent.roster.json`. Header `x-starnet-token` from `~/.config/starnet/env`.
 
 # v0.15.4 SWITCH-OVER — DONE 2026-11-26 (record below; superseded where it disagrees with CURRENT STATE above)
